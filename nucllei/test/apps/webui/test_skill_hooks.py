@@ -1,15 +1,19 @@
-"""skill の requires / on_load(llens prism-hu/llens#22「hooks 的な」)の回帰テスト。
+"""skill の on_load(llens prism-hu/llens#22「hooks 的な」)の回帰テスト。
 
-requires = 読み込まれたら一緒に読み込む skill、on_load = 読み込まれたらサーバが chat に
-つき 1 回だけ実行する tool。どちらも 3 入口(`/command`・モデルの load_skill・添付の
-自動ロード)で効く。設計は _memos/skill-design.md「requires / on_load」。
+on_load = skill が読み込まれたときに書いた順に処理する手順。`load_skill` の要素は別の skill を
+一緒に読み込み(毎リクエスト再導出・保存しない)、それ以外の tool の要素はサーバが chat に
+つき 1 回だけ実行する(保存して以後は履歴から拾う)。3 入口(`/command`・モデルの
+load_skill・添付の自動ロード)で効く。設計は _memos/skill-design.md「on_load」。
 
 カバー範囲:
-- API: 保存・正規化・検証(400)・on_load 非空は admin のみ・update の省略は保持
-- requires: 3 入口それぞれで要求先が続けて入る / 要求先の tool も生える / 履歴にあれば
-  入れない / 使えない要求先は「使えない」行 / 循環は 1 回で止まる / 履歴からの tool 再導出
-- on_load: 3 入口それぞれで 1 回だけ実行 / 履歴に結果があれば再実行しない(呼び出し回数) /
+- API: 保存・正規化・検証(400)・load_skill 以外の要素を含むものは admin のみ(load_skill の
+  要素だけなら editor も可)・update の省略は保持・旧 `requires` は未知フィールドとして無視
+- load_skill の要素: 3 入口それぞれで読み込み先が続けて入る / 読み込み先の tool も生える /
+  履歴にあれば入れない / 使えない読み込み先は「使えない」行 / 循環は 1 回で止まる /
+  履歴からの tool 再導出
+- tool の要素: 3 入口それぞれで 1 回だけ実行 / 履歴に結果があれば再実行しない(呼び出し回数) /
   このターンに無い tool は ERROR 行 / 例外も ERROR 行で読み込みは続く / 子ターン(subagent)でも同じ
+- 書いた順: load_skill の要素で入った skill の on_load はその位置で深さ優先に展開
 - 永続化の形: in_payload の印は同じターンの追撃では二重にせず、保存では落ちて次のターンからは
   通常の tool 往復として読まれる
 """
@@ -176,18 +180,19 @@ class TestSkillHooks(AbstractPostgresTest):
                     "id": "emr",
                     "name": "EMR",
                     "content": "c",
-                    "requires": ["/base", " base ", "", "other"],
                     "on_load": [
                         {"tool": " read_file ", "args": {"path": "/ext/a.md"}},
+                        {"tool": "load_skill", "args": {"skill_id": "/base"}},
                         {"tool": "probe"},
                     ],
                 },
             )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["requires"] == ["base", "other"]
+        assert "requires" not in body
         assert body["on_load"] == [
             {"tool": "read_file", "args": {"path": "/ext/a.md"}},
+            {"tool": "load_skill", "args": {"skill_id": "base"}},
             {"tool": "probe", "args": {}},
         ]
         # 省略した skill は空
@@ -196,20 +201,33 @@ class TestSkillHooks(AbstractPostgresTest):
                 self.create_url("/create"),
                 json={"id": "plain", "name": "p", "content": "c"},
             )
-        assert response.json()["requires"] == []
+        assert response.json()["on_load"] == []
+
+    def test_old_requires_field_is_ignored(self):
+        """旧 `requires` は廃止(on_load の load_skill の要素に統合)。送っても未知フィールドとして
+        無視される(SkillForm は pydantic 既定の extra=ignore)。"""
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                self.create_url("/create"),
+                json={"id": "old", "name": "o", "content": "c", "requires": ["x"]},
+            )
+        assert response.status_code == 200, response.text
+        assert "requires" not in response.json()
         assert response.json()["on_load"] == []
 
     def test_validation_errors_are_400(self):
         bad = [
-            {"requires": ["self"]},
-            {"requires": "base"},
-            {"requires": [1]},
+            {"on_load": [{"tool": "load_skill", "args": {"skill_id": "self"}}]},
+            {"on_load": [{"tool": "load_skill", "args": {"skill_id": "/self"}}]},
+            {"on_load": [{"tool": "load_skill", "args": {}}]},
+            {"on_load": [{"tool": "load_skill", "args": {"skill_id": "/"}}]},
+            {"on_load": [{"tool": "load_skill", "args": {"skill_id": 1}}]},
+            {"on_load": [{"tool": "load_skill", "args": {"skill_id": "a", "x": 1}}]},
             {"on_load": {"tool": "probe"}},
             {"on_load": ["probe"]},
             {"on_load": [{"tool": ""}]},
             {"on_load": [{"tool": "probe", "args": [1]}]},
             {"on_load": [{"tool": "probe", "when": "x"}]},
-            {"on_load": [{"tool": "load_skill", "args": {"skill_id": "x"}}]},
         ]
         for extra in bad:
             with mock_webui_user(id="1", role="admin"):
@@ -219,7 +237,7 @@ class TestSkillHooks(AbstractPostgresTest):
                 )
             assert response.status_code == 400, (extra, response.text)
 
-    def test_on_load_is_admin_only_requires_is_not(self):
+    def test_on_load_tools_are_admin_only_load_skill_is_not(self):
         from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
         from nucllei.models.users import Users
 
@@ -240,42 +258,55 @@ class TestSkillHooks(AbstractPostgresTest):
                 name=group.name, description=group.description, user_ids=["7"]
             ),
         )
-        # editor: requires は書ける
+        load_only = [{"tool": "load_skill", "args": {"skill_id": "x"}}]
+        mixed = [*load_only, {"tool": "probe"}]
+        # editor: load_skill の要素だけなら作成も更新もできる
         with mock_webui_user(id="7", role="user"):
             response = self.fast_api_client.post(
                 self.create_url("/create"),
-                json={"id": "mine", "name": "m", "content": "c", "requires": ["x"]},
+                json={"id": "mine", "name": "m", "content": "c", "on_load": load_only},
             )
-        assert response.status_code == 200, response.text
-        assert response.json()["requires"] == ["x"]
-        # editor: on_load は作成も更新も不可(tool_ids と同じ admin ゲート)
+            assert response.status_code == 200, response.text
+            assert response.json()["on_load"] == load_only
+            response = self.fast_api_client.post(
+                self.create_url("/id/mine/update"),
+                json={"id": "mine", "name": "m", "content": "c2", "on_load": load_only},
+            )
+            assert response.status_code == 200, response.text
+        # editor: load_skill 以外の tool を 1 つでも含むと作成も更新も不可(tool_ids と同じ
+        # admin ゲート)
         with mock_webui_user(id="7", role="user"):
             response = self.fast_api_client.post(
                 self.create_url("/create"),
-                json={
-                    "id": "hooky",
-                    "name": "h",
-                    "content": "c",
-                    "on_load": [{"tool": "probe"}],
-                },
+                json={"id": "hooky", "name": "h", "content": "c", "on_load": mixed},
             )
             assert response.status_code == 401
             response = self.fast_api_client.post(
                 self.create_url("/id/mine/update"),
-                json={
-                    "id": "mine",
-                    "name": "m",
-                    "content": "c",
-                    "on_load": [{"tool": "probe"}],
-                },
+                json={"id": "mine", "name": "m", "content": "c", "on_load": mixed},
             )
             assert response.status_code == 401
-        # admin が付けた on_load 付き skill は editor が編集・削除できない
-        self._skill("adminhook", owner="7", on_load=[{"tool": "probe", "args": {}}])
+        # admin が付けた tool の要素がある skill は、editor が自分の物でも編集・削除できない
+        # (on_load を省略した更新・load_skill だけに書き換える更新も不可)
+        self._skill(
+            "adminhook",
+            owner="7",
+            on_load=[{"tool": "probe", "args": {}}],
+        )
         with mock_webui_user(id="7", role="user"):
             response = self.fast_api_client.post(
                 self.create_url("/id/adminhook/update"),
                 json={"id": "adminhook", "name": "h", "content": "changed"},
+            )
+            assert response.status_code == 401
+            response = self.fast_api_client.post(
+                self.create_url("/id/adminhook/update"),
+                json={
+                    "id": "adminhook",
+                    "name": "h",
+                    "content": "changed",
+                    "on_load": load_only,
+                },
             )
             assert response.status_code == 401
             response = self.fast_api_client.delete(
@@ -284,18 +315,13 @@ class TestSkillHooks(AbstractPostgresTest):
             assert response.status_code == 401
 
     def test_update_omitted_keeps_explicit_empty_clears(self):
-        self._skill(
-            "keep",
-            requires=["base"],
-            on_load=[{"tool": "probe", "args": {"x": 1}}],
-        )
+        self._skill("keep", on_load=[{"tool": "probe", "args": {"x": 1}}])
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
                 self.create_url("/id/keep/update"),
                 json={"id": "keep", "name": "k", "content": "new"},
             )
         assert response.status_code == 200, response.text
-        assert response.json()["requires"] == ["base"]
         assert response.json()["on_load"] == [{"tool": "probe", "args": {"x": 1}}]
         with mock_webui_user(id="1", role="admin"):
             response = self.fast_api_client.post(
@@ -304,22 +330,28 @@ class TestSkillHooks(AbstractPostgresTest):
                     "id": "keep",
                     "name": "k",
                     "content": "new",
-                    "requires": [],
                     "on_load": [],
                 },
             )
-        assert response.json()["requires"] == []
         assert response.json()["on_load"] == []
 
-    # ── requires ───────────────────────────────────────────────
+    # ── load_skill の要素 ───────────────────────────────────────
 
-    def test_requires_via_command(self):
+    def test_load_skill_entry_via_command(self):
         from nucllei.utils.skills import REQUIRED_SKILL_UNAVAILABLE, apply_skill_command
 
         self._skill("base", tool_ids=["base-tools"], description="")
         self._skill("secret", access_control={})  # 作成者以外は見えない
-        self._skill("emr", owner="2", requires=["base", "secret", "missing"])
-        # base は preset に紐づいていなくても requires で入る
+        self._skill(
+            "emr",
+            owner="2",
+            on_load=[
+                {"tool": "load_skill", "args": {"skill_id": "base"}},
+                {"tool": "load_skill", "args": {"skill_id": "secret"}},
+                {"tool": "load_skill", "args": {"skill_id": "missing"}},
+            ],
+        )
+        # base は preset に紐づいていなくても、description が空でも load_skill の要素で入る
         model = _model("emr")
         form_data = {"messages": [{"role": "user", "content": "/emr はじめる"}]}
         user = types.SimpleNamespace(id="2", name="Hanako", role="user")
@@ -331,17 +363,23 @@ class TestSkillHooks(AbstractPostgresTest):
         assert emr_result.startswith("【emr の手順書】")
         for missing in ("secret", "missing"):
             assert REQUIRED_SKILL_UNAVAILABLE.format(skill_id=missing) in emr_result
-        assert messages[3]["tool_calls"][0]["id"] == "skill:base:0:requires"
+        assert messages[3]["tool_calls"][0]["id"] == "skill:emr:on_load:0"
         assert json.loads(messages[4]["content"])["result"] == "【base の手順書】"
         assert [a["id"] for a in activations] == ["emr", "base"]
         assert activations[1]["tool_ids"] == ["base-tools"]
 
-    def test_requires_skips_already_loaded_and_stops_cycles(self, caplog):
+    def test_load_skill_entry_skips_already_loaded_and_stops_cycles(self, caplog):
         from nucllei.utils.skills import apply_skill_command
 
-        self._skill("a", requires=["b"])
-        self._skill("b", requires=["a", "c"])
-        self._skill("c", requires=["b"])
+        self._skill("a", on_load=[{"tool": "load_skill", "args": {"skill_id": "b"}}])
+        self._skill(
+            "b",
+            on_load=[
+                {"tool": "load_skill", "args": {"skill_id": "a"}},
+                {"tool": "load_skill", "args": {"skill_id": "c"}},
+            ],
+        )
+        self._skill("c", on_load=[{"tool": "load_skill", "args": {"skill_id": "b"}}])
         model = _model("a", "c")
         caplog.set_level(logging.WARNING)
         form_data = {
@@ -357,11 +395,15 @@ class TestSkillHooks(AbstractPostgresTest):
         assert [a["id"] for a in activations] == ["a", "b", "c"]
         assert any("循環" in r.message for r in caplog.records)
 
-    def test_requires_via_auto_load(self):
+    def test_load_skill_entry_via_auto_load(self):
         from nucllei.models.files import FileForm, Files
         from nucllei.utils.skills import apply_skill_auto_load
 
-        self._skill("audio", auto_load_content_types=["audio/"], requires=["base"])
+        self._skill(
+            "audio",
+            auto_load_content_types=["audio/"],
+            on_load=[{"tool": "load_skill", "args": {"skill_id": "base"}}],
+        )
         self._skill("base", tool_ids=["base-tools"])
         Files.insert_new_file(
             "1",
@@ -382,17 +424,23 @@ class TestSkillHooks(AbstractPostgresTest):
         )
         assert _called_skill_ids(form_data["messages"]) == ["audio", "base"]
         assert form_data["messages"][3]["tool_calls"][0]["id"] == (
-            "skill:base:auto:requires"
+            "skill:audio:on_load:0"
         )
         assert [a["id"] for a in activations] == ["audio", "base"]
 
-    def test_requires_via_model_load_skill(self):
+    def test_load_skill_entry_via_model_load_skill(self):
         from nucllei.utils.skills import (
             build_load_skill_tool,
             drain_load_skill_followups,
         )
 
-        self._skill("emr", requires=["base", "missing"])
+        self._skill(
+            "emr",
+            on_load=[
+                {"tool": "load_skill", "args": {"skill_id": "base"}},
+                {"tool": "load_skill", "args": {"skill_id": "missing"}},
+            ],
+        )
         self._skill("base", tool_ids=["base-tools"], description="")
         loaded_tools = []
 
@@ -403,16 +451,16 @@ class TestSkillHooks(AbstractPostgresTest):
         entry = build_load_skill_tool(_model("emr"), self.user, load_tools=load_tools)
         result = json.loads(asyncio.run(entry["callable"](skill_id="emr")))
         assert "skill missing は使えない" in result["result"]
-        # 要求先の tool は load_skill の中で生える(次のイテレーションから使える)
+        # 読み込み先の tool は load_skill の中で生える(次のイテレーションから使える)
         assert loaded_tools == ["base"]
 
         async def never(calls):
-            raise AssertionError("on_load は無い")
+            raise AssertionError("tool の要素は無い")
 
         calls, results = asyncio.run(
             drain_load_skill_followups(entry, {"load_skill": entry}, never)
         )
-        assert [c["id"] for c in calls] == ["skill:base:requires:emr"]
+        assert [c["id"] for c in calls] == ["skill:emr:on_load:0"]
         assert json.loads(results[0]["content"]) == {
             "result": "【base の手順書】",
             "tools": ["base_fn"],
@@ -420,10 +468,14 @@ class TestSkillHooks(AbstractPostgresTest):
         # 取り出したら空(同じ応答で 2 回足さない)
         assert asyncio.run(drain_load_skill_followups(entry, {}, never)) == ([], [])
 
-    def test_replay_includes_required_skill_tools(self):
+    def test_replay_includes_chained_skill_tools(self):
         from nucllei.utils.skills import replay_skill_tool_ids
 
-        self._skill("emr", tool_ids=["emr-tools"], requires=["base"])
+        self._skill(
+            "emr",
+            tool_ids=["emr-tools"],
+            on_load=[{"tool": "load_skill", "args": {"skill_id": "base"}}],
+        )
         self._skill("base", tool_ids=["base-tools"])
         form_data = {
             "messages": [
@@ -485,24 +537,94 @@ class TestSkillHooks(AbstractPostgresTest):
             "skill:emr:on_load:0",
         ]
 
-    def test_on_load_of_required_skill_runs_after_its_body(self, monkeypatch):
+    def test_on_load_runs_in_written_order_depth_first(self, monkeypatch):
+        """書いた順に処理し、load_skill の要素で入った skill の on_load はその位置で展開する
+        (初回のターン)。2 ターン目は tool を再実行せず、load_skill の exchange が先・保存された
+        結果が後に並ぶ(/command の割り切り — README_API §6.4)。"""
         self._patch_get_tools(monkeypatch)
         self._skill(
-            "emr", requires=["base"], on_load=[{"tool": "probe", "args": {"x": 1}}]
+            "emr",
+            on_load=[
+                {"tool": "probe", "args": {"x": 1}},
+                {"tool": "load_skill", "args": {"skill_id": "base"}},
+                {"tool": "probe", "args": {"x": 3}},
+            ],
         )
         self._skill("base", on_load=[{"tool": "probe", "args": {"x": 2}}])
         model = _model("emr", tool_ids=["probe-tools"])
-        form_data, _ = self._payload([{"role": "user", "content": "/emr"}], model)
+        first = [{"role": "user", "content": "/emr"}]
+        form_data, metadata = self._payload(list(first), model)
         ids = [
             m.get("tool_call_id") for m in form_data["messages"] if m["role"] == "tool"
         ]
         assert ids == [
             "skill:emr:0",
             "skill:emr:on_load:0",
-            "skill:base:0:requires",
+            "skill:emr:on_load:1",  # base の load_skill
             "skill:base:on_load:0",
+            "skill:emr:on_load:2",
         ]
-        assert self.probe_calls == [1, 2]
+        assert self.probe_calls == [1, 2, 3]
+        # 続けて並ぶ tool の要素は 1 つの往復(base の後の 2 つ)
+        assert [
+            [c["id"] for c in b["content"]] for b in metadata["skill_on_load_blocks"]
+        ] == [
+            ["skill:emr:on_load:0"],
+            ["skill:base:on_load:0", "skill:emr:on_load:2"],
+        ]
+
+        history = self._next_turn_history(first, metadata)
+        form_data, metadata = self._payload(history, model)
+        assert self.probe_calls == [1, 2, 3]
+        assert "skill_on_load_blocks" not in metadata
+        ids = [
+            m.get("tool_call_id") for m in form_data["messages"] if m["role"] == "tool"
+        ]
+        assert ids == [
+            "skill:emr:0",
+            "skill:emr:on_load:1",
+            "skill:emr:on_load:0",
+            "skill:base:on_load:0",
+            "skill:emr:on_load:2",
+        ]
+
+    def test_model_load_skill_followups_in_written_order(self):
+        from nucllei.utils.skills import (
+            build_load_skill_tool,
+            drain_load_skill_followups,
+        )
+
+        self._skill(
+            "emr",
+            on_load=[
+                {"tool": "probe", "args": {"x": 1}},
+                {"tool": "load_skill", "args": {"skill_id": "base"}},
+                {"tool": "probe", "args": {"x": 3}},
+            ],
+        )
+        self._skill("base", on_load=[{"tool": "probe", "args": {"x": 2}}])
+        executed = []
+
+        async def execute(calls):
+            executed.extend(json.loads(c["function"]["arguments"])["x"] for c in calls)
+            return [
+                {"tool_call_id": c["id"], "content": "ok", "duration": 0.0}
+                for c in calls
+            ]
+
+        tools = {"probe": self._probe_entry()}
+        entry = build_load_skill_tool(_model("emr"), self.user)
+        tools["load_skill"] = entry
+        asyncio.run(entry["callable"](skill_id="emr"))
+        calls, _ = asyncio.run(drain_load_skill_followups(entry, tools, execute))
+        assert [c["id"] for c in calls] == [
+            "skill:emr:on_load:0",
+            "skill:emr:on_load:1",
+            "skill:base:on_load:0",
+            "skill:emr:on_load:2",
+        ]
+        assert calls[1]["function"]["name"] == "load_skill"
+        assert executed == [1, 2, 3]
 
     def test_on_load_unavailable_tool_is_error_line(self, monkeypatch):
         self._patch_get_tools(monkeypatch)

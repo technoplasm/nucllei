@@ -725,8 +725,8 @@ async def process_chat_payload(
             )
             a["result_message"]["content"] = a["result"]
 
-    # llens#22: 読み込まれた skill(`/command`・自動ロード・その requires)の on_load を
-    # chat につき 1 回だけ実行し、load_skill の exchange の直後に差し込む。tool は
+    # llens#22: 読み込まれた skill(`/command`・自動ロード・その on_load の load_skill で入った
+    # skill)の on_load の tool の要素を chat につき 1 回だけ実行し、書いた順の位置に差し込む。tool は
     # このターンの tools_dict にある物だけ(モデルの tool の read ACL・skill の tool を
     # 通った物)、実行はモデルの call と同じ execute_tool_calls。応答には synthetic でない
     # tool_calls ブロックとして残す(次のリクエストからは履歴の実体 — 再実行しない)。
@@ -2527,7 +2527,7 @@ async def process_chat_response(
 
                 assembler.set_tool_results(results)
 
-                # llens#22: load_skill が積んだ後続(requires の要求先・on_load)を
+                # llens#22: load_skill が積んだ後続(on_load の load_skill と tool の要素)を
                 # 同じ応答の tool 往復として続けて足す(通常のブロック — 保存されて
                 # 次のリクエストからは履歴の実体になる)
                 followup_calls, followup_results = await drain_load_skill_followups(

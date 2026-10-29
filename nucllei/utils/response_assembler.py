@@ -255,7 +255,7 @@ class ContentBlocksAssembler:
         self.content_blocks.append({"type": "text", "content": ""})
 
     def append_tool_exchange(self, calls, results):
-        """サーバが足した tool 往復(skill の requires / on_load — llens#22)を、直前の tool
+        """サーバが足した tool 往復(skill の on_load — llens#22)を、直前の tool
         結果の後ろに 1 ブロックとして綴じ、次の text ブロックを開く。
 
         set_tool_results の直後に呼ぶ(開いたばかりの空の text ブロックは畳む)。モデル向け
