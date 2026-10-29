@@ -7,19 +7,26 @@ middleware(オーケストレーション)から issue #23 で分離した。設
 """
 
 import json
+import logging
 import re
 
+from nucllei.env import SRC_LOG_LEVELS
 from nucllei.models.chats import Chats
 from nucllei.models.files import Files
-from nucllei.models.skills import Skills, normalize_command
+from nucllei.models.skills import ON_LOAD_FORBIDDEN_TOOLS, Skills, normalize_command
 from nucllei.utils.access_control import has_access, has_read_access_to_file
+from nucllei.utils.content_blocks import convert_content_blocks_to_messages
 from nucllei.utils.file_images import INTERNAL_FILE_URL_PATTERN
 from nucllei.utils.task import (
     prompt_template,
     resolve_base_model_id,
     user_prompt_params,
 )
-from nucllei.utils.tool_errors import ToolCallError
+from nucllei.utils.tool_errors import ToolCallError, ToolFailure
+from nucllei.utils.tool_render import resolve_result_render
+
+log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 # 読み込み済みの skill を再ロードしたときの結果(本文は返さない)。tool 結果の文の規約
 # (事実の文 + 「次の手:」— README_API §5.1)に揃える。
@@ -28,6 +35,16 @@ LOADED_RESULT = (
     "次の手: 上の手順書に従って作業を続ける。"
 )
 
+# requires の要求先が使えないとき、要求元の result の末尾に足す 1 行(llens#22)。
+# 黙って飛ばすと、モデルは手順書が前提にしている skill を知らずに待つ。
+REQUIRED_SKILL_UNAVAILABLE = (
+    "skill {skill_id} は使えない (この利用者には見えないか、存在しない)。"
+    "次の手: その skill 無しでこの手順書に従う。"
+)
+
+# on_load の合成 tool call の id(決定的 — 履歴にこの id の結果があれば実行しない)
+ON_LOAD_CALL_ID = "skill:{skill_id}:on_load:{n}"
+
 # 先頭行の行頭にある `/command` トークンを検出する正規表現(issue #35)。
 SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
 
@@ -35,6 +52,50 @@ SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
 def is_skill_visible(skill, user) -> bool:
     """read 可視性(access_control read。作成者は常に可視)。"""
     return skill.user_id == user.id or has_access(user.id, "read", skill.access_control)
+
+
+def resolve_required_skills(skill, user, loaded: set) -> tuple[list, dict]:
+    """`skill` の requires を深さ優先・宣言順に解決する(llens#22)。
+
+    戻り値は (一緒に読み込む skill の列, {要求元の skill id: [使えない旨の行]})。列に
+    `skill` 自身は入らない。`loaded`(本文が既に載っている skill id。呼び出し側は `skill`
+    自身を入れてから呼ぶ)にある skill は入れず、入れたものは `loaded` に足す。
+    循環(A → B → A)は辿っている途中の skill に戻った所で止め、warning を 1 行出す。
+
+    要求先の認可は「read 可視」だけ(機能「スキル」の有効とモデルへの紐づけは、要求元が
+    発火した時点で満たしている)。要求先をモデルの meta.skillIds に並べる必要は無い —
+    並べないと連鎖できないなら requires の意味が無い。要求先が見えない・存在しないなら
+    入れず、要求元の result の末尾に `REQUIRED_SKILL_UNAVAILABLE` を足す。
+    """
+    order = []
+    notes: dict[str, list[str]] = {}
+
+    def visit(current, path):
+        for required_id in current.requires or []:
+            if required_id in path:
+                log.warning(
+                    "skill requires の循環を 1 回で止めた: "
+                    + " -> ".join([*path, required_id])
+                )
+                continue
+            if required_id in loaded:
+                continue
+            required = Skills.get_skill_by_id(required_id)
+            if required is None or not is_skill_visible(required, user):
+                notes.setdefault(current.id, []).append(
+                    REQUIRED_SKILL_UNAVAILABLE.format(skill_id=required_id)
+                )
+                continue
+            loaded.add(required.id)
+            order.append(required)
+            visit(required, (*path, required.id))
+
+    visit(skill, (skill.id,))
+    return order, notes
+
+
+def _with_notes(expanded: str, notes) -> str:
+    return expanded + "".join(f"\n\n{note}" for note in notes or [])
 
 
 def activate_skill(skill, user, model=None) -> str:
@@ -156,23 +217,55 @@ def apply_skill_command(form_data, user, model):
         loaded.add(skill.id)
 
         # id はモデル由来の call(functions.load_skill:N)と衝突しない自前形式。
-        exchange, activation = synthesize_load_skill_exchange(
-            skill, user, model, f"skill:{skill.id}:{idx}", idx == last_user_idx
+        # requires の要求先は同じ規則の exchange で続けて差し込む(llens#22)
+        exchange, chain = synthesize_skill_chain(
+            skill,
+            user,
+            model,
+            f"skill:{skill.id}:{idx}",
+            idx == last_user_idx,
+            loaded,
+            lambda required: f"skill:{required.id}:{idx}:requires",
         )
         new_messages.extend(exchange)
-        activations.append(activation)
+        activations.extend(chain)
 
     form_data["messages"] = new_messages
     return form_data, activations
 
 
-def synthesize_load_skill_exchange(skill, user, model, call_id, current):
+def synthesize_skill_chain(
+    skill, user, model, call_id, current, loaded, required_call_id
+):
+    """`skill` と、その requires の要求先の合成 exchange を順に作る(llens#22)。
+
+    `loaded` に `skill` 自身を入れてから呼ぶ(要求先は resolve_required_skills が足す)。
+    `required_call_id(required)` は要求先の call id(入口ごとに決定的な形)。戻り値は
+    (exchange の messages, 発火リスト)。発火リストは `skill` が先頭で、要求先は
+    深さ優先・宣言順。
+    """
+    required, notes = resolve_required_skills(skill, user, loaded)
+    messages, activations = synthesize_load_skill_exchange(
+        skill, user, model, call_id, current, notes.get(skill.id)
+    )
+    activations = [activations]
+    for item in required:
+        exchange, activation = synthesize_load_skill_exchange(
+            item, user, model, required_call_id(item), current, notes.get(item.id)
+        )
+        messages = [*messages, *exchange]
+        activations.append(activation)
+    return messages, activations
+
+
+def synthesize_load_skill_exchange(skill, user, model, call_id, current, notes=None):
     """「load_skill を呼んだことにする」合成 exchange と発火情報を作る。
 
     `/command`(入口 1)と添付による自動ロード(入口 3)の共通部。戻り値は
-    ([assistant tool_call, tool result], activation)。
+    ([assistant tool_call, tool result], activation)。`notes` は result の末尾に足す行
+    (requires の要求先が使えない旨 — resolve_required_skills)。
     """
-    expanded = activate_skill(skill, user, model)
+    expanded = _with_notes(activate_skill(skill, user, model), notes)
     arguments = json.dumps({"skill_id": skill.id}, ensure_ascii=False)
     # 戻り値は構造化 JSON {result, tools}(#35): 導入された tool 名は
     # 後段(process_chat_payload の skill tools ロード)で書き足される。
@@ -205,6 +298,8 @@ def synthesize_load_skill_exchange(skill, user, model, call_id, current):
         # 導入 tool 名を後段で書き戻すための参照(dict は共有される)
         "result_message": result_message,
         "tool_ids": skill.tool_ids or [],
+        # 読み込み時に 1 回だけ実行する tool(llens#22 — apply_skill_on_load が消費)
+        "on_load": skill.on_load or [],
         "current": current,
     }
     return exchange, activation
@@ -237,6 +332,130 @@ def iter_loaded_skill_ids(messages):
             skill_id = arguments.get("skill_id")
             if isinstance(skill_id, str) and normalize_command(skill_id):
                 yield normalize_command(skill_id)
+
+
+def iter_tool_result_ids(messages):
+    """履歴にある tool 結果の call id を順に返す(on_load の「1 回だけ」の判定 — llens#22)。
+
+    role:tool メッセージの tool_call_id に加え、content_blocks 形で来る履歴の results も読む
+    (synthetic は除く)。
+    """
+    for message in messages:
+        role = message.get("role")
+        if role == "tool":
+            call_id = message.get("tool_call_id")
+            if call_id:
+                yield call_id
+        elif role == "assistant":
+            for block in message.get("content_blocks") or []:
+                if block.get("type") != "tool_calls" or block.get("synthetic"):
+                    continue
+                for result in block.get("results") or []:
+                    call_id = (result or {}).get("tool_call_id")
+                    if call_id:
+                        yield call_id
+
+
+def on_load_call(skill_id: str, n: int, entry: dict, tools: dict) -> dict:
+    """on_load の n 番目を OpenAI 形の tool call にする。引数は skill に書いた固定値だけ。"""
+    name = entry.get("tool") or ""
+    call = {
+        "id": ON_LOAD_CALL_ID.format(skill_id=skill_id, n=n),
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": json.dumps(entry.get("args") or {}, ensure_ascii=False),
+        },
+    }
+    # 引数の表示ディスクリプタ(#20)はモデルが呼んだ call と同じく tool から付ける
+    args_render = ((tools.get(name) or {}).get("render") or {}).get("args")
+    if args_render:
+        call["render"] = {"args": args_render}
+    return call
+
+
+def _on_load_unavailable(call: dict, skill_id: str) -> dict:
+    name = call["function"]["name"]
+    error = ToolFailure(
+        f"skill {skill_id} の読み込み時に実行する {name} は使えない"
+        " (このターンの tool の一覧に無い)",
+        "その結果無しで手順書に従う。",
+    )
+    return {
+        "tool_call_id": call["id"],
+        "content": error.text,
+        "duration": 0.0,
+        "error_kind": error.kind,
+    }
+
+
+async def run_skill_on_load(skill_id, on_load, tools, done_ids: set, execute):
+    """skill の on_load を宣言順に実行し (calls, results) を返す(llens#22)。
+
+    - `done_ids` に call id がある(= 履歴に結果がある・このリクエストで実行済み)ものは
+      実行しない。実行したものは `done_ids` に足す
+    - tool は `tools`(このターンの tools_dict — モデルの tool の read ACL・skill の tool を
+      通った物)に在るものだけ。無ければ実行せず ERROR の 1 行
+    - 実行は `execute(calls)`(middleware.execute_tool_calls — モデルの call と同じ関数。
+      例外・timeout は ERROR の result になり、skill の読み込みは止めない)
+    """
+    calls, results = [], []
+    for n, entry in enumerate(on_load or []):
+        call = on_load_call(skill_id, n, entry, tools)
+        if call["id"] in done_ids:
+            continue
+        done_ids.add(call["id"])
+        name = call["function"]["name"]
+        if name in ON_LOAD_FORBIDDEN_TOOLS or name not in tools:
+            log.warning(
+                f"skill {skill_id} の on_load[{n}] の tool {name!r} はこのターンに無い"
+            )
+            result = _on_load_unavailable(call, skill_id)
+        else:
+            result = (await execute([call]))[0]
+        calls.append(call)
+        results.append(result)
+    return calls, results
+
+
+async def apply_skill_on_load(activations, messages, tools, execute) -> list:
+    """`/command`・自動ロード(と requires で入った skill)の on_load を実行する(llens#22)。
+
+    各発火の load_skill exchange(tool result)の直後に「assistant の tool_call + 本物の
+    tool result」を差し込み(`messages` をその場で書き換える)、応答へ載せる tool_calls
+    ブロックを返す。ブロックは **synthetic でない**(次のリクエストからは履歴の実体として
+    現れ、call id で見つかって再実行されない — load_skill の exchange が毎リクエスト
+    再導出されるのとは扱いが違う)。このリクエストの messages には差し込み済みなので、
+    同じターンの追撃では `in_payload` の印で二重にしない(convert_content_blocks_to_messages)。
+    印は永続化(snapshot_content_blocks)で落ちる。
+    """
+    done = set(iter_tool_result_ids(messages))
+    blocks = []
+    for activation in activations:
+        if not activation.get("on_load"):
+            continue
+        anchor = next(
+            (
+                i
+                for i, m in enumerate(messages)
+                if m.get("role") == "tool"
+                and m.get("tool_call_id") == activation["call_id"]
+            ),
+            None,
+        )
+        if anchor is None:
+            # 前段(inlet filter 等)が exchange を落とした — 置き場所が無いので次のリクエストに回す
+            log.warning(f"skill {activation['id']} の on_load: 差し込み位置が無い")
+            continue
+        calls, results = await run_skill_on_load(
+            activation["id"], activation["on_load"], tools, done, execute
+        )
+        if not calls:
+            continue
+        block = {"type": "tool_calls", "content": calls, "results": results}
+        messages[anchor + 1 : anchor + 1] = convert_content_blocks_to_messages([block])
+        blocks.append({**block, "in_payload": True})
+    return blocks
 
 
 def _readable_content_type(file_id, user, cache) -> str:
@@ -406,11 +625,18 @@ def apply_skill_auto_load(form_data, user, model, metadata=None):
         else:
             continue
 
-        exchange, activation = synthesize_load_skill_exchange(
-            skill, user, model, f"skill:{skill.id}:auto", current
+        loaded.add(skill.id)
+        exchange, chain = synthesize_skill_chain(
+            skill,
+            user,
+            model,
+            f"skill:{skill.id}:auto",
+            current,
+            loaded,
+            lambda required: f"skill:{required.id}:auto:requires",
         )
         pending.setdefault(anchor, []).extend(exchange)
-        activations.append(activation)
+        activations.extend(chain)
 
     if not activations:
         return form_data, activations
@@ -469,6 +695,9 @@ def replay_skill_tool_ids(form_data, user, model) -> list[str]:
 
     tool_ids: list[str] = []
     seen_skill_ids: set[str] = set()
+    # requires の要求先(llens#22)は meta.skillIds に無くてよい — 要求元が AND を満たして
+    # いれば、要求先は read 可視だけで載る(resolve_required_skills と同じ認可)
+    chained: set[str] = set()
 
     for skill_id in iter_loaded_skill_ids(form_data.get("messages", [])):
         if skill_id in seen_skill_ids:
@@ -481,9 +710,12 @@ def replay_skill_tool_ids(form_data, user, model) -> list[str]:
             or not is_skill_visible(skill, user)
         ):
             continue
-        for tool_id in skill.tool_ids or []:
-            if tool_id not in tool_ids:
-                tool_ids.append(tool_id)
+        chained.add(skill.id)
+        required, _ = resolve_required_skills(skill, user, chained)
+        for item in [skill, *required]:
+            for tool_id in item.tool_ids or []:
+                if tool_id not in tool_ids:
+                    tool_ids.append(tool_id)
 
     return tool_ids
 
@@ -571,6 +803,11 @@ def build_load_skill_tool(model, user, load_tools=None, messages=None):
     # (ターン内の先行呼び出しは load_skill 自身が足す — 同じ tool エントリが
     # そのターンの native ループで使い回される)。
     loaded_skill_ids = set(iter_loaded_skill_ids(messages or []))
+    # requires の要求先・on_load(llens#22)は load_skill の結果の後ろに別の tool 往復として
+    # 足す。load_skill はここへ積むだけで、native ループが load_skill を含む応答の実行後に
+    # drain_load_skill_followups で取り出して実行・保存する
+    followups: list = []
+    on_load_done = set(iter_tool_result_ids(messages or []))
 
     async def load_skill(skill_id: str = ""):
         skill = manifest.get(normalize_command(skill_id))
@@ -580,15 +817,41 @@ def build_load_skill_tool(model, user, load_tools=None, messages=None):
                 "load_skill の説明の一覧にある id をそのまま渡す。",
             )
         # 判定と記録は await より前(同じターンの並列呼び出しでも本文は 1 回)
+        required = []
         if skill.id in loaded_skill_ids:
             result = LOADED_RESULT.format(skill_id=skill.id)
         else:
             loaded_skill_ids.add(skill.id)
-            result = activate_skill(skill, user, model)
+            required, notes = resolve_required_skills(skill, user, loaded_skill_ids)
+            result = _with_notes(
+                activate_skill(skill, user, model), notes.get(skill.id)
+            )
+            if skill.on_load:
+                followups.append({"skill_id": skill.id, "on_load": skill.on_load})
+            for item in required:
+                followups.append(
+                    {
+                        "skill": item,
+                        "call_id": f"skill:{item.id}:requires:{skill.id}",
+                        "content": _with_notes(
+                            activate_skill(item, user, model), notes.get(item.id)
+                        ),
+                    }
+                )
+                if item.on_load:
+                    followups.append({"skill_id": item.id, "on_load": item.on_load})
         loaded_tool_names = []
         if load_tools is not None and skill.tool_ids:
             # load_tools は async フック(#28: 中で get_tools をワーカースレッド実行)
             loaded_tool_names = await load_tools(skill) or []
+        # 要求先の tool も今のうちに生やす(後続の on_load・次のイテレーションから使える)
+        for item in required:
+            names = []
+            if load_tools is not None and item.tool_ids:
+                names = await load_tools(item) or []
+            for followup in followups:
+                if followup.get("skill") is item:
+                    followup["tools"] = names
         # 戻り値は構造化 JSON {result, tools}(#35): 指示本文と「何が導入されたか」を
         # モデル/UI の双方に見せる。str のまま返す(ループは str を素通しする)。
         return json.dumps(
@@ -602,7 +865,59 @@ def build_load_skill_tool(model, user, load_tools=None, messages=None):
         "spec": spec,
         "callable": load_skill,
         "render": {"result": {"kind": "skill"}},
+        "followups": followups,
+        "on_load_done": on_load_done,
     }
+
+
+async def drain_load_skill_followups(entry, tools, execute):
+    """load_skill が積んだ後続(requires の要求先・on_load — llens#22)を取り出して
+    (calls, results) にする。native ループが load_skill を含む応答の実行後に呼ぶ。
+
+    要求先は load_skill と同じ形の call(id `skill:<要求先>:requires:<要求元>`)と、
+    読み込み済みの本文の結果。on_load は run_skill_on_load で実行する。どちらも通常の
+    (synthetic でない)tool 往復として応答に残り、次のリクエストからは履歴の実体になる。
+    """
+    pending = list((entry or {}).get("followups") or [])
+    if not pending:
+        return [], []
+    entry["followups"].clear()
+    done = entry.setdefault("on_load_done", set())
+    calls, results = [], []
+    for item in pending:
+        if "skill" in item:
+            content = json.dumps(
+                {"result": item["content"], "tools": item.get("tools") or []},
+                ensure_ascii=False,
+            )
+            calls.append(
+                {
+                    "id": item["call_id"],
+                    "type": "function",
+                    "function": {
+                        "name": "load_skill",
+                        "arguments": json.dumps(
+                            {"skill_id": item["skill"].id}, ensure_ascii=False
+                        ),
+                    },
+                }
+            )
+            render = resolve_result_render(content, {"kind": "skill"})
+            results.append(
+                {
+                    "tool_call_id": item["call_id"],
+                    "content": content,
+                    "duration": 0.0,
+                    **({"render": render} if render else {}),
+                }
+            )
+        else:
+            c, r = await run_skill_on_load(
+                item["skill_id"], item["on_load"], tools, done, execute
+            )
+            calls.extend(c)
+            results.extend(r)
+    return calls, results
 
 
 def skill_activation_seed_block(skill_activations) -> dict:

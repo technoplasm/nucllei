@@ -1,5 +1,5 @@
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from nucllei.internal.db import Base, get_db
 from nucllei.models.users import Users, UserResponse
@@ -37,6 +37,12 @@ class Skill(Base):
     # 条件に合う添付が会話にあれば `/command` と同じ経路で発火する
     # (utils/skills.py apply_skill_auto_load)。空 = 自動ロードしない。
     auto_load_content_types = Column(JSON, nullable=True)
+    # 読み込まれたときに一緒に読み込む skill の id(先頭 `/` なし)。どの入口で読み込まれても
+    # 効く(utils/skills.py resolve_required_skills)。NULL / [] = 無し。
+    requires = Column(JSON, nullable=True)
+    # 読み込まれたときにサーバが chat につき 1 回だけ実行する tool。
+    # `[{"tool": <tool 名>, "args": {…}}]`(args は固定値だけ)。非空の保存は admin のみ。
+    on_load = Column(JSON, nullable=True)
 
     access_control = Column(JSON, nullable=True)  # Controls data access levels.
     # Defines access control rules for this entry.
@@ -62,10 +68,12 @@ class SkillModel(BaseModel):
     content: str
     tool_ids: list[str] = []
     auto_load_content_types: list[str] = []
+    requires: list[str] = []
+    on_load: list[dict] = []
 
     access_control: Optional[dict] = None
 
-    @field_validator("auto_load_content_types", mode="before")
+    @field_validator("auto_load_content_types", "requires", "on_load", mode="before")
     @classmethod
     def _none_as_empty(cls, value):
         # 列追加より前からある行は NULL — モデル上は常にリスト
@@ -93,12 +101,80 @@ class SkillForm(BaseModel):
     content: str
     tool_ids: list[str] = []
     auto_load_content_types: list[str] = []
+    # requires / on_load は省略(None)= 更新で既存値を保つ(作成では [])。形の検証は
+    # router(400 で返すため — pydantic の検証は 422 になる)。
+    requires: Any = None
+    on_load: Any = None
     access_control: Optional[dict] = None
 
     @field_validator("auto_load_content_types")
     @classmethod
     def _normalize_content_types(cls, value):
         return normalize_content_type_prefixes(value)
+
+
+class SkillFieldError(ValueError):
+    """requires / on_load の形が不正(router が 400 で返す)。message は利用者向け。"""
+
+
+def normalize_requires(value, skill_id: str) -> list[str]:
+    """requires を正規化する: 文字列の配列、各要素は先頭 `/` と前後空白を落とし、空要素と
+    重複を除く(順序は保つ)。自分自身・文字列でない要素は `SkillFieldError`。"""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SkillFieldError("requires は skill id の配列で指定する")
+    normalized = []
+    for item in value:
+        if not isinstance(item, str):
+            raise SkillFieldError("requires の要素は skill id の文字列で指定する")
+        item = normalize_command(item)
+        if not item or item in normalized:
+            continue
+        if item == normalize_command(skill_id):
+            raise SkillFieldError("requires に自分自身は指定できない")
+        normalized.append(item)
+    return normalized
+
+
+# on_load に書けない tool: load_skill は skill の連鎖そのもの(requires を使う)
+ON_LOAD_FORBIDDEN_TOOLS = frozenset({"load_skill"})
+
+
+def normalize_on_load(value) -> list[dict]:
+    """on_load を検証して正規化する: `[{"tool": <名前>, "args": {…}}]`。tool は空でない
+    文字列(前後空白は落とす)、args は JSON object(省略は {})。それ以外のキーは不可。
+    不正なら `SkillFieldError`。"""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SkillFieldError(
+            'on_load は [{"tool": <tool 名>, "args": {…}}] の配列で指定する'
+        )
+    normalized = []
+    for n, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise SkillFieldError(f"on_load[{n}] は object で指定する")
+        unknown = set(item) - {"tool", "args"}
+        if unknown:
+            raise SkillFieldError(
+                f"on_load[{n}] に使えないキーがある: {', '.join(sorted(unknown))}"
+            )
+        tool = item.get("tool")
+        if not isinstance(tool, str) or not tool.strip():
+            raise SkillFieldError(f"on_load[{n}].tool は tool 名の文字列で指定する")
+        tool = tool.strip()
+        if tool in ON_LOAD_FORBIDDEN_TOOLS:
+            raise SkillFieldError(
+                f"on_load[{n}].tool に {tool} は指定できない (skill を一緒に読み込むなら requires)"
+            )
+        args = item.get("args", {})
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            raise SkillFieldError(f"on_load[{n}].args は object で指定する")
+        normalized.append({"tool": tool, "args": args})
+    return normalized
 
 
 def normalize_content_type_prefixes(prefixes: list[str]) -> list[str]:
@@ -127,6 +203,8 @@ class SkillsTable:
         skill = SkillModel(
             **{
                 **form_data.model_dump(),
+                "requires": form_data.requires or [],
+                "on_load": form_data.on_load or [],
                 "id": normalize_command(form_data.id),
                 "user_id": user_id,
                 "created_at": int(time.time()),
@@ -193,6 +271,11 @@ class SkillsTable:
                 skill.content = form_data.content
                 skill.tool_ids = form_data.tool_ids
                 skill.auto_load_content_types = form_data.auto_load_content_types
+                # 省略(None)は既存値を保つ — 旧いクライアントの保存で消えないように
+                if form_data.requires is not None:
+                    skill.requires = form_data.requires
+                if form_data.on_load is not None:
+                    skill.on_load = form_data.on_load
                 skill.access_control = form_data.access_control
                 skill.updated_at = int(time.time())
                 db.commit()

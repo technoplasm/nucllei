@@ -57,7 +57,9 @@ from nucllei.utils.misc import (
 from nucllei.utils.skills import (
     apply_skill_auto_load,
     apply_skill_command,
+    apply_skill_on_load,
     build_load_skill_tool,
+    drain_load_skill_followups,
     current_skill_activation_seeds,
     replay_skill_tool_ids,
     skill_activation_seed_block,
@@ -722,6 +724,22 @@ async def process_chat_payload(
                 {"result": a["content"], "tools": names}, ensure_ascii=False
             )
             a["result_message"]["content"] = a["result"]
+
+    # llens#22: 読み込まれた skill(`/command`・自動ロード・その requires)の on_load を
+    # chat につき 1 回だけ実行し、load_skill の exchange の直後に差し込む。tool は
+    # このターンの tools_dict にある物だけ(モデルの tool の read ACL・skill の tool を
+    # 通った物)、実行はモデルの call と同じ execute_tool_calls。応答には synthetic でない
+    # tool_calls ブロックとして残す(次のリクエストからは履歴の実体 — 再実行しない)。
+    on_load_blocks = await apply_skill_on_load(
+        skill_activations,
+        form_data["messages"],
+        tools_dict,
+        lambda calls: execute_tool_calls(
+            calls, tools_dict, events_stream=events_stream, metadata=metadata
+        ),
+    )
+    if on_load_blocks:
+        metadata["skill_on_load_blocks"] = on_load_blocks
 
     # 今回のターンの発火を UI seed 用に metadata へ(result 確定後)。
     current_skill_activations = current_skill_activation_seeds(skill_activations)
@@ -2421,6 +2439,9 @@ async def process_chat_response(
             seed_blocks.append(
                 skill_activation_seed_block(metadata["skill_activations"])
             )
+        # llens#22: skill の on_load の実行結果(通常の tool_calls ブロック。payload に
+        # 差し込み済みなので in_payload の印で同じターンの追撃には再送しない)
+        seed_blocks.extend(metadata.get("skill_on_load_blocks") or [])
 
         # llens(#17/#23): デルタ → content_blocks の組み立ては assembler
         # (utils/response_assembler.py)へ分離。reasoning は SGLang reasoning
@@ -2505,6 +2526,19 @@ async def process_chat_response(
                 )
 
                 assembler.set_tool_results(results)
+
+                # llens#22: load_skill が積んだ後続(requires の要求先・on_load)を
+                # 同じ応答の tool 往復として続けて足す(通常のブロック — 保存されて
+                # 次のリクエストからは履歴の実体になる)
+                followup_calls, followup_results = await drain_load_skill_followups(
+                    tools.get("load_skill"),
+                    tools,
+                    lambda calls: execute_tool_calls(
+                        calls, tools, events_stream=events_stream, metadata=metadata
+                    ),
+                )
+                if followup_calls:
+                    assembler.append_tool_exchange(followup_calls, followup_results)
 
                 snapshot = blocks_event_data(assembler.content_blocks)
                 await event_emitter(

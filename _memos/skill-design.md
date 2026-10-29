@@ -356,3 +356,55 @@ tool result = 展開済み content の全シーケンス。
   ターンからは名指しされ、読み込んでいない人には名前が出ない。`builtin-tools.md`「モデル向け文面の監査」。
 - `{{CURRENT_WEEKDAY}}` は日本語(月曜日…日曜日)で固定した(`utils/task.py`。strftime の %A はプロセスの
   ロケール次第で英語だった)。手順書 `docs/manual/13_skills.md` も「曜日 (例: `月曜日`)」に。
+
+## requires / on_load(2026-10-29、llens 依頼・ken 指示 — llens prism-hu/llens#22「hooks 的な」)
+
+**なぜ**: llens の `emr` は「DB のノートの索引を必ず読んでから作業する」が要るが、手順書に「読め」と
+書いても GLM が読まない。prompt で頼むのではなく、読み込みと同時にサーバが確実に context へ入れる。
+skill → skill の連鎖(requires)も同じ「読み込まれたとき」の仕組みに載せた。トリガ型
+(「tool X が呼ばれたら」)と per-turn hooks(README_API §5.9)は別物で、今回は作らない。
+
+**データ**: `skill.requires`(JSON、skill id の配列)と `skill.on_load`(JSON、
+`[{"tool": <関数名>, "args": {…}}]`)。migration `b6e1d9a3c7f2`。API は top-level フィールドで、
+**update の省略(None)は既存値を保つ**(旧いクライアント・FE の保存で消えない)。検証は router の
+400(`SkillFieldError`)。権限: on_load 非空は admin のみ(tool_ids と同じ `_require_editor`)、
+requires は editor も書ける(要求先は発火時に利用者の read で判定するので抜け道にならない)。
+
+**requires**(`utils/skills.py::resolve_required_skills`): 深さ優先・宣言順。要求先の認可は
+**read 可視だけ** — 機能 ON と meta.skillIds の紐づけは要求元が満たしている。要求先を preset に
+並べさせると連鎖の意味が無い。既に載っている skill は入れない(`loaded` 集合を入口と共有)、循環は
+辿っている途中に戻った所で止めて warning 1 行、見えない・無い要求先は要求元の result に
+`REQUIRED_SKILL_UNAVAILABLE` を 1 行足す。入口ごとの差し込み:
+- `/command`・自動ロード: `synthesize_skill_chain` が要求元の exchange の直後に要求先の exchange を
+  並べ、発火リストにも積む(tool_ids の取り込み・seed・毎リクエスト再導出は今までどおり)
+- モデルの load_skill: load_skill の中で要求先の本文と tool の取り込み(load_tools)まで済ませ、
+  後続(`followups`)に積む。native ループが load_skill を含む応答を実行した後に
+  `drain_load_skill_followups` で取り出し、`load_skill` の call(id `skill:<要求先>:requires:<要求元>`)
+  として**通常の**tool 往復で足す(`ContentBlocksAssembler.append_tool_exchange`)。保存されるので
+  次のリクエストからは履歴の load_skill 呼び出しとして読まれ、`replay_skill_tool_ids` も要求先の
+  tool を再導出する(要求元から requires を辿る — 要求先は meta.skillIds に無くてよい)
+
+**on_load**: 本物の tool 実行。**1 回だけ**の判定キーは決定的な call id
+`skill:<id>:on_load:<n>` — 履歴にその id の tool 結果があれば実行しない(`iter_tool_result_ids`)。
+- `/command`・自動ロード(と、その requires): `apply_skill_on_load` を process_chat_payload の
+  tools 合流の後(tools_dict が確定した後)に呼ぶ。実行は `execute_tool_calls`(モデルの call と
+  同じ関数)、tool はこのターンの tools_dict にある物だけ(無ければ実行せず ERROR 1 行、
+  `ToolFailure`)。結果は load_skill の tool result の直後に payload の messages へ差し込み、
+  同じ tool_calls ブロックを `metadata["skill_on_load_blocks"]` 経由で応答の seed にする
+- **load_skill の exchange との違い**: load_skill の合成 exchange は毎リクエスト再導出 + synthetic
+  (保存しても履歴に再送しない)。on_load は**一度きりの実行結果なので synthetic にしない** — 応答に
+  通常の tool 往復として保存し、次のリクエストからは FE の expandAssistantToolHistory /
+  サーバ側の再構成(subagent・続きターン)が履歴の実体として運ぶ。そのターン内だけは payload に
+  差し込み済みなので、ブロックに `in_payload` の印を付けて convert_content_blocks_to_messages
+  (追撃・carried 計測)で二重にしない。印は snapshot_content_blocks が写さない(知らないキー)
+  ので永続化で自然に落ちる
+- モデルの load_skill: 後続(`followups`)に積み、requires と同じく native ループで実行して通常の
+  tool 往復として足す。読み込み済み(LOADED_RESULT)の再ロードでは requires も on_load もしない
+- subagent: 子ターンも process_chat_payload / process_chat_response を通るので同じ(子の応答に残る)
+- 既知の割り切り: (1) 自動ロードの `files` 由来は load_skill の exchange が最初の user メッセージの
+  直後に再導出されるが、on_load は最初に実行したターンの応答に残るので、後のターンでは位置がずれる。
+  (2) その応答が消える(削除・再生成・分岐)と次の読み込みで再実行される(履歴が唯一の状態)。
+  (3) on_load の結果は inlet filter の後に差し込むので、filter はそれを見ない。
+  (4) 履歴はクライアント入力なので、偽の結果を履歴に入れれば実行を止められる — 止まるのはその
+  利用者自身の context に入る結果だけで、権限は増えない
+

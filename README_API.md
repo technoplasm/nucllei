@@ -2720,6 +2720,8 @@ POST /api/v1/skills/create
   "content": "You now have vault access tools. Use secret_password to retrieve the stored secret.\nToday is {{CURRENT_DATE}}; the user is {{USER_NAME}}.",
   "tool_ids": ["vault-tools"],
   "auto_load_content_types": [],
+  "requires": ["vault-basics"],
+  "on_load": [{"tool": "read_file", "args": {"path": "/ext/groups/EMR/notes/index.md"}}],
   "access_control": null
 }
 ```
@@ -2752,6 +2754,19 @@ POST /api/v1/skills/create
   automatically (§6.3). Empty (the default) disables it. Normalized on save
   (trimmed, lowercased, empty entries and duplicates dropped). **An update
   replaces the list** — omit the field and it is reset to `[]`.
+- `requires` — ids of skills to load **together with** this one, whichever way
+  it is loaded (§6.4). A leading `/` is dropped, empty entries and duplicates
+  are removed; the skill itself is rejected (400). Skill editors may set it.
+- `on_load` — tools the server runs **once per chat** when the skill is loaded:
+  `[{"tool": "<function name>", "args": {…}}]` (`args` defaults to `{}`; no
+  other keys; `load_skill` is rejected — use `requires`). The arguments are the
+  fixed values written here only. **Admin-only**, like `tool_ids` (creating,
+  updating or deleting a skill whose stored or submitted `on_load` is non-empty).
+  Shape errors are 400.
+- `requires` / `on_load` on update: **omitted (or `null`) keeps the stored
+  value**; send `[]` to clear. (Unlike `tool_ids` / `auto_load_content_types`,
+  which an update replaces.) Both are top-level fields of `POST /skills/create`,
+  `POST /skills/id/{id}/update` and the skill responses (always lists).
 - `access_control` — `null` public / `{}` private / `{"read":{group_ids,user_ids}}`.
 
 ### 6.2 Permissions (three tiers)
@@ -2759,7 +2774,7 @@ POST /api/v1/skills/create
 - **user** — uses skills they can read (via `/command` or model auto-load).
 - **skill editor** (`USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS`) — browses all
   skills, creates skills (forced private), edits/deletes their own.
-- **admin** — everything, including sharing (ACL) and `tool_ids`.
+- **admin** — everything, including sharing (ACL), `tool_ids` and `on_load`.
 
 ### 6.3 Activation
 
@@ -2820,6 +2835,59 @@ Authorization is never inherited from the history. Every re-derivation re-checks
 the same AND as the `/command` path (feature flag, the model's `meta.skillIds`,
 and read visibility), so removing a skill from the preset drops its tools even
 though the earlier `load_skill` call is still sitting in the conversation.
+
+### 6.4 `requires` and `on_load`
+
+Both take effect whenever a skill is loaded — by `/command`, by the model's
+`load_skill`, or by an attachment — including a skill that was itself pulled
+in through `requires`.
+
+**`requires`** — right after the skill's `load_skill` exchange the server adds,
+depth-first in declaration order, the same kind of exchange for each required
+skill (call + expanded content), and loads its `tool_ids` too.
+
+- A required skill only needs to be **readable by the user**. It does not have
+  to be in the preset's `meta.skillIds` (the requiring skill already passed the
+  AND of §6.3), and its `description` may be empty.
+- Already loaded (earlier in the history, or earlier in the same request):
+  not added again. Cycles (A → B → A) stop at the first repeat, with one
+  warning in the server log.
+- Not readable / not existing: not loaded, and the requiring skill's `result`
+  gets one extra line: `skill <id> は使えない (…)。次の手: その skill 無しでこの手順書に従う。`
+- Call ids: `skill:<id>:<n>:requires` (`/command` at user message n),
+  `skill:<id>:auto:requires` (attachment), `skill:<id>:requires:<requiring id>`
+  (model `load_skill`). Their tools are re-derived on later turns like the
+  requiring skill's own (`replay_skill_tool_ids` follows `requires`).
+
+**`on_load`** — the server really executes each tool, through the same function
+as a model tool call, and inserts it right after that skill's `load_skill`
+exchange as an ordinary assistant `tool_calls` + `role:"tool"` result. In the
+UI it is a normal tool card.
+
+- **Once per chat.** The call id is deterministic,
+  `skill:<skill id>:on_load:<n>` (n = 0-based position in `on_load`). If the
+  history sent with the request already has a tool result with that id, the
+  tool is not run again. The first run is stored in that turn's response as a
+  normal (non-synthetic) tool block, so the next request carries it back as
+  history. This is the difference from the `load_skill` exchange itself, which
+  is re-derived on every request and shown as a synthetic card.
+- The tool must be **available in that turn** — in the turn's tool list (the
+  preset's `meta.toolIds` after the per-user read ACL, plus the tools of the
+  loaded skills). It does not have to be in the skill's own `tool_ids`.
+  Otherwise it is not run and the result is one ERROR line
+  (`ERROR: skill <id> の読み込み時に実行する <tool> は使えない (…)。次の手: …`,
+  `error_kind: "failure"`).
+- An exception or timeout becomes the ERROR result of that call, as for any
+  tool. Loading the skill never fails because of `on_load`.
+- Inside a subagent's turn the same rules apply (same user); the result is
+  stored in the child chat.
+- Known trade-offs: the result sits in the response of the turn that first ran
+  it. For an attachment loaded from `files` the `load_skill` exchange is placed
+  after the first user message (§6.3), so on later turns the `on_load` exchange
+  appears further down than the skill body. If that response is deleted,
+  regenerated or branched away, the next load runs the tool again (the history
+  is the only state). A model `load_skill` of a skill that is already loaded
+  returns the short result and does not run `on_load`.
 
 ---
 

@@ -167,7 +167,11 @@ def convert_content_blocks_to_messages(
 
     temp_blocks = []
     for block in content_blocks:
-        if block.get("synthetic"):
+        if block.get("synthetic") or block.get("in_payload"):
+            # in_payload: skill の on_load(llens#22)を payload の messages に差し込み済みの
+            # ブロック。同じターンの追撃では二重にしない(印は永続化で落ちる —
+            # snapshot_content_blocks は知っているキーしか写さないので、次のターンからは
+            # 通常の tool 往復として読まれる)
             continue
         if block["type"] == "tool_calls":
             # call 列のキーは 2 形ある(#110 敵対検証 4): 組み立て中の内部表現は
