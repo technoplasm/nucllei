@@ -286,7 +286,10 @@ class TestRunSubagent(AbstractPostgresTest):
             in spec["description"]
         )
         assert "サブエージェントどうしは同時に走り" in spec["description"]
-        assert "sandbox で実行する tool は並べても同時には走らず" in spec["description"]
+        # sandbox の直列は sandbox の共通注記が言う・結果の受け取り方は await_task の説明が言う
+        # (2026-10-30 batch 6 で外した)。続け方 (session_id) は注記の 1 回だけ
+        assert "sandbox で実行する tool" not in spec["description"]
+        assert spec["description"].count("session_id") == 1
         # per-tool timeout(クラス属性 timeouts)と表示ディスクリプタ(戻り型の Annotated)
         assert tool["timeout"] == SUBAGENT_TURN_TIMEOUT_S
         assert tool["render"] == {"result": {"kind": "subagent"}}

@@ -57,7 +57,7 @@ class Tools:
     - 使う: 長大な資料・多数のページを読んで結論だけ欲しいとき / 互いに独立した調べものを並行させたいとき
     - 使わない: 自分で数手で済む作業、会話の流れに強く依存する判断(子はこの会話を見ていない)
     - instruction は単独で完結させる: 目的・対象・返してほしい形を書く。開かせたいもの(/workspace や /ext のパス・URL・file_id・doc の path)は受け取った形のまま書き、中身は貼らない
-    - 並行させるなら 1 回の応答の中に run_subagent を並べる(サブエージェントどうしは同時に走り、全部そろってから次の手。1 本ずつ別の手で出すと直列になる)。sandbox で実行する tool は並べても同時には走らず、1 本ずつ順番に走る。待たずに別の作業を進めたいときだけ background: true(結果は完了時に通知で届く。今すぐ要るときだけ await_task)。同時に走れるのはサーバー全体で 4 本まで(ほかの利用者の分も、background の分も終わるまで数える)・超過は即エラー — 5 本以上なら 4 本ずつ、先の分がそろってから次
+    - 並行させるなら 1 回の応答の中に run_subagent を並べる(サブエージェントどうしは同時に走り、全部そろってから次の手。1 本ずつ別の手で出すと直列になる)。待たずに別の作業を進めたいときだけ background: true。同時に走れるのはサーバー全体で 4 本まで(ほかの利用者の分も、background の分も終わるまで数える)・超過は即エラー — 5 本以上なら 4 本ずつ、先の分がそろってから次
     - 結果は子のまとめであって原文ではない。根拠が要る点・食い違いは自分で確かめる。追加の質問は session_id で同じ子に続ける
     """
 
@@ -95,11 +95,11 @@ class Tools:
         __user__: Optional[dict] = None,
         __metadata__: Optional[dict] = None,
     ) -> Annotated[Union[dict, str], RenderAs(kind="subagent")]:
-        """サブエージェントを起動し、instruction を 1 ターン実行させる。返るのは最終回答(answer)のみ — 実行過程(transcript)は親には来ない。会話を継続するには、結果の session_id を session_id 引数に渡して追いの instruction を送る。
+        """サブエージェントを起動し、instruction を 1 ターン実行させる。
 
         :param preset_id: 起動する preset の id。新規セッション時は必須(session_id 継続時は不要)。
         :param instruction: サブエージェントへの指示。
-        :param session_id: 続ける既存のサブエージェントのセッション id(省略で新規セッション)。
+        :param session_id: 続けたい子の結果の session_id(子は前のやりとりを覚えているので、追いの instruction だけを送る。省略で新規セッション)。
         :return: {ok, session_id, answer, truncated?, note?, usage?, error?}
         """
         from nucllei.models.users import Users
