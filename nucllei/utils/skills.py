@@ -1001,6 +1001,7 @@ async def drain_load_skill_followups(entry, tools, execute, drain=None):
 # load_recipe (builtin_sandbox) が積む後続 — レシピの frontmatter の on_load (2026-10-30)。
 # 置き場は request の metadata(tool は `__metadata__` で受ける)。要素は
 # `{"call_id": "recipe:<フォルダ>:on_load:<n>", "tool": <名前>, "args": {…}, "recipe": <フォルダ>}`。
+# `"warning": <文>` がある要素は実行せず、その文を結果にする (引けない参照の警告)。
 RECIPE_FOLLOWUPS_KEY = "_recipe_followups"
 RECIPE_ON_LOAD_DONE_KEY = "_recipe_on_load_done"
 # 後続の入れ子 (レシピ → skill → レシピ …) の深さの上限。循環は「読み込み済み」で止まるので保険
@@ -1065,6 +1066,21 @@ def make_followup_drain(tools: dict, metadata: dict, execute):
                 args_render = ((tools.get(name) or {}).get("render") or {}).get("args")
                 if args_render:
                     call["render"] = {"args": args_render}
+                if item.get("warning"):
+                    # load_recipe が引けないと判定した要素 (参照先が無い・見えない — 警告で
+                    # 止めない、ken 2026-10-30): 実行せず、その位置の結果に警告を入れる
+                    pairs.append(
+                        (
+                            call,
+                            {
+                                "tool_call_id": call_id,
+                                "content": item["warning"],
+                                "duration": 0.0,
+                                "error_kind": "outcome",
+                            },
+                        )
+                    )
+                    continue
                 if name not in tools:
                     log.warning(
                         f"レシピ {item.get('recipe')} の on_load の tool {name!r} はこのターンに無い"

@@ -2748,7 +2748,7 @@ POST /api/v1/skills/create
   memberships, not every group), `{{BASE_MODEL_ID}}` (id of the base model
   that actually runs inference — the selected preset's `base_model_id`; `Unknown`
   if the server cannot resolve it), `{{USER_RECIPES}}` (the recipes the user can
-  see, one line each — §6.5; empty string if none). The same variables are expanded in a preset's
+  see, one line each, with `(壊れている: …)` / `(警告: …)` marks — §6.5; empty string if none). The same variables are expanded in a preset's
   system prompt (`params.system`). Inside a subagent's turn `{{BASE_MODEL_ID}}`
   refers to the child preset's base, while the `{{USER_*}}` variables stay those
   of the user who started the parent chat. There is no call-time parameter mechanism.
@@ -2968,30 +2968,68 @@ name:
 
 ```
 - /workspace/recipes/月次集計 — 月次の件数を集計して表にする
-- /ext/groups/EMR/recipes/抽出 — (壊れている: read の /ext/groups/EMR/notes/検査結果.md が無い。edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き))
+- /ext/groups/EMR/recipes/抽出 — EMR の抽出 (警告: on_load の read /ext/groups/EMR/notes/検査結果.md が無い。読み込めるが、その要素は実行しない)
+- /ext/public/recipes/共通 — (壊れている: frontmatter の知らないキー: onload (使えるのは title・description・author・updated・tools・on_load)。on_load の綴り違いでは。edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き))
 ```
 
 The `description` is folded to one line and cut at 120 characters (`…`); the
 words the tools use to give the model instructions (`次の手:` `返答への指示:` …)
 are defused. Folders that break the name rule (below), `trash`, and names
-starting with `.` are not listed. A **broken** recipe stays in the list with its
-reason, so it can be fixed. It is **computed every time**, never stored. A recipe
-broken only because a referenced file was missing heals by itself once the file
-is back. "Broken" here is the light check, shared with `load_recipe` (one
-function, `assess_recipe`):
-- `RECIPE.md` missing, not a regular file, or not text.
-- The frontmatter is not closed, not YAML, not a mapping, or a required key is
-  empty.
-- An `on_load` entry is malformed, or what it refers to is gone: the `read:`
-  file, the `recipe:` folder, the `shell:` / `python:` attachment, or a `skill:`
-  the user cannot see.
+starting with `.` are not listed. Two marks, both **computed every time** and
+never stored, and both shared with `load_recipe`:
+- **`(壊れている: …)`** (`assess_recipe` → `frontmatter_problems`) — the
+  **frontmatter itself is invalid** (a schema error, the same for every reader at
+  any time): `RECIPE.md` missing, not a regular file or not text; not closed, not
+  YAML, not a mapping; an **unknown key** (only `title` `description` `author`
+  `updated` `tools` `on_load`; the message names the key, the allowed keys and a
+  close spelling — `onload:` must not be silently ignored); a required key empty;
+  a wrong type (`title` / `description` / `author` one-line strings, `updated`
+  `YYYY-MM-DD`, `tools` function names); an `on_load` entry that does not fit the
+  notation. It stays in the list with its reason, so it can be fixed.
+- **`(警告: …)`** (`reference_warnings`, ken 2026-10-30 "dependencies get deleted
+  all the time — warn, still run, and let the model recover") — the frontmatter is
+  valid but a value does not pass the environment, the permissions or the layer
+  rule: an `on_load` entry that breaks the **layer rule** (below; `layer_warnings`,
+  reader-independent), or a reference the environment no longer provides **for
+  this reader**: the `read:` file or the
+  `recipe:` folder is gone (or not a regular file), the `shell:` / `python:`
+  attachment is gone, a `skill:` does not exist or this user cannot see it, a
+  `read:` / `recipe:` points into a group the reader does not belong to
+  (admins too — memberships only; references into the recipe's own group are
+  exempt), or a frontmatter `tools` function is restricted to a group the reader
+  is not in (`RECIPE_RESTRICTED_TOOLS`; a `null` entry — personal only — is not
+  judged). The recipe still loads; it heals by itself once the reference is back.
 
-Patient data and layer rules are not part of the light check (they are checked
-before every write). The list runs on **every request** that has the variable,
+**Layer rule for `on_load` references** (llens, ken 2026-10-30) — references go
+from a narrower layer to a wider one only, so a shared recipe's hook cannot make
+the reader's `/workspace` (memory, EMR exports) flow into the conversation:
+
+| recipe's layer | `skill:` | `recipe:` | `read:` | `shell:` / `python:` |
+|---|---|---|---|---|
+| personal | yes | personal, the reader's groups, everyone | anything the reader can see | yes (its own attachments) |
+| group `g` | yes | `g` and everyone only | `g`, `/ext/public`, its own folder, the read-only `/ext/<name>` mounts (doc …) | **no** |
+| everyone | yes | everyone only | `/ext/public`, its own folder, the read-only `/ext` mounts | **no** |
+
+Shared → personal, group → another group, and everyone → group are violations.
+A violation is a **warning**, the same for every reader, and the entry is
+**never run** — that, not refusing the recipe, is what blocks the injection
+(`グループ「EMR」のレシピの on_load では shell は使えない (共有の層では付属の実行は不可。使うなら個人のレシピから recipe: で読む)`,
+`グループ「EMR」のレシピの on_load の read では /workspace/x.csv を読まない (…)`).
+References that break the rule are never stat-ed for the reader. Where an
+older **write rule** overlaps (a shared recipe whose text names
+`/workspace/recipes|imports|exports|trash|memory`: "a path the reader cannot
+see"), the write rule still refuses the write. To use
+`shell` / `python` with a shared recipe, put the attachment and the entry in a
+personal recipe and `recipe:` the shared one from there.
+
+Patient data, the restricted functions' layers and the other write rules are not
+part of the light check (they are checked before every write). The list runs on **every request** that has the variable,
 so it is bounded: one sandbox `POST /recipes/index` (every layer's folders and
 the head of each `RECIPE.md`), one `POST /files/stat_many` (every referenced path
-of every recipe), one DB query (the referenced skills). A reference the sandbox
-could not answer for counts as unknown, not broken. If the sandbox is too old
+of every recipe that passes the layer rule and the reader's memberships), one DB
+query (whether the referenced skills exist and are visible; the reader's
+memberships are one more). A reference the sandbox could not answer for counts as
+unknown — no warning. If the sandbox is too old
 (no `/recipes/index`) or unreachable, the variable becomes one line
 (`(レシピの一覧を取れない: sandbox が古い …)` / `(… sandbox が応答しない)`), not an
 empty list. Expansion is synchronous, so the async entry points fetch the list
@@ -3019,7 +3057,20 @@ or earlier in the same request — returns
 A **broken** recipe (the light check above) is an ERROR, with no body and no
 `on_load`: `レシピ <folder> は壊れている: <reasons>` with the next step
 `edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)。`. This is the same
-wording as the list.
+wording as the list. **Warnings** do not stop it: the body is returned, a
+recipe-level warning (`tools`) follows the body as
+`警告: <reason>。次の手: <next>。`, and an `on_load` entry that cannot be resolved
+is **not run** — it keeps its position and its call id, and its result is one
+line instead (`error_kind: outcome`):
+`警告: レシピ <folder> の読み込み時の処理の <n> 番目 (<kind>) は実行しなかった — <reason>。次の手: 参照先を戻すか、edit_recipe で on_load から外す・直す。`
+(for a reference the reader cannot see: `この利用者には使えないので、そうユーザーに伝える (直せるのはその参照先が見える人)。`;
+for a layer-rule violation: `edit_recipe で on_load から外す・直す (この置き場のレシピからは実行しない)。`).
+The `load_recipe` result says how many entries were skipped
+(`うち <n> 件は引けないので実行せず、その位置の結果に警告を入れる。`). The skipped
+entry counts as done for the chat like any other (it is not retried later in
+the same chat). A `recipe:` target that is itself broken or warned is not
+judged up front; its own `load_recipe` at that position returns its ERROR or
+warnings.
 The frontmatter's `on_load` is then processed like a skill's (§6.4):
 - **Order.** Entries run in the order written, depth-first: a recipe or skill
   pulled in by an entry has its own `on_load` expanded at that position.
@@ -3052,8 +3103,10 @@ takes `.py` only. The rest are arguments, split with `shlex` and each quoted.
 The command is built as
 `cd '<folder>' && bash ./<file> '<arg>' …` (`python3 ./<file> …`) and runs
 through `run_shell` (stateless — another user's code never enters the reader's
-stateful kernel). An arbitrary command line (`shell: curl … | sh`) is refused by
-the check (the attachment `curl` does not exist) and is never run. The reason is
+stateful kernel). An arbitrary command line (`shell: curl … | sh`) is never run:
+the first word is read as an attachment name (`curl` does not exist → a warning,
+the entry is skipped), and even with such a file the rest are quoted arguments
+(`bash ./curl http://x '|' sh`). Only personal recipes may have them (layer rule). The reason is
 that a hook runs in the reader's jail without the model's judgement. Keeping it
 to attached files keeps it to content that the check can inspect.
 
@@ -3073,6 +3126,13 @@ creates a recipe or rewrites one completely; the tool builds `RECIPE.md`.
 - **Check first.** Before writing, the **whole resulting folder** (attachments
   included) goes through the full check below; any stop finding means
   nothing is written.
+- **Source keys.** With `from_path`, a source whose frontmatter has an unknown
+  key is refused (`写し元 … の frontmatter が壊れている`) instead of dropping the
+  key in the rebuilt frontmatter.
+- **Warnings are written.** A layer-rule violation, or a reference that is gone or
+  invisible to the writer, does not stop the write; the reply carries the same warnings
+  (`警告: <reason> (読み込み時はこの要素を実行しない)。次の手: …`) and the last line
+  asks to relay them.
 - **Result.** It says where the recipe went, the title, the author (shared
   layers), where the previous version went and how to restore it, and a last
   `返答への指示:` line.
@@ -3091,16 +3151,15 @@ creates a recipe or rewrites one completely; the tool builds `RECIPE.md`.
 **The full check** (before `save_recipe` / `edit_recipe` write, in every layer,
 the personal one included; and in `nucllei recipe-check`). Stop findings (the
 reply is `書く前の検査で止めた (何も書いていない):` + the list, and the next
-step lists the fixes):
+step lists the fixes) are of two kinds. **The frontmatter rule** is exactly the
+"broken" check above (`frontmatter_problems`; `tool_ids` is an unknown key now,
+with `tools` as the close spelling). **The write rules** (`check_folder`):
 - **Shape.** `RECIPE.md` directly in the folder, a `RECIPE.md` in a subfolder,
   symlinks, and anything that is not a regular file.
-- **Frontmatter.** Closed, YAML, a mapping, required keys present.
-- **`updated`.** `YYYY-MM-DD`, not in the future. The lint also checks that it
-  is not older than the file's mtime.
-- **`tool_ids`.** Not used; `tools` replaces it.
-- **`tools`.** Function names only, and each must be called in the body.
-- **`on_load`.** The entries' shape, and that the `shell` / `python`
-  attachments exist.
+- **`updated`.** Not in the future. The lint also checks that it is not older
+  than the file's mtime.
+- **`tools`.** Each must be called in the body.
+
 - **Patient data.** Read after NFKC: 9–10 digit numbers, labelled numbers
   (「患者番号」「ID」`pid` … with 5+ digits), names with an honorific (with a
   stop list), and provenance-memo lines (`RECIPE_MEMO_KEYS`). Values are
@@ -3110,6 +3169,10 @@ step lists the fixes):
 - **Shared layers only.** Functions in `RECIPE_RESTRICTED_TOOLS` outside their
   layer, and paths the reader cannot see (`/workspace|~|$HOME` +
   `recipes|imports|exports|trash|memory`, and a relative `recipes/`).
+
+Not stop findings: the layer rule and missing references (the tools reply with
+a warning; the lint prints a `note` — it has no reader, so visibility is not
+judged, and `/ext` references are checked against the host directory).
 
 Binary attachments that cannot be inspected are listed as `※ … バイナリなので中身を検査していない` lines.
 

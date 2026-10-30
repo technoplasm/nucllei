@@ -1,13 +1,15 @@
 """見えるレシピの一覧 `{{USER_RECIPES}}` と、レシピの「壊れている」の判定の I/O (2026-10-30)。
 
-判定そのものは `utils/recipes.py` (`assess_recipe`)。ここは sandbox と DB に問い合わせて材料を集める:
+判定そのものは `utils/recipes.py` (壊れている = `assess_recipe`、警告 = `reference_warnings`)。
+ここは sandbox と DB に問い合わせて材料を集める:
 
 - sandbox `/recipes/index` 1 回 — 各層の `recipes/<名前>/` と RECIPE.md の先頭・フォルダ直下の種類
 - sandbox `/files/stat_many` 1 回 — 全レシピの on_load の参照先 (`read:` `recipe:`) の有無
-- DB 1 回 — 全レシピの on_load の `skill:` がこの利用者に見えるか
+- DB 1 回 — 全レシピの on_load の `skill:` が有るか・この利用者に見えるか
 
-一覧と `load_recipe` は同じ `assess_recipe` を通る (片方だけ直って片方が壊れている、を作らない)。
-「壊れている」は保存しない — 毎回その場で判定するので、参照先のファイルを戻せばレシピ側は何もしなくても直る。
+一覧と `load_recipe` は同じ判定を通る (片方だけ直って片方が壊れている、を作らない)。
+「壊れている」は frontmatter の不正だけで、層の規則の違反・参照先が無い・見えないは「警告」(読み込めて、通らない要素だけ
+実行しない — ken 2026-10-30)。どちらも保存しない — 毎回その場で判定するので、参照先を戻せば警告は消える。
 
 層は個人 → 所属グループ (名前順) → 全体。管理者でも所属している分だけ ({{USER_GROUPS}} と同じ規則 —
 `user_group_names` のうち今のグループ名の規則を通るもの)。一覧は毎リクエスト走るので、問い合わせは
@@ -27,6 +29,7 @@ from nucllei.utils.recipes import (
     RECIPE_MD,
     WORKSPACE,
     RecipeRefs,
+    RefWarnings,
     assess_recipe,
     broken_line,
     decode_text,
@@ -35,6 +38,8 @@ from nucllei.utils.recipes import (
     name_problem,
     read_frontmatter,
     recipe_refs,
+    reference_warnings,
+    warning_line,
 )
 
 log = logging.getLogger(__name__)
@@ -52,34 +57,42 @@ def _uid_role(user) -> tuple[Optional[str], Optional[str]]:
     return getattr(user, "id", None) or None, getattr(user, "role", None)
 
 
-def member_places(user) -> list[str]:
-    """一覧に出す層の jail のパス (個人 → 所属グループ → 全体)。"""
+def member_groups(user) -> list[str]:
+    """読む人の所属グループ (名前順)。{{USER_GROUPS}} / NUCLLEI_USER_GROUPS と同じく管理者でも所属分だけ、
+    今のグループ名の規則を通るもの。"""
     from nucllei.utils.ext_acl import is_group_dir_name
     from nucllei.utils.task import user_group_names
 
     uid, _ = _uid_role(user)
-    groups = sorted(
+    return sorted(
         {g for g in user_group_names(uid) if is_group_dir_name(g)},
         key=lambda g: (g.casefold(), g),
     )
+
+
+def member_places(user, groups=None) -> list[str]:
+    """一覧に出す層の jail のパス (個人 → 所属グループ → 全体)。"""
+    if groups is None:
+        groups = member_groups(user)
     return [WORKSPACE] + [f"{GROUPS}/{g}" for g in groups] + [PUBLIC]
 
 
-def visible_skill_ids(user, ids) -> set:
-    """`ids` のうちこの利用者に見える skill (DB 1 回)。"""
+def seen_skill_ids(user, ids) -> tuple[set, set]:
+    """`ids` のうち (有る skill, この利用者に見える skill)。DB 1 回。"""
     from nucllei.models.skills import Skills
     from nucllei.utils.skills import is_skill_visible
 
     if not ids:
-        return set()
-    out = set()
+        return set(), set()
+    existing, visible = set(), set()
     for skill in Skills.get_skills_by_ids(sorted(ids)):
+        existing.add(skill.id)
         try:
             if is_skill_visible(skill, _as_user(user)):
-                out.add(skill.id)
+                visible.add(skill.id)
         except Exception:
             continue
-    return out
+    return existing, visible
 
 
 class _U:
@@ -147,7 +160,8 @@ async def user_recipes_text(user) -> str:
     if not uid:
         return ""
     started = time.perf_counter()
-    places = member_places(user)
+    groups = member_groups(user)
+    places = member_places(user, groups)
     try:
         res = await sandbox_post(
             "/recipes/index",
@@ -187,21 +201,27 @@ async def user_recipes_text(user) -> str:
                 item.get("entries") if isinstance(item.get("entries"), dict) else None
             )
             found.append((folder, md, entries))
-            recipe_refs((md or {}).get("text"), folder, refs)
+            recipe_refs((md or {}).get("text"), folder, refs, groups)
 
-    # stat が取れなかった参照先はキーが無い = 「分からない」で、壊れているとは言わない
-    # (sandbox の一時的な失敗でレシピを壊さない — assess_recipe)
+    # stat が取れなかった参照先はキーが無い = 「分からない」で、警告しない
+    # (sandbox の一時的な失敗で警告を出さない — reference_warnings)
     path_types = await stat_paths(user, refs.paths) if refs.paths else {}
-    visible = visible_skill_ids(user, refs.skills)
+    skills = seen_skill_ids(user, refs.skills)
 
     lines = []
     for folder, md, entries in found:
-        reasons = assess_recipe(folder, md, entries, path_types, visible)
+        reasons = assess_recipe(folder, md)
         if reasons:
             lines.append(f"- {folder} — {broken_line(reasons)}")
             continue
         fm, _ = read_frontmatter(md["text"])
-        lines.append(index_line(folder, fm.get("description")))
+        line = index_line(folder, fm.get("description"))
+        warns = reference_warnings(
+            folder, md["text"], entries, path_types, member_groups=groups, skills=skills
+        )
+        if warns:
+            line += " " + warning_line(warns.reasons())
+        lines.append(line)
     took = time.perf_counter() - started
     log.debug(f"[recipes] index for {uid}: {len(lines)} recipes in {took:.3f}s")
     return "\n".join(lines)
@@ -209,9 +229,9 @@ async def user_recipes_text(user) -> str:
 
 async def assess_loaded_recipe(
     user, folder: str, files: dict, skipped: dict
-) -> list[str]:
-    """load_recipe の「壊れている」の判定 (一覧と同じ `assess_recipe`)。`files` / `skipped` は
-    `/recipes/folder` の中身。"""
+) -> tuple[list[str], RefWarnings]:
+    """load_recipe の判定 (一覧と同じ `assess_recipe` / `reference_warnings`)。(壊れている理由, 警告)。
+    `files` / `skipped` は `/recipes/folder` の中身。"""
     md_bytes = files.get(RECIPE_MD)
     if md_bytes is None:
         md = (
@@ -222,12 +242,25 @@ async def assess_loaded_recipe(
     else:
         r = decode_text(md_bytes)
         md = {"type": "file", "text": None if r is None else r[0]}
+    broken = assess_recipe(folder, md)
+    if broken:
+        return broken, RefWarnings()
     entries = {rel: "file" for rel in files if "/" not in rel}
     for rel, why in skipped.items():
         if "/" not in rel:
             entries[rel] = "symlink" if why == "symlink" else "other"
+    return [], await reference_warnings_for(user, folder, md["text"], entries)
+
+
+async def reference_warnings_for(
+    user, folder: str, md_text: str, entries: Optional[dict]
+) -> RefWarnings:
+    """読む人 `user` から見た、1 つのレシピの警告 (sandbox 1 回 + DB 2 回 — load_recipe・save / edit)。"""
+    groups = member_groups(user)
     refs = RecipeRefs()
-    recipe_refs((md or {}).get("text"), folder, refs)
+    recipe_refs(md_text, folder, refs, groups)
     path_types = await stat_paths(user, refs.paths) if refs.paths else {}
-    visible = visible_skill_ids(user, refs.skills)
-    return assess_recipe(folder, md, entries, path_types, visible)
+    skills = seen_skill_ids(user, refs.skills)
+    return reference_warnings(
+        folder, md_text, entries, path_types, member_groups=groups, skills=skills
+    )

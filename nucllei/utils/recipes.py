@@ -26,6 +26,7 @@ import しない (CLI がサーバの設定無しで動くように)。配備層
 from __future__ import annotations
 
 import datetime as dt
+import difflib
 import io
 import json
 import logging
@@ -51,6 +52,8 @@ RECIPE_MD = "RECIPE.md"
 TRASH = "trash"
 
 REQUIRED_KEYS = ("title", "description", "author", "updated")
+# frontmatter に書けるキー。これ以外は壊れている (`onload:` の綴り違いを黙って無視しない — ken 2026-10-30)
+KNOWN_KEYS = REQUIRED_KEYS + ("tools", "on_load")
 NAME_MAX_BYTES = 200
 # 一覧の description の上限 (1 行に畳んでから)
 INDEX_DESCRIPTION_CHARS = 120
@@ -731,6 +734,122 @@ def normalize_skill_on_load_shorthand(entry):
 
 
 # ---------------------------------------------------------------------------
+# on_load の参照の層の規則 (llens 依頼・ken 2026-10-30)
+# ---------------------------------------------------------------------------
+#
+# 参照は「狭い層 → 広い層」の向きだけ。共有のレシピの on_load で、読む人の /workspace (記憶・
+# EMR の書き出し) を読ませる注入を塞ぐ:
+#
+#   レシピの層   skill:  recipe:                    read:                                   shell: / python:
+#   個人         可      個人・所属グループ・全体   どこでも (見えるもの)                   可 (自分の付属)
+#   グループ g   可      g と全体だけ               g・全体・自分のフォルダ・全員に ro の /ext  不可
+#   全体         可      全体だけ                   全体・自分のフォルダ・全員に ro の /ext    不可
+#
+# 違反は層とパスだけで決まる (読む人によらない) が、frontmatter としては正しいので「壊れている」に
+# せず**警告** (ken 2026-10-30 の最終形): その要素を実行しないことで注入を塞ぐ (`layer_warnings`)。
+# 違反した参照は stat もしない (`recipe_refs`)。
+
+# グループ・全体の層の付属の実行の不可の理由 (警告の文で同じ文面)
+SHARED_NO_ATTACHMENT = (
+    "共有の層では付属の実行は不可。使うなら個人のレシピから recipe: で読む"
+)
+
+
+def _under(path: str, base: str) -> bool:
+    return path == base or path.startswith(base + "/")
+
+
+def _group_of(path: str) -> Optional[str]:
+    """`/ext/groups/<g>[/…]` の `<g>` (それ以外は None)。"""
+    if not path.startswith(GROUPS + "/"):
+        return None
+    g = path[len(GROUPS) + 1 :].split("/", 1)[0]
+    return g or None
+
+
+def _ro_ext(path: str) -> bool:
+    """全員に read-only で見える /ext の置き場 (`/ext/<名前>/…`、groups・public 以外 = doc 等)。"""
+    if not path.startswith(EXT + "/"):
+        return False
+    name = path[len(EXT) + 1 :].split("/", 1)[0]
+    return bool(name) and name not in ("groups", "public") and not bad_segment(name)
+
+
+def layer_of_folder(folder: str) -> Optional[Layer]:
+    """レシピのフォルダ (`<層>/recipes/<名前>`) の層 (名前の規則は見ない)。"""
+    parent = folder.rstrip("/").rpartition("/")[0]
+    if not parent.endswith("/" + RECIPES):
+        return None
+    return layer_of_place(parent[: -len(RECIPES) - 1])
+
+
+def _recipe_layer(item: OnLoadItem) -> Optional[Layer]:
+    try:
+        return parse_recipe_path(item.args["path"]).layer
+    except (RecipePathError, KeyError):
+        return None
+
+
+def layer_violation(
+    layer: Optional[Layer], folder: str, item: OnLoadItem
+) -> Optional[str]:
+    """on_load の要素 `item` が、層 `layer` のレシピ (`folder`) の規則に反する理由 (反しなければ None)。"""
+    if layer is None or not layer.shared:
+        return None
+    who = f"{layer.label}のレシピ"
+    if item.kind in ("shell", "python"):
+        return f"{who}の on_load では {item.kind} は使えない ({SHARED_NO_ATTACHMENT})"
+    if item.kind == "recipe":
+        target = _recipe_layer(item)
+        if target is not None and (target.kind == "public" or target == layer):
+            return None
+        allowed = (
+            "このグループと全体のレシピだけ"
+            if layer.kind == "group"
+            else "全体のレシピだけ"
+        )
+        return (
+            f"{who}の on_load の recipe では {item.args['path']} を読まない"
+            f" ({who}から読めるのは{allowed})"
+        )
+    if item.kind == "read":
+        p = item.ref_path or ""
+        if (
+            _under(p, folder)
+            or _under(p, PUBLIC)
+            or (layer.kind == "group" and _under(p, layer.path))
+            or _ro_ext(p)
+        ):
+            return None
+        allowed = (
+            "このグループ・全体の置き場" if layer.kind == "group" else "全体の置き場"
+        ) + "、このレシピのフォルダ、全員が読める /ext の置き場だけ"
+        return (
+            f"{who}の on_load の read では {p} を読まない ({who}が読めるのは{allowed})"
+        )
+    return None
+
+
+def _ref_group(item: OnLoadItem) -> Optional[str]:
+    """recipe / read の参照先のグループ (グループの置き場でなければ None)。"""
+    if item.kind == "recipe":
+        target = _recipe_layer(item)
+        return target.group if target is not None and target.kind == "group" else None
+    if item.kind == "read":
+        return _group_of(item.ref_path or "")
+    return None
+
+
+def _reader_groups(layer: Optional[Layer], member_groups) -> set:
+    """読む人が参照してよいグループ = 所属 + そのレシピ自身のグループ (そのレシピを開けている
+    = 管理者が所属していないグループのレシピを load_recipe した、は今までどおり通す)。"""
+    out = set(member_groups)
+    if layer is not None and layer.kind == "group":
+        out.add(layer.group)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 軽い検査 (一覧と load_recipe — 「壊れている」の判定。保存しない、毎回その場で)
 # ---------------------------------------------------------------------------
 
@@ -743,38 +862,41 @@ class RecipeRefs:
     skills: set = field(default_factory=set)  # 可視を DB で見る skill id
 
 
-def recipe_refs(md_text: Optional[str], folder: str, refs: RecipeRefs) -> None:
-    """RECIPE.md の on_load の参照先を `refs` に足す (読めなければ何もしない)。"""
+def recipe_refs(
+    md_text: Optional[str], folder: str, refs: RecipeRefs, member_groups=None
+) -> None:
+    """RECIPE.md の on_load の参照先を `refs` に足す (読めなければ何もしない)。層の規則に反する参照と、
+    読む人の所属していないグループの参照 (`member_groups` を渡したとき) は調べない (どちらも
+    中身を見ずに決まる — 共有のレシピのために読む人の /workspace を stat しない)。"""
     if md_text is None:
         return
     fm, problem = read_frontmatter(md_text)
     if fm is None:
         return
+    layer = layer_of_folder(folder)
+    allowed = None if member_groups is None else _reader_groups(layer, member_groups)
     items, _ = parse_recipe_on_load(fm.data.get("on_load"), folder)
     for item in items:
+        if layer_violation(layer, folder, item):
+            continue
+        g = _ref_group(item)
+        if allowed is not None and g is not None and g not in allowed:
+            continue
         if item.ref_path:
             refs.paths.add(item.ref_path)
         if item.skill_id:
             refs.skills.add(item.skill_id)
 
 
-def assess_recipe(
-    folder: str,
-    md: Optional[dict],
-    entries: Optional[dict],
-    path_types: dict,
-    visible_skills: set,
-) -> list[str]:
-    """レシピが壊れている理由 (壊れていなければ [])。一覧と load_recipe が同じこれを通る。
+def assess_recipe(folder: str, md: Optional[dict]) -> list[str]:
+    """レシピが壊れている理由 (壊れていなければ [])。一覧・load_recipe が同じこれを通る。
 
-    - `md`: `{"type": "file"|"symlink"|…, "text": str|None}` (RECIPE.md が無ければ None)
-    - `entries`: フォルダ直下の {名前: 種類} (shell / python の付属の有無。分からなければ None)
-    - `path_types`: 参照先の絶対パス -> 種類 ("file" / "dir" / "symlink" / None = 無い)。
-      キーが無いパスは「分からない」(sandbox に聞けなかった) で、壊れているとは言わない
-    - `visible_skills`: この利用者に見える skill id
+    「壊れている」は**frontmatter そのものの不正だけ** (と RECIPE.md が無い・普通のファイルでない) —
+    `frontmatter_problems`。中の値が環境・権限・層の規則で通らないのは `reference_warnings` (警告。
+    止めない — ken 2026-10-30「依存を消しちゃうのはよくあるので、warn で実行はできるが警告がモデルに
+    入る」)。
 
-    見るのは置き場の形と frontmatter と on_load の参照先だけ (患者データ・層の判定は書く前の
-    `check_folder` — 一覧は毎リクエスト走るので軽くする)。"""
+    - `md`: `{"type": "file"|"symlink"|…, "text": str|None}` (RECIPE.md が無ければ None)"""
     if md is None:
         return ["RECIPE.md が無い"]
     if md.get("type") != "file":
@@ -782,45 +904,197 @@ def assess_recipe(
     text = md.get("text")
     if text is None:
         return ["RECIPE.md がテキストでない"]
+    return frontmatter_problems(text, folder)
+
+
+def unknown_key_problem(k) -> str:
+    near = difflib.get_close_matches(str(k), KNOWN_KEYS, n=1, cutoff=0.6)
+    return (
+        f"frontmatter の知らないキー: {k} (使えるのは "
+        + "・".join(KNOWN_KEYS)
+        + ")"
+        + (f"。{near[0]} の綴り違いでは" if near else "")
+    )
+
+
+def frontmatter_problems(text: str, folder: str) -> list[str]:
+    """frontmatter の不正 (スキーマの誤り) — 閉じていない・YAML でない・知らないキー・必須キーが無い・
+    型が違う (title / description / author は 1 行の文字列、updated は YYYY-MM-DD、tools は関数名の
+    並び)・on_load の形が記法に合わない。ここに当たるものが「壊れている」で、save / edit の
+    「frontmatter の規則」もこれだけ (書き込みの規則は `check_folder`)。"""
     fm, problem = read_frontmatter(text)
     if fm is None:
         return [problem]
-    reasons = []
+    out: list[str] = [unknown_key_problem(k) for k in fm.data if k not in KNOWN_KEYS]
     missing = [k for k in REQUIRED_KEYS if not fm.get(k)]
     if missing:
-        reasons.append("frontmatter の必須キーが無い・空: " + ", ".join(missing))
-    items, errors = parse_recipe_on_load(fm.data.get("on_load"), folder)
-    reasons += errors
-    for item in items:
-        if item.kind == "skill":
-            if item.skill_id not in visible_skills:
-                reasons.append(
-                    f"on_load の skill {item.skill_id} が使えない (見えないか、無い)"
+        out.append("frontmatter の必須キーが無い・空: " + ", ".join(missing))
+    for k in ("title", "description", "author"):
+        if k in fm.data and fm.data[k] is not None and _scalar(fm.data[k]) is None:
+            out.append(f"{k} は 1 行の文字列で書く")
+    upd = fm.get("updated")
+    if upd and _updated_date(upd) is None:
+        out.append(f"updated が YYYY-MM-DD でない: {upd!r}")
+    if "tools" in fm.data:
+        names = _tools_list(fm.data["tools"])
+        if names is None or not all(
+            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x) for x in names
+        ):
+            out.append("tools は関数名のカンマ区切り (例 `grep_doc, read_doc`)")
+    _, errors = parse_recipe_on_load(fm.data.get("on_load"), folder)
+    return out + errors
+
+
+def _updated_date(upd: str) -> Optional[dt.date]:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", upd or ""):
+        return None
+    try:
+        return dt.date.fromisoformat(upd)
+    except ValueError:
+        return None
+
+
+# 警告の次の手 (load_recipe の後続の結果・一覧の印・save / edit の返答で同じ文面)
+WARN_NEXT_MISSING = "参照先を戻すか、edit_recipe で on_load から外す・直す"
+WARN_NEXT_LAYER = (
+    "edit_recipe で on_load から外す・直す (この置き場のレシピからは実行しない)"
+)
+WARN_NEXT_HIDDEN = (
+    "この利用者には使えないので、そうユーザーに伝える (直せるのはその参照先が見える人)"
+)
+
+
+@dataclass
+class RefWarnings:
+    """環境の変化で引けない参照 (警告)。`items` は on_load の要素の番号 -> (理由, 次の手)、
+    `recipe` はレシピ全体の警告 (frontmatter の tools) の (理由, 次の手)。"""
+
+    items: dict = field(default_factory=dict)
+    recipe: list = field(default_factory=list)
+
+    def reasons(self) -> list[str]:
+        return [r for r, _ in self.items.values()] + [r for r, _ in self.recipe]
+
+    def __bool__(self) -> bool:
+        return bool(self.items or self.recipe)
+
+
+def layer_warnings(folder: str, md_text: Optional[str]) -> dict:
+    """on_load の要素の番号 -> (層の規則に反する理由, 次の手)。読む人によらない (純関数)。
+    frontmatter が読めなければ {} (壊れている側 — `assess_recipe`)。"""
+    if md_text is None:
+        return {}
+    fm, _ = read_frontmatter(md_text)
+    if fm is None:
+        return {}
+    layer = layer_of_folder(folder)
+    items, _ = parse_recipe_on_load(fm.data.get("on_load"), folder)
+    out = {}
+    for n, item in enumerate(items):
+        violation = layer_violation(layer, folder, item)
+        if violation:
+            out[n] = (violation, WARN_NEXT_LAYER)
+    return out
+
+
+def reference_warnings(
+    folder: str,
+    md_text: Optional[str],
+    entries: Optional[dict],
+    path_types: dict,
+    *,
+    member_groups=None,
+    skills: Optional[tuple[set, set]] = None,
+) -> RefWarnings:
+    """on_load の参照先と frontmatter の tools のうち、今この利用者には引けないもの (警告)。
+
+    - `entries`: フォルダ直下の {名前: 種類} (shell / python の付属。分からなければ None)
+    - `path_types`: read / recipe の参照先 -> 種類 (None = 無い)。キーが無いパスは「分からない」で、
+      警告しない (sandbox に聞けなかった — その要素は実行して、結果が自分で言う)
+    - `member_groups`: 読む人の所属 (管理者でも所属で見る = {{USER_GROUPS}} と同じ。そのレシピ自身の
+      グループは除く)。None は判定しない (ホストの lint — 読む人が居ない)
+    - `skills`: (有る skill id, この利用者に見える skill id)。None は判定しない
+
+    層の規則に反する要素は `layer_warnings` の警告 (参照先は見ない)。壊れているレシピ
+    (`assess_recipe`) には使わない。"""
+    out = RefWarnings()
+    if md_text is None:
+        return out
+    fm, _ = read_frontmatter(md_text)
+    if fm is None:
+        return out
+    layer = layer_of_folder(folder)
+    allowed = None if member_groups is None else _reader_groups(layer, member_groups)
+    out.items.update(layer_warnings(folder, md_text))
+    items, _ = parse_recipe_on_load(fm.data.get("on_load"), folder)
+    for n, item in enumerate(items):
+        if n in out.items:
+            continue
+        g = _ref_group(item)
+        what = (
+            f"recipe {item.args['path']}"
+            if item.kind == "recipe"
+            else f"read {item.ref_path}"
+        )
+        if allowed is not None and g is not None and g not in allowed:
+            out.items[n] = (
+                f"on_load の {what} は所属していないグループ「{g}」のもの",
+                WARN_NEXT_HIDDEN,
+            )
+        elif item.kind == "skill":
+            if skills is None:
+                continue
+            existing, visible = skills
+            if item.skill_id not in existing:
+                out.items[n] = (
+                    f"on_load の skill {item.skill_id} が無い",
+                    WARN_NEXT_MISSING,
                 )
-        elif item.kind == "recipe":
-            if item.ref_path in path_types and path_types[item.ref_path] != "file":
-                reasons.append(f"on_load の recipe {item.args['path']} が無い")
-        elif item.kind == "read":
+            elif item.skill_id not in visible:
+                out.items[n] = (
+                    f"on_load の skill {item.skill_id} がこの利用者に見えない",
+                    WARN_NEXT_HIDDEN,
+                )
+        elif item.kind in ("recipe", "read"):
             if item.ref_path not in path_types:
                 continue
             kind = path_types[item.ref_path]
-            if kind is None:
-                reasons.append(f"read の {item.ref_path} が無い")
-            elif kind != "file":
-                reasons.append(
-                    f"read の {item.ref_path} が普通のファイルでない ({kind})"
-                )
-        else:
-            kind = (
-                (entries or {}).get(item.attachment) if entries is not None else "file"
+            if kind == "file":
+                continue
+            out.items[n] = (
+                (
+                    f"on_load の {what} が無い"
+                    if kind is None
+                    else f"on_load の {what} が普通のファイルでない ({kind})"
+                ),
+                WARN_NEXT_MISSING,
             )
-            if kind is None:
-                reasons.append(f"{item.kind} の付属 {item.attachment} がフォルダに無い")
-            elif kind != "file":
-                reasons.append(
-                    f"{item.kind} の付属 {item.attachment} が普通のファイルでない ({kind})"
+        elif entries is not None:
+            kind = entries.get(item.attachment)
+            if kind == "file":
+                continue
+            out.items[n] = (
+                (
+                    f"on_load の {item.kind} の付属 {item.attachment} がフォルダに無い"
+                    if kind is None
+                    else f"on_load の {item.kind} の付属 {item.attachment} が普通のファイルでない ({kind})"
+                ),
+                WARN_NEXT_MISSING,
+            )
+    if member_groups is not None and "tools" in fm.data:
+        table = restricted_tools()
+        mine = set(member_groups)
+        for fn in _tools_list(fm.data["tools"]) or []:
+            group = table.get(fn)
+            # 表で null (= 個人だけ) の関数は誰が使えるか分からないので判定しない
+            if group and group not in mine:
+                out.recipe.append(
+                    (
+                        f"tools の {fn} はグループ「{group}」の人だけが使える",
+                        f"{WARN_NEXT_HIDDEN}。{fn} を使う手順は飛ばす",
+                    )
                 )
-    return reasons
+    return out
 
 
 def broken_line(reasons: list[str]) -> str:
@@ -829,6 +1103,14 @@ def broken_line(reasons: list[str]) -> str:
         f" ほか {len(reasons) - 2} 件" if len(reasons) > 2 else ""
     )
     return f"(壊れている: {shown}。{BROKEN_NEXT})"
+
+
+def warning_line(reasons: list[str]) -> str:
+    """一覧の印の中身 (`(警告: …)`)。理由は 2 つまで。壊れているとは言い分ける (読み込める)。"""
+    shown = "、".join(reasons[:2]) + (
+        f" ほか {len(reasons) - 2} 件" if len(reasons) > 2 else ""
+    )
+    return f"(警告: {shown}。読み込めるが、その要素は実行しない)"
 
 
 def index_line(folder: str, description: str) -> str:
@@ -882,7 +1164,12 @@ FIX_LINKS = "symlink・普通のファイルでないもの・入れ子の RECIP
 
 @dataclass
 class CheckResult:
-    stops: list = field(default_factory=list)  # 止める所見
+    stops: list = field(
+        default_factory=list
+    )  # 止める所見 (frontmatter の不正 + 書き込みの規則)
+    schema: list = field(
+        default_factory=list
+    )  # そのうち frontmatter の不正 (= 壊れている)
     notes: list = field(default_factory=list)  # 注意 (止めない: 具体的な年月日)
     unchecked: list = field(default_factory=list)  # 中身を検査できなかった (バイナリ)
     fixes: list = field(default_factory=list)  # 直し方 (「次の手」)
@@ -901,73 +1188,25 @@ def _tools_list(v) -> Optional[list[str]]:
     return [x.strip() for x in s.split(",")] if s.strip() else []
 
 
-def meta_findings(
-    text: str, today: dt.date, folder: str, entries: Optional[dict] = None
-) -> list[tuple[str, str]]:
-    """RECIPE.md の frontmatter の崩れ。[(種別 meta|on_load, 文)]。"""
-    fm, problem = read_frontmatter(text)
+def frontmatter_write_rules(text: str, today: dt.date) -> list[str]:
+    """frontmatter の書き込みの規則 (スキーマとしては正しいが、書く前に止めるもの): updated が未来、
+    tools にあるのに本文が呼んでいない。"""
+    fm, _ = read_frontmatter(text)
     if fm is None:
-        return [("meta", problem)]
-    out: list[tuple[str, str]] = []
-    missing = [k for k in REQUIRED_KEYS if not fm.get(k)]
-    if missing:
-        out.append(("meta", "必須キーが無い・空: " + ", ".join(missing)))
-    for k in ("title", "description", "author"):
-        if k in fm.data and _scalar(fm.data[k]) is None:
-            out.append(("meta", f"{k} は 1 行の文字列で書く"))
-    upd = fm.get("updated")
-    if upd:
-        try:
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", upd):
-                raise ValueError
-            d = dt.date.fromisoformat(upd)
-        except ValueError:
-            out.append(("meta", f"updated が YYYY-MM-DD でない: {upd!r}"))
-        else:
-            if d > today:
-                out.append(("meta", f"updated が未来: {upd}"))
-    if "tool_ids" in fm.data:
-        out.append(
-            ("meta", "tool_ids は使わない。tools に変える (関数名のカンマ区切り)")
-        )
-    if "tools" in fm.data:
-        names = _tools_list(fm.data["tools"])
-        if names is None or not all(
-            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x) for x in names
-        ):
+        return []
+    out = []
+    d = _updated_date(fm.get("updated"))
+    if d is not None and d > today:
+        out.append(f"updated が未来: {fm.get('updated')}")
+    names = _tools_list(fm.data["tools"]) if "tools" in fm.data else None
+    if names and all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x) for x in names):
+        unused = [x for x in names if not fn_pattern(x).search(fm.body)]
+        if unused:
             out.append(
-                ("meta", "tools は関数名のカンマ区切り (例 `grep_doc, read_doc`)")
+                "tools にあるのに本文が呼んでいない: "
+                + ", ".join(unused)
+                + " (本文で呼んだ関数だけを書く)"
             )
-        else:
-            unused = [x for x in names if not fn_pattern(x).search(fm.body)]
-            if unused:
-                out.append(
-                    (
-                        "meta",
-                        "tools にあるのに本文が呼んでいない: "
-                        + ", ".join(unused)
-                        + " (本文で呼んだ関数だけを書く)",
-                    )
-                )
-    items, errors = parse_recipe_on_load(fm.data.get("on_load"), folder)
-    out += [("on_load", e) for e in errors]
-    for item in items:
-        if item.attachment and entries is not None:
-            kind = entries.get(item.attachment)
-            if kind is None:
-                out.append(
-                    (
-                        "on_load",
-                        f"{item.kind} の付属 {item.attachment} がフォルダに無い",
-                    )
-                )
-            elif kind != "file":
-                out.append(
-                    (
-                        "on_load",
-                        f"{item.kind} の付属 {item.attachment} が普通のファイルでない",
-                    )
-                )
     return out
 
 
@@ -1023,15 +1262,13 @@ def check_folder(
 ) -> CheckResult:
     """書いた後のフォルダ全体の検査 (save_recipe / edit_recipe が書く前に、lint が置いてあるものに)。
 
-    見るもの: RECIPE.md が直下に 1 つ (入れ子の RECIPE.md は不可)、frontmatter (閉じている・YAML・
-    必須キー・updated・tools)、on_load の形と付属の有無、患者データらしきもの (番号・氏名・由来メモ。
-    年月日は注意で止めない)、symlink・普通のファイルでないもの、共有の層なら使える人が限られる関数と
-    行き先の人に見えないパス。`md_mtime` (lint) を渡すと `updated` が最後に書いた日より前かも見る。"""
+    止めるのは 2 種類: **frontmatter の規則** (`frontmatter_problems` — 壊れているのと同じ判定) と
+    **書き込みの規則** (RECIPE.md が直下に 1 つ・入れ子の RECIPE.md は不可、updated が未来・tools の
+    使い残し、患者データらしきもの (番号・氏名・由来メモ。年月日は注意で止めない)、symlink・普通の
+    ファイルでないもの、共有の層なら使える人が限られる関数と行き先の人に見えないパス)。
+    on_load の参照の層の規則・参照先の有無は止めない (警告 — `reference_warnings`)。
+    `md_mtime` (lint) を渡すと `updated` が最後に書いた日より前かも見る。"""
     res = CheckResult()
-    entries = {rel: "file" for rel in files if "/" not in rel}
-    for rel, why in (skipped or {}).items():
-        if "/" not in rel:
-            entries[rel] = why
     md = files.get(RECIPE_MD)
     if md is None:
         res.stops.append("RECIPE.md が無い")
@@ -1040,19 +1277,17 @@ def check_folder(
         if r is None:
             res.stops.append("RECIPE.md がテキストでない")
         else:
-            for _kind, msg in meta_findings(r[0], today, ref.folder, entries):
-                res.stops.append(f"RECIPE.md: {msg}")
+            res.schema = [
+                f"RECIPE.md: {msg}" for msg in frontmatter_problems(r[0], ref.folder)
+            ]
+            res.stops += res.schema
+            res.stops += [
+                f"RECIPE.md: {msg}" for msg in frontmatter_write_rules(r[0], today)
+            ]
             if md_mtime is not None:
                 fm, _ = read_frontmatter(r[0])
                 upd = fm.get("updated") if fm else ""
-                try:
-                    d = (
-                        dt.date.fromisoformat(upd)
-                        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", upd)
-                        else None
-                    )
-                except ValueError:
-                    d = None
+                d = _updated_date(upd)
                 if d is not None and md_mtime > d and d != today:
                     res.stops.append(
                         f"RECIPE.md: updated ({upd}) が最後に書いた日 ({md_mtime}) より前"
@@ -1091,13 +1326,10 @@ def check_folder(
     ps = res.stops
     if any("患者データ" in p or "由来メモ" in p for p in ps):
         res.fixes.append(FIX_PATIENT)
-    if any(
-        p.startswith("RECIPE.md: on_load") or "on_load の" in p or "の付属" in p
-        for p in ps
-    ):
+    if any(p.startswith("RECIPE.md: on_load") for p in ps):
         res.fixes.append(FIX_ON_LOAD)
     if any(
-        p.startswith("RECIPE.md: ") and "on_load" not in p and "付属" not in p
+        p.startswith("RECIPE.md: ") and not p.startswith("RECIPE.md: on_load")
         for p in ps
     ):
         res.fixes.append(FIX_META)
@@ -1188,6 +1420,17 @@ def lint_targets(path: str, ext_root: str) -> list[tuple[str, str]]:
     return out
 
 
+def _local_type(real: str) -> Optional[str]:
+    """ホストのパスの種類 (`/files/stat_many` と同じ語。symlink は辿らない)。"""
+    if os.path.islink(real):
+        return "symlink"
+    if os.path.isfile(real):
+        return "file"
+    if os.path.isdir(real):
+        return "dir"
+    return "other" if os.path.lexists(real) else None
+
+
 def _local_groups(real_groups: str) -> list[str]:
     if not os.path.isdir(real_groups):
         return []
@@ -1232,6 +1475,22 @@ def lint_folder(jail_path: str, real_path: str, today: dt.date) -> list[str]:
     )
     lines += [f"stop\t{jail_path}\t{s}" for s in res.stops]
     lines += [f"note\t{jail_path}\t{s}" for s in res.notes]
+    # 警告 (層の規則の違反・参照先が無い) は note。見えない系は読む人が居ないので見ない
+    md = files.get(RECIPE_MD)
+    text = decode_text(md)[0] if md is not None and decode_text(md) else None
+    if text is not None and not res.schema:
+        refs = RecipeRefs()
+        recipe_refs(text, jail_path, refs)
+        ext_root = real_path[: len(real_path) - len(jail_path) + len(EXT)]
+        path_types = {
+            p: _local_type(ext_root + p[len(EXT) :])
+            for p in refs.paths
+            if p.startswith(EXT + "/")
+        }
+        entries = {rel: "file" for rel in files if "/" not in rel}
+        entries.update({rel: w for rel, w in skipped.items() if "/" not in rel})
+        warns = reference_warnings(jail_path, text, entries, path_types)
+        lines += [f"note\t{jail_path}\t{r}" for r in warns.reasons()]
     lines += [
         f"unchecked\t{jail_path}\t{rel}: バイナリなので中身を検査していない"
         for rel in res.unchecked
