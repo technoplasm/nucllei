@@ -1,4 +1,4 @@
-"""見えるレシピの一覧 `{{USER_RECIPES}}` と、レシピの「壊れている」の判定の I/O (2026-10-30)。
+"""見えるレシピの一覧 (load_recipe の説明に入る) と、レシピの「壊れている」の判定の I/O (2026-10-30)。
 
 判定そのものは `utils/recipes.py` (壊れている = `assess_recipe`、警告 = `reference_warnings`)。
 ここは sandbox と DB に問い合わせて材料を集める:
@@ -12,7 +12,8 @@
 実行しない — ken 2026-10-30)。どちらも保存しない — 毎回その場で判定するので、参照先を戻せば警告は消える。
 
 層は個人 → 所属グループ (名前順) → 全体。管理者でも所属している分だけ ({{USER_GROUPS}} と同じ規則 —
-`user_group_names` のうち今のグループ名の規則を通るもの)。一覧は毎リクエスト走るので、問い合わせは
+`user_group_names` のうち今のグループ名の規則を通るもの)。一覧は能力「レシピ」が ON のリクエストごとに
+走る (builtin_tools/recipe_tools.build_recipe_tools) ので、問い合わせは
 上の 2 + 1 回に限り、sandbox が遅い・古いときは一覧を空にせず 1 行で知らせる。
 """
 
@@ -118,7 +119,7 @@ def _md_of(item: dict) -> Optional[dict]:
 
 
 async def user_recipes_text(user) -> str:
-    """{{USER_RECIPES}} の中身。0 件なら空文字列。"""
+    """見えるレシピの一覧 (1 行ずつ `- <フォルダ> — <description>` + 印)。0 件なら空文字列。"""
     from nucllei.env import SANDBOX_URL
 
     if not SANDBOX_URL:

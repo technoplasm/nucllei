@@ -99,6 +99,8 @@
 	// llens(#42): 機能「スキル」(meta.features.skills、既定 ON)。OFF でこのモデルの
 	// manifest(load_skill)と /command 発火が両方止まる。
 	let featureSkills = $state(true);
+	// 機能「レシピ」(meta.features.recipes、既定 ON)。OFF でこのモデルにレシピの tool と一覧が入らない
+	let featureRecipes = $state(true);
 
 	let accessControl = $state<any>({});
 
@@ -193,12 +195,17 @@
 		}
 
 		// 既定(ON)のときはキーを残さない(meta を汚さない)
-		if (!featureSkills) {
-			info.meta.features = { ...(info.meta.features ?? {}), skills: false };
-		} else if (info.meta.features?.skills !== undefined) {
-			delete info.meta.features.skills;
-			if (Object.keys(info.meta.features).length === 0) {
-				delete info.meta.features;
+		for (const [key, on] of [
+			['skills', featureSkills],
+			['recipes', featureRecipes]
+		] as const) {
+			if (!on) {
+				info.meta.features = { ...(info.meta.features ?? {}), [key]: false };
+			} else if (info.meta.features?.[key] !== undefined) {
+				delete info.meta.features[key];
+				if (Object.keys(info.meta.features).length === 0) {
+					delete info.meta.features;
+				}
 			}
 		}
 
@@ -308,6 +315,7 @@
 			skillIds = model?.meta?.skillIds ?? [];
 			subagentPresetIds = model?.meta?.subagentPresetIds ?? [];
 			featureSkills = (model?.meta?.features?.skills ?? true) !== false;
+			featureRecipes = (model?.meta?.features?.recipes ?? true) !== false;
 			filterIds = model?.meta?.filterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
@@ -591,7 +599,7 @@
 								</div>
 
 								<div class="my-2">
-									<Capabilities bind:capabilities bind:featureSkills />
+									<Capabilities bind:capabilities bind:featureSkills bind:featureRecipes />
 								</div>
 
 								<hr class=" border-line my-1.5" />

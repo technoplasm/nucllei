@@ -795,6 +795,8 @@ export interface ModelMeta {
 	// backend は meta.skillIds ∩ 可視 で発火 — nucllei/utils/skills.py)
 	features?: {
 		skills?: boolean;
+		// 機能「レシピ」(既定 ON — nucllei/utils/recipes.py の is_recipes_feature_enabled)
+		recipes?: boolean;
 		[key: string]: boolean | undefined;
 	};
 	skillIds?: string[];

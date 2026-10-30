@@ -168,6 +168,22 @@ builtin tools は自前で `json.dumps(..., ensure_ascii=False, indent=2)` し�
   送られる(モデルは呼ばないだけで無害、コンテキスト消費のみ)。入口別分離が必要になったら
   後から足す(合成 exchange 注入はモデル能力非依存 — この機構は他の強制注入にも流用可能)
 
+### 1b'. 機能「レシピ」チェックボックス(per-model、2026-10-30)
+
+- `meta.features.recipes`(既定 ON)。ON かつ SANDBOX_URL のある配備なら、middleware が
+  load_recipe / save_recipe / edit_recipe を合成して tools に差し込む(`build_recipe_tools`、
+  load_skill の隣)。見えるレシピの一覧は load_recipe の説明に入る(skill の manifest と同じ —
+  旧 `{{USER_RECIPES}}` は廃止)。OFF なら 3 つとも入らず sandbox にも聞かない
+- 経緯(ken 2026-10-30): 最初は builtin_sandbox の関数だった → 「スキルみたいにトグれないとおかしい」。
+  builtin_recipes として Tools 行にしてツール選択で付け外す案も出たが、「スキルみたいに」「能力として」
+  で load_skill と同じ「能力 → 合成の tool」の形に決着。ツール選択の一覧には出ない(load_skill と同じく
+  行を持たない)。toolIds 側の同名関数は合成側が勝つ(警告ログ)
+- builtin_sandbox を付けないモデルでも動く: 中に sandbox.Tools のインスタンスを持ち、_post /
+  _write_target / _write_bytes / read_file / run_shell を借りる(valve は builtin_sandbox の保存値)。
+  モデル自身が付属を動かすには run_shell が要る — load_recipe の説明に 1 行
+- 抜け道のガード(write_file / edit_file で RECIPE.md を断る)は sandbox 側に残す。次の手は「レシピの
+  tool があれば save_recipe / edit_recipe、無ければ管理者に能力を有効にしてもらう」の中立な文
+
 ### 1c. 組み込みツール = Tools テーブルの builtin 行
 
 - **定義**: `nucllei/builtin_tools/` 配下のモジュール。起動時に Tools テーブルへ

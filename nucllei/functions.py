@@ -31,7 +31,6 @@ from nucllei.utils.misc import (
     openai_chat_chunk_message_template,
     openai_chat_completion_message_template,
 )
-from nucllei.utils.task import ensure_user_recipes
 from nucllei.utils.payload import (
     apply_model_params_to_body_openai,
     apply_model_system_prompt_to_body,
@@ -290,8 +289,6 @@ async def generate_function_chat_completion(
 
         params = model_info.params.model_dump()
         form_data = apply_model_params_to_body_openai(params, form_data)
-        # {{USER_RECIPES}} は sandbox に聞く(非同期)ので先に取る(2026-10-30)
-        await ensure_user_recipes(user, params.get("system"))
         form_data = apply_model_system_prompt_to_body(
             params, form_data, metadata, user, model_info
         )

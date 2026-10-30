@@ -1,5 +1,5 @@
-"""builtin_sandbox のレシピの tool (load_recipe / save_recipe / edit_recipe) と {{USER_RECIPES}}
-(llens 依頼・ken 指示 2026-10-30「ぜんぶ nuc にやらせて」) の回帰。
+"""レシピの tool (load_recipe / save_recipe / edit_recipe) と、能力「レシピ」の合成・load_recipe の説明に
+入る一覧 (llens 依頼・ken 指示 2026-10-30「ぜんぶ nuc にやらせて」「スキルみたいに」) の回帰。
 
 sandbox は**本物のアプリ** (`sandbox/app/main.py`) を TestClient で動かし、tool の HTTP
 (`sandbox_post`) をそこへ流す — 置き場の fd 操作・symlink・ゴミ箱の名前まで通して確かめる。
@@ -88,6 +88,14 @@ def sbx(monkeypatch, tmp_path):
 
 
 def _tool():
+    """レシピの tool (能力「レシピ」で合成される方)。"""
+    from nucllei.builtin_tools.recipe_tools import RecipeTools
+
+    return RecipeTools()
+
+
+def _sb_tool():
+    """sandbox の tool (write_file / read_file 等 — 抜け道のガード)。"""
     from nucllei.builtin_tools.sandbox import Tools
 
     return Tools()
@@ -127,7 +135,7 @@ def _recipes_text(user=USER):
 
 
 # ---------------------------------------------------------------------------
-# {{USER_RECIPES}}
+# 一覧 (load_recipe の説明に入る)
 # ---------------------------------------------------------------------------
 
 
@@ -232,7 +240,7 @@ def test_index_warning_disappears_when_reference_comes_back(sbx):
         "- /ext/groups/EMR/recipes/抽出 — 月次の集計 (警告: requires の read"
         " /ext/groups/EMR/notes/検査結果.md が無い。読み込めるが、その要素は実行しない)"
     )
-    tool = _tool()
+    tool = _sb_tool()
     out = run(
         tool.write_file("/ext/groups/EMR/notes/検査結果.md", "戻した", __user__=USER)
     )
@@ -258,34 +266,106 @@ def test_index_is_two_sandbox_calls_and_fast(sbx):
     assert took < 2.0, took
 
 
-def test_prompt_template_uses_prefetched_recipes(sbx):
-    from nucllei.utils.task import (
-        RECIPES_NOT_FETCHED,
-        _user_recipes,
-        ensure_user_recipes,
-        prompt_template,
+def _model(features=None):
+    info = {"meta": {"features": features}} if features is not None else {"meta": {}}
+    return {"id": "m1", "info": info}
+
+
+def _build(model, user=USER):
+    from nucllei.builtin_tools.recipe_tools import build_recipe_tools
+
+    return asyncio.run(
+        build_recipe_tools(
+            model, user, {"__user__": user, "__metadata__": {}, "__messages__": []}
+        )
     )
 
+
+def test_capability_default_on_puts_three_tools_with_index_in_description(sbx):
+    """能力「レシピ」(meta.features.recipes) は既定 ON。3 つを合成し、load_recipe の説明の末尾に
+    見えるレシピの一覧 (印も同じ) を入れる。取得は 1 回 (sandbox 2 往復まで)。"""
     _put(sbx["ws"], "集計", _md())
+    _put(sbx["ws"], "壊れ", "---\ntitle: a\n")
+    sbx["calls"].clear()
+    tools = _build(_model())
+    assert list(tools) == ["load_recipe", "save_recipe", "edit_recipe"]
+    assert sbx["calls"] == [
+        "/recipes/index"
+    ]  # requires が無いので stat_many は飛ばない
+    desc = tools["load_recipe"]["spec"]["description"]
+    assert desc.endswith(
+        "見えるレシピ (path にそのまま渡す):\n"
+        "- /workspace/recipes/壊れ — (壊れている: frontmatter が閉じていない (2 つ目の --- の行が無い)。"
+        "edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き))\n"
+        "- /workspace/recipes/集計 — 月次の集計"
+    )
+    assert "run_shell (コード実行の tool) が要る" in desc
+    for name, entry in tools.items():
+        props = entry["spec"]["parameters"]["properties"]
+        assert not [k for k in props if k.startswith("__")], name
+        assert entry["tool_id"] == "recipes" and entry["serial"] is True
+    assert "path" in tools["load_recipe"]["spec"]["parameters"]["properties"]
+    # 説明に一覧を入れるのは load_recipe だけ
+    assert "見えるレシピ" not in tools["save_recipe"]["spec"]["description"]
 
-    async def go():
-        token = _user_recipes.set(None)
-        try:
-            tpl = "前\n{{USER_RECIPES}}\n後"
-            before = prompt_template(tpl, user_id="u1")
-            sbx["calls"].clear()
-            await ensure_user_recipes(USER, "変数なし")
-            assert sbx["calls"] == []  # 本文に無ければ sandbox に聞かない
-            await ensure_user_recipes(USER, tpl)
-            await ensure_user_recipes(USER, tpl)  # 1 リクエスト 1 回
-            assert sbx["calls"] == ["/recipes/index"]
-            return before, prompt_template(tpl, user_id="u1")
-        finally:
-            _user_recipes.reset(token)
 
-    before, after = asyncio.run(go())
-    assert before == f"前\n{RECIPES_NOT_FETCHED}\n後"
-    assert after == "前\n- /workspace/recipes/集計 — 月次の集計\n後"
+def test_capability_off_or_no_sandbox_puts_nothing_and_asks_nothing(sbx, monkeypatch):
+    import nucllei.env
+
+    _put(sbx["ws"], "集計", _md())
+    sbx["calls"].clear()
+    assert _build(_model({"recipes": False})) == {}
+    assert sbx["calls"] == []  # OFF なら sandbox に聞かない
+    assert set(_build(_model({"recipes": True, "skills": False}))) == {
+        "load_recipe",
+        "save_recipe",
+        "edit_recipe",
+    }
+    sbx["calls"].clear()
+    monkeypatch.setattr(nucllei.env, "SANDBOX_URL", "")
+    assert _build(_model()) == {}
+    assert sbx["calls"] == []
+
+
+def test_capability_description_empty_and_unreachable(sbx, monkeypatch):
+    import nucllei.builtin_tools.sandbox as sb
+    from nucllei.utils.recipe_index import RECIPES_UNREACHABLE
+
+    desc = _build(_model())["load_recipe"]["spec"]["description"]
+    assert desc.endswith("\n\n見えるレシピは無い (作るなら save_recipe)。")
+
+    async def down(path, payload, timeout_s):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(sb, "sandbox_post", down)
+    desc = _build(_model())["load_recipe"]["spec"]["description"]
+    assert desc.endswith("\n\n" + RECIPES_UNREACHABLE)
+
+
+def test_capability_tools_run_without_builtin_sandbox(sbx, shell):
+    """builtin_sandbox を付けていないモデルでも、合成した load_recipe は自分で sandbox を呼ぶ
+    (requires の read / shell が動く)。"""
+    _put(
+        sbx["ws"],
+        "集計",
+        _md(extra="requires:\n  - read: q.sql\n  - shell: prep.sh 30d\n"),
+        **{"q.sql": "select 1", "prep.sh": "echo hi"},
+    )
+    tools = _build(_model())
+    out = asyncio.run(
+        call_text(tools["load_recipe"]["callable"](path="/workspace/recipes/集計"))
+    )
+    assert "select 1" in out and "### shell prep.sh 30d の出力" in out
+    assert shell["calls"] and "prep.sh" in shell["calls"][0]
+
+
+def test_user_recipes_variable_is_gone():
+    """{{USER_RECIPES}} は廃止 (一覧は load_recipe の説明へ)。展開しない — 未知の変数のまま。"""
+    from nucllei.utils.task import prompt_template
+
+    assert prompt_template("前 {{USER_RECIPES}} 後", user_id="u1") == (
+        "前 {{USER_RECIPES}} 後"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1108,12 +1188,14 @@ def test_edit_recipe_match_rules(sbx):
 
 
 def test_write_and_edit_file_refuse_recipe_md_but_allow_attachments(sbx):
-    tool = _tool()
+    tool = _sb_tool()
     out = run(tool.write_file("/workspace/recipes/集計/RECIPE.md", "x", __user__=USER))
     assert out.startswith(
         "ERROR: /workspace/recipes/集計/RECIPE.md はレシピの本体 (RECIPE.md)"
     )
     assert "save_recipe" in out and "edit_recipe" in out
+    # レシピの能力が無効なモデルもあるので、その場合の次の手 (管理者に有効にしてもらう) も言う
+    assert "能力「レシピ」を有効にしてもらう" in out
     _put(sbx["ws"], "集計", _md())
     out = run(
         tool.edit_file("/workspace/recipes/集計/RECIPE.md", "集計", "x", __user__=USER)
@@ -1127,6 +1209,8 @@ def test_write_and_edit_file_refuse_recipe_md_but_allow_attachments(sbx):
 
 def test_read_file_adds_load_recipe_hint(sbx):
     _put(sbx["ws"], "集計", _md())
-    out = run(_tool().read_file("/workspace/recipes/集計/RECIPE.md", __user__=USER))
+    out = run(_sb_tool().read_file("/workspace/recipes/集計/RECIPE.md", __user__=USER))
     out = getattr(out, "text", out)
-    assert out.rstrip().endswith("レシピは load_recipe(path) で読み込む。")
+    assert out.rstrip().endswith(
+        "レシピは load_recipe(path) で読み込む (load_recipe が無いモデルではレシピが無効)。"
+    )

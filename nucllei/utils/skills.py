@@ -66,17 +66,6 @@ def activate_skill(skill, user, model=None) -> str:
     )
 
 
-def reachable_skill_contents(model) -> list[str]:
-    """このモデルで読み込まれうる skill の本文(meta.skillIds)。{{USER_RECIPES}} を先に取るかの
-    判定に使う(ensure_user_recipes)。"""
-    if not is_skills_feature_enabled(model):
-        return []
-    return [
-        skill.content or ""
-        for skill in Skills.get_skills_by_ids(get_model_skill_ids(model))
-    ]
-
-
 def is_skills_feature_enabled(model) -> bool:
     """モデル(preset)の機能「スキル」が有効か(issue #42)。
 

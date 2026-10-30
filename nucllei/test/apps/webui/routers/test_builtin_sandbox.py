@@ -153,9 +153,6 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
                 "read_file",
                 "list_workspace",
                 "fetch_from_workspace",
-                "load_recipe",
-                "save_recipe",
-                "edit_recipe",
             }
 
         # env を外すと既存の prune 経路(prefix ありで BUILTIN_TOOLS 未定義)が

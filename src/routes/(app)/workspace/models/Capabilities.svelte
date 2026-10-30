@@ -22,12 +22,17 @@
 	// OFF でこのモデルの manifest(load_skill)と /command 発火が両方止まる。
 	// llens(#140): 旧「サブエージェント」トグル(meta.features.subagent)は撤去 —
 	// builtin_subagent を toolIds に入れるか(ToolsSelector)に吸収した。
+	// 機能「レシピ」(meta.features.recipes、既定 ON — ken 2026-10-30「スキルみたいに」)。
+	// ON でこのモデルに load_recipe / save_recipe / edit_recipe と見えるレシピの一覧が入る
+	// (backend の is_recipes_feature_enabled。sandbox の無い配備では入らない)。
 	let {
 		capabilities = $bindable({}),
-		featureSkills = $bindable(true)
+		featureSkills = $bindable(true),
+		featureRecipes = $bindable(true)
 	}: {
 		capabilities?: Record<string, boolean | undefined>;
 		featureSkills?: boolean;
+		featureRecipes?: boolean;
 	} = $props();
 </script>
 
@@ -35,7 +40,8 @@
 	<div class="flex w-full justify-between mb-1">
 		<div class=" self-center text-sm font-semibold">{$i18n.t('Capabilities')}</div>
 	</div>
-	<div class="flex">
+	<!-- 狭い幅では折り返す(折り返さないと 390px で項目名が 1 文字ずつ縦に潰れる) -->
+	<div class="flex flex-wrap gap-y-1">
 		<!-- llens(#49): label で行クリックトグル -->
 		<label class=" flex items-center gap-2 mr-3 cursor-pointer">
 			<span class="flex items-center">
@@ -52,6 +58,27 @@
 					content={$i18n.t('Expose the skill list to the model (load_skill) + /command activation')}
 				>
 					{$i18n.t('Skills')}
+				</Tooltip>
+			</div>
+		</label>
+
+		<label class=" flex items-center gap-2 mr-3 cursor-pointer">
+			<span class="flex items-center">
+				<Checkbox
+					state={featureRecipes ? 'checked' : 'unchecked'}
+					onChange={(state) => {
+						featureRecipes = state === 'checked';
+					}}
+				/>
+			</span>
+
+			<div class=" py-0.5 text-sm capitalize">
+				<Tooltip
+					content={$i18n.t(
+						'Give the model the recipe tools (load_recipe / save_recipe / edit_recipe) with the list of recipes the user can see. Needs the sandbox'
+					)}
+				>
+					{$i18n.t('Recipes')}
 				</Tooltip>
 			</div>
 		</label>

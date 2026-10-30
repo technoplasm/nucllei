@@ -294,7 +294,7 @@ separate reasoning block.
 | `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                   | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                             |
 | `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)            | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                              |
 | `SANDBOX_TEXT_MAX_SIZE_MB`                                     | env  | `1` (MB, integer)     | text cap: body of `write_file` (guard against a looping model), the file `edit_file` edits (before and after the edit) and the file browser's text editor (open / save, §4.4.1). `read_file` reads by range and has no cap (§5.7) |
-| `RECIPE_RESTRICTED_TOOLS`                                      | env  | empty                 | recipes (§6.5): functions only some users can use, as a JSON object `{"<function>": "<group>" | null}` (`null` = personal layer only). A recipe in a shared layer whose files name such a function is refused unless the layer is that group; a reader outside the group gets a warning when the `RECIPE.md` names it. Read by `save_recipe` / `edit_recipe` / `load_recipe` / `{{USER_RECIPES}}` and `nucllei recipe-check` |
+| `RECIPE_RESTRICTED_TOOLS`                                      | env  | empty                 | recipes (§6.5): functions only some users can use, as a JSON object `{"<function>": "<group>" | null}` (`null` = personal layer only). A recipe in a shared layer whose files name such a function is refused unless the layer is that group; a reader outside the group gets a warning when the `RECIPE.md` names it. Read by `save_recipe` / `edit_recipe` / `load_recipe` (and the recipe list in its description) and `nucllei recipe-check` |
 | `RECIPE_MEMO_KEYS`                                             | env  | empty                 | recipes (§6.5): keys of provenance-memo lines (`-- <key>:`) that a tool leaves at the top of saved files (comma-separated, e.g. `executed_at,csv,params`). Such a line is refused as patient data |
 | `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                                                                                                        |
 | `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                                                                                                          |
@@ -1092,7 +1092,8 @@ so preset edits apply immediately.
 
 A model preset is where all capability wiring happens (`meta` fields):
 `toolIds` (tools available to the model), `filterIds` / `actionIds` (functions),
-`skillIds` + `features.skills` (skills), plus params and system prompt.
+`skillIds` + `features.skills` (skills), `features.recipes` (the recipe tools,
+§6.5), plus params and system prompt.
 
 `meta.capabilities.preserve_reasoning` (default on; the model editor's
 Capabilities, "Preserve reasoning") controls whether the tool loop's follow-up
@@ -2067,8 +2068,9 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     (`meta.subagentPresetIds`, §5.8).
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
     `send_to_workspace` / `write_file` / `edit_file` / `remove_file` / `read_file` /
-    `list_workspace` / `fetch_from_workspace` / `load_recipe` / `save_recipe` /
-    `edit_recipe` (the recipe tools: §6.5). **Registered only when `SANDBOX_URL` is set**; with
+    `list_workspace` / `fetch_from_workspace`. (The recipe tools `load_recipe` /
+    `save_recipe` / `edit_recipe` are not part of it since 2026-10-30: they come
+    with the preset's capability "Recipes" — §6.5.) **Registered only when `SANDBOX_URL` is set**; with
     no value the tool is absent from `/api/v1/tools/` entirely (and an existing
     row is pruned on the next boot, ACL included). It is gated because, unlike
     the always-registered builtins above, it needs an external service to be
@@ -2747,8 +2749,9 @@ POST /api/v1/skills/create
   `(name.casefold(), name)`; empty string if none — admins get only their own
   memberships, not every group), `{{BASE_MODEL_ID}}` (id of the base model
   that actually runs inference — the selected preset's `base_model_id`; `Unknown`
-  if the server cannot resolve it), `{{USER_RECIPES}}` (the recipes the user can
-  see, one line each, with `(壊れている: …)` / `(警告: …)` marks — §6.5; empty string if none). The same variables are expanded in a preset's
+  if the server cannot resolve it). `{{USER_RECIPES}}` was retired on 2026-10-30
+  (the recipe list now sits in `load_recipe`'s description — §6.5) and is left
+  as literal text, like any unknown variable. The same variables are expanded in a preset's
   system prompt (`params.system`). Inside a subagent's turn `{{BASE_MODEL_ID}}`
   refers to the child preset's base, while the `{{USER_*}}` variables stay those
   of the user who started the parent chat. There is no call-time parameter mechanism.
@@ -2923,6 +2926,23 @@ this date llens handled them with a jail command (`/ext/bin/recipe list / check 
 promote`); the checks, the listing and the writes now live in nucllei. The
 checks are implemented once, in `nucllei/utils/recipes.py`.
 
+**Capability "Recipes" (2026-10-30, ken: 「スキルみたいに」「能力として」).** The
+three tools `load_recipe` / `save_recipe` / `edit_recipe` are switched on per
+model preset by `meta.features.recipes` (**default on** — a missing key is on;
+the model editor's Capabilities, "Recipes", next to "Skills"). When it is on and
+the deployment has a sandbox (`SANDBOX_URL`), the server synthesizes the three
+tools into the turn (`builtin_tools/recipe_tools.build_recipe_tools`, called next
+to `load_skill`) — independent of `builtin_sandbox` and of `meta.toolIds`, and
+not listed in the tool picker. A tool of the same name from `toolIds` is shadowed
+(warning log), as with `load_skill`. When it is off, none of the three is offered
+and the sandbox is not asked for the list. The tools reach the sandbox on their
+own (an internal `sandbox.Tools` instance using `builtin_sandbox`'s saved
+valves), so `requires`' `read` / `shell` / `python` run even for a preset without
+`builtin_sandbox`; running an attached file by hand still needs `run_shell`, and
+`load_recipe`'s description says so. A model whose preset turns the capability
+off and calls one of them anyway (history replay) gets the usual "not in this
+turn's tool list" error.
+
 | layer | place | who can write |
 |---|---|---|
 | personal `/workspace` | `/workspace/recipes/<name>/` | the user |
@@ -2941,11 +2961,13 @@ functions are found by name in the text).
 The tools write the frontmatter themselves (`author` = the user's name, `updated`
 = today), so a model never hand-writes a broken one.
 
-**The list `{{USER_RECIPES}}`.** A template variable (§6.1; a preset's system
-prompt or a skill body) that expands to the recipes the user can see — personal,
-the groups the user **belongs to** (admins too: memberships only, the same rule
-as `{{USER_GROUPS}}`), then everyone — one line each, ordered by layer then folder
-name:
+**The list (in `load_recipe`'s description).** Like `load_skill`'s manifest, the
+recipes the user can see are appended to `load_recipe`'s description, after
+`見えるレシピ (path にそのまま渡す):` — personal, the groups the user **belongs to**
+(admins too: memberships only, the same rule as `{{USER_GROUPS}}`), then
+everyone — one line each, ordered by layer then folder name (no recipes:
+`見えるレシピは無い (作るなら save_recipe)。`). It replaces the retired
+`{{USER_RECIPES}}` variable; no prompt has to mention it:
 
 ```
 - /workspace/recipes/月次集計 — 月次の件数を集計して表にする
@@ -3006,20 +3028,17 @@ see"), the write rule still refuses the write. To use
 personal recipe and `recipe:` the shared one from there.
 
 Patient data, the restricted functions' layers and the other write rules are not
-part of the light check (they are checked before every write). The list runs on **every request** that has the variable,
-so it is bounded: one sandbox `POST /recipes/index` (every layer's folders and
-the head of each `RECIPE.md`), one `POST /files/stat_many` (every referenced path
-of every recipe that passes the layer rule and the reader's memberships), one DB
-query (whether the referenced skills exist and are visible; the reader's
-memberships are one more). A reference the sandbox could not answer for counts as
-unknown — no warning. If the sandbox is too old
-(no `/recipes/index`) or unreachable, the variable becomes one line
+part of the light check (they are checked before every write). The list is
+fetched **once per request** whose preset has the capability on (and never when
+it is off or there is no sandbox), so it is bounded: one sandbox
+`POST /recipes/index` (every layer's folders and the head of each `RECIPE.md`),
+one `POST /files/stat_many` (every referenced path of every recipe that passes
+the layer rule and the reader's memberships — skipped when no recipe has a
+reference), one DB query (the reader's memberships). A reference the sandbox
+could not answer for counts as unknown — no warning. If the sandbox is too old
+(no `/recipes/index`) or unreachable, the description ends with that one line
 (`(レシピの一覧を取れない: sandbox が古い …)` / `(… sandbox が応答しない)`), not an
-empty list. Expansion is synchronous, so the async entry points fetch the list
-first and keep it for the request (`ensure_user_recipes`): before a preset's
-system prompt is applied (`routers/openai` · `ollama` · `functions`), at the top
-of `process_chat_payload` (skills the model can reach — its `meta.skillIds`), and before a server-driven continuation's wire.
-Where the variable could not be fetched, it reads `(レシピの一覧はここでは取れない)`.
+empty list.
 
 **`load_recipe(path)`** — `path` is the folder (`…/RECIPE.md` accepted). It
 reads with the user's read access and returns **one result** (ken 2026-10-30
@@ -3221,10 +3240,12 @@ with `.`, no control / format characters, NFC, at most 200 UTF-8 bytes, not
 
 **Bypasses.** `write_file` / `edit_file` refuse `<layer>/recipes/<name>/RECIPE.md`
 (`… はレシピの本体 (RECIPE.md) で、write_file / edit_file では書かない` → use
-`save_recipe` / `edit_recipe`). Attachments are still written with `write_file`
-/ `edit_file`, and the next `save_recipe` / `edit_recipe` checks them with the
-folder. `read_file` on a `RECIPE.md` reads it and adds
-`レシピは load_recipe(path) で読み込む。`. `run_shell`'s `mv` / `cp` cannot be
+`save_recipe` / `edit_recipe` if the recipe tools are there; if not, the
+capability is off for this model and an admin has to turn on "Recipes").
+Attachments are still written with `write_file` / `edit_file`, and the next
+`save_recipe` / `edit_recipe` checks them with the folder. `read_file` on a
+`RECIPE.md` reads it and adds
+`レシピは load_recipe(path) で読み込む (load_recipe が無いモデルではレシピが無効)。`. `run_shell`'s `mv` / `cp` cannot be
 stopped; the next write checks whatever it left.
 
 **Sandbox.** Needs the sandbox endpoints `POST /recipes/index`,

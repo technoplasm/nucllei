@@ -4,7 +4,7 @@ llens 依頼・ken 指示「ぜんぶ nuc にやらせて」で、llens の jail
 promote) が持っていた判定をここへ移した。**判定の実装はここ 1 つ**で、使う側は 3 つ:
 
 - builtin の `save_recipe` / `edit_recipe` (書く前の検査 = `check_folder`。個人の層も含む)
-- 一覧 `{{USER_RECIPES}}` と `load_recipe` (軽い検査 = `assess_recipe`。「壊れている」は保存せず、
+- 一覧 (load_recipe の説明) と `load_recipe` (軽い検査 = `assess_recipe`。「壊れている」は保存せず、
   毎回その場で判定する — 参照先のファイルを戻せばレシピ側は何もしなくても直る)
 - ホストの lint `nucllei recipe-check` (共有の層 `/ext/groups` `/ext/public` だけ。個人の層は見ない)
 
@@ -61,6 +61,22 @@ INDEX_DESCRIPTION_CHARS = 120
 
 # 壊れたレシピの次の手 (一覧の印・load_recipe の ERROR で同じ文面 — ken 2026-10-30)
 BROKEN_NEXT = "edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)"
+
+# 能力「レシピ」で middleware が合成して差し込む tool (builtin_tools/recipe_tools.build_recipe_tools)
+RECIPE_FUNCTION_NAMES = ("load_recipe", "save_recipe", "edit_recipe")
+
+
+def is_recipes_feature_enabled(model) -> bool:
+    """モデル (preset) の能力「レシピ」が有効か (ken 2026-10-30「スキルみたいに」「能力として」)。
+
+    meta.features.recipes に持つ (既定 ON — キー不在は有効。`is_skills_feature_enabled` と同じ形)。
+    ON なら middleware が load_recipe / save_recipe / edit_recipe を合成して tools に差し込み、
+    見えるレシピの一覧を load_recipe の説明に入れる。OFF なら 3 つとも入らず sandbox にも聞かない。
+    グローバルフラグは作らない。model は app.state.MODELS の dict (`info.meta`)。
+    """
+    meta = ((model or {}).get("info") or {}).get("meta") or {}
+    features = meta.get("features") or {}
+    return features.get("recipes", True) is not False
 
 
 # ---------------------------------------------------------------------------

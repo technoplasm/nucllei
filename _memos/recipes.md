@@ -9,8 +9,8 @@
 | 何 | どこ |
 |---|---|
 | 判定 (名前・frontmatter・requires・患者データ・層) | `nucllei/utils/recipes.py` (I/O なし・env.py を import しない) |
-| 一覧 `{{USER_RECIPES}}` と「壊れている」「警告」の材料集め | `nucllei/utils/recipe_index.py` |
-| tool (load_recipe / save_recipe / edit_recipe)、requires の展開 | `nucllei/builtin_tools/recipe_tools.py` (`sandbox.Tools` の mixin = 同じ toolkit・ACL) |
+| 一覧 (load_recipe の説明に入る) と「壊れている」「警告」の材料集め | `nucllei/utils/recipe_index.py` |
+| tool (load_recipe / save_recipe / edit_recipe)、requires の展開、能力「レシピ」の合成 | `nucllei/builtin_tools/recipe_tools.py` (`build_recipe_tools` — middleware が load_skill の隣で差し込む。中に sandbox.Tools を持って HTTP・書き先・read_file / run_shell を借りる) |
 | sandbox | `/recipes/index` `/recipes/folder` `/files/stat_many`、`/files/trash` の `name` |
 | ホストの lint | `nucllei recipe-check` (共有の層だけ) |
 
@@ -76,8 +76,11 @@
   (stateful kernel に他人のコードを流さない)。
 - **from_path はパスを書き換えない** (付属は相対で指す決まり)。旧 promote で書き換えた
   `/workspace/recipes/<名前>/` は、共有の層では「見えないパス」で止まる。
-- **{{USER_RECIPES}} は非同期の入口で先に取る** (ContextVar、1 リクエスト 1 回)。`prompt_template`
-  は同期のまま。取っていない経路では `(レシピの一覧はここでは取れない)` + warning。
+- **有効化はモデルの能力「レシピ」** (`meta.features.recipes`、既定 ON — ken 2026-10-30「スキルみたいに」
+  「能力として」)。builtin_sandbox の関数だったのを外し、load_skill と同じく middleware が合成する。
+  一覧は load_recipe の説明に入れる (skill の manifest と同じ) — **{{USER_RECIPES}} は廃止**
+  (変数を書かなくても一覧が入る。旧変数は未知の変数として字面のまま残る)。一覧の取得は能力が ON の
+  リクエストだけ・1 回。経緯は `_memos/builtin-tools.md` 1b'。
 
 ## 割り切り・未了
 

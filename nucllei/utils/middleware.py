@@ -45,7 +45,6 @@ from nucllei.retrieval.utils import dedupe_files_by_id, get_sources_from_files
 
 from nucllei.utils.chat import generate_chat_completion
 from nucllei.utils.task import (
-    ensure_user_recipes,
     get_task_model_id,
 )
 from nucllei.utils.misc import (
@@ -60,7 +59,6 @@ from nucllei.utils.skills import (
     apply_skill_command,
     apply_skill_hooks,
     build_load_skill_tool,
-    reachable_skill_contents,
     run_skill_hooks,
     current_skill_activation_seeds,
     replay_skill_tool_ids,
@@ -514,13 +512,6 @@ async def process_chat_payload(
     form_data = apply_params_to_form_data(form_data, model)
     log.debug(f"form_data: {form_data}")
 
-    # {{USER_RECIPES}}(見えるレシピの一覧 — sandbox に聞く)を、このモデルで読み込まれうる
-    # skill の本文にあれば先に取っておく(同期の prompt_template が展開する。2026-10-30)。
-    # preset の system prompt の分は、それを当てる直前(routers/openai 等)で同じく取る
-    await ensure_user_recipes(
-        user, *(await asyncio.to_thread(reachable_skill_contents, model))
-    )
-
     # サーバーサイド `/command` 発火(issue #35)。フィルタや RAG より前に、
     # 合成の load_skill tool exchange(call + 展開済み content の result)を
     # ヒットした user メッセージの直後へ注入する。
@@ -813,6 +804,20 @@ async def process_chat_payload(
                 "tool 'load_skill' is shadowed by the skill manifest pseudo-tool"
             )
         tools_dict["load_skill"] = load_skill_tool
+
+    # 能力「レシピ」(meta.features.recipes、既定 ON — ken 2026-10-30「スキルみたいに」):
+    # load_recipe / save_recipe / edit_recipe を合成して差し込む(builtin_sandbox・toolIds の
+    # 有無に依らない)。見えるレシピの一覧は load_recipe の説明に入る(1 リクエスト 1 回 —
+    # OFF・sandbox の無い配備では sandbox に聞かない)。同名は load_skill と同じく合成側が勝つ。
+    # import はここで(builtin_tools は utils.tools 経由の循環を避けて遅延 import する慣例)
+    from nucllei.builtin_tools.recipe_tools import build_recipe_tools
+
+    for name, entry in (
+        await build_recipe_tools(model, user, tools_extra_params)
+    ).items():
+        if name in tools_dict:
+            log.warning(f"tool '{name}' is shadowed by the recipe capability tool")
+        tools_dict[name] = entry
 
     # llens(#140): run_subagent は builtin `builtin_subagent`(Tools 行)になり、上の
     # get_tools 経路(meta.toolIds × 行の read ACL × available / spec_overrides フック)で

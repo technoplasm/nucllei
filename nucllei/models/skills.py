@@ -218,15 +218,6 @@ class SkillsTable:
         except Exception:
             return None
 
-    def get_skills_by_ids(self, ids) -> list[SkillModel]:
-        """id の集合の skill をまとめて 1 回の問い合わせで(無い id は落とす)。"""
-        ids = [normalize_command(i) for i in ids or [] if isinstance(i, str)]
-        if not ids:
-            return []
-        with get_db() as db:
-            rows = db.query(Skill).filter(Skill.id.in_(ids)).all()
-            return [SkillModel.model_validate(r) for r in rows]
-
     def get_skills(self) -> list[SkillUserResponse]:
         with get_db() as db:
             skills = []

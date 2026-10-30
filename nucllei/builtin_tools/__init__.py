@@ -151,8 +151,7 @@ if SANDBOX_URL:
             "Run Python / shell in a server-side isolated environment (nsjail) "
             "with a persistent /workspace "
             "(run_python / run_python_once / run_shell / send_to_workspace / "
-            "write_file / edit_file / remove_file / read_file / list_workspace / fetch_from_workspace / "
-            "load_recipe / save_recipe / edit_recipe)"
+            "write_file / edit_file / remove_file / read_file / list_workspace / fetch_from_workspace)"
         ),
     }
 

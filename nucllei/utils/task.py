@@ -1,8 +1,6 @@
 import logging
 import math
 import re
-import time
-from contextvars import ContextVar
 from datetime import datetime
 from typing import Optional
 
@@ -104,57 +102,6 @@ def user_prompt_params(user) -> dict:
     }
 
 
-# {{USER_RECIPES}}(2026-10-30、llens 依頼): 見えるレシピの一覧。sandbox に聞く(非同期)ので、
-# 同期の prompt_template は展開しない — 非同期の入口(preset の system prompt を当てる直前・
-# process_chat_payload の頭・続きターンの wire の前)が ensure_user_recipes で先に取り、
-# リクエストの間だけ ContextVar に持つ(リクエストのタスクごとに別のコンテキスト。念のため
-# 古い値は使わない)。取っていない経路で本文に出てきたら RECIPES_NOT_FETCHED にする。
-USER_RECIPES_TOKEN = "{{USER_RECIPES}}"
-RECIPES_NOT_FETCHED = "(レシピの一覧はここでは取れない)"
-_USER_RECIPES_TTL_S = 60
-_user_recipes: ContextVar[Optional[dict]] = ContextVar(
-    "nucllei_user_recipes", default=None
-)
-
-
-def _user_id_of(user) -> Optional[str]:
-    if user is None:
-        return None
-    if isinstance(user, dict):
-        return user.get("id") or None
-    return getattr(user, "id", None) or None
-
-
-async def ensure_user_recipes(user, *templates) -> None:
-    """`templates` のどれかに {{USER_RECIPES}} があれば、このリクエストの間の一覧を取っておく
-    (1 リクエスト 1 回)。無ければ何もしない(sandbox に聞かない)。"""
-    if not any(isinstance(t, str) and USER_RECIPES_TOKEN in t for t in templates):
-        return
-    uid = _user_id_of(user)
-    if not uid:
-        return
-    cache = _user_recipes.get()
-    if cache is None:
-        cache = {}
-        _user_recipes.set(cache)
-    hit = cache.get(uid)
-    if hit is not None and time.monotonic() - hit[0] < _USER_RECIPES_TTL_S:
-        return
-    from nucllei.utils.recipe_index import user_recipes_text
-
-    cache[uid] = (time.monotonic(), await user_recipes_text(user))
-
-
-def _prefetched_user_recipes(user_id: Optional[str]) -> str:
-    hit = (_user_recipes.get() or {}).get(user_id) if user_id else None
-    if hit is None or time.monotonic() - hit[0] >= _USER_RECIPES_TTL_S:
-        log.warning(
-            "{{USER_RECIPES}} を先に取っていない経路で展開した (ensure_user_recipes の呼び漏れ)"
-        )
-        return RECIPES_NOT_FETCHED
-    return hit[1]
-
-
 # datetime.weekday() の順(月曜 = 0)
 _WEEKDAYS_JA = ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日")
 
@@ -172,8 +119,6 @@ def prompt_template(
     {{USER_ROLE}} は role の値そのまま(不明なら "Unknown")。{{USER_GROUPS}} は
     user_group_names(user_id) を ", " でつないだもの(所属なし・user 不明なら空文字列)。
     グループの DB 照会は {{USER_GROUPS}} が本文にあるときだけ、1 呼び出しにつき 1 回。
-    {{USER_RECIPES}} は見えるレシピの一覧(1 行ずつ `- <フォルダの path> — <description>`。
-    0 件なら空文字列)で、非同期の入口が ensure_user_recipes で先に取ったものを入れる。
     """
     # Get the current date
     current_date = datetime.now()
@@ -214,10 +159,6 @@ def prompt_template(
     if "{{USER_GROUPS}}" in template:
         template = template.replace(
             "{{USER_GROUPS}}", ", ".join(user_group_names(user_id))
-        )
-    if USER_RECIPES_TOKEN in template:
-        template = template.replace(
-            USER_RECIPES_TOKEN, _prefetched_user_recipes(user_id)
         )
 
     return template
