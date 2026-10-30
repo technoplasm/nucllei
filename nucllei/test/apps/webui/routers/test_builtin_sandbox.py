@@ -2322,6 +2322,10 @@ def test_docstrings_drop_example_paths_and_internal_words():
         r"\s*\n\s*", "", Tools.__doc__
     )
     assert "unar (書庫の展開) / zip" in specs["run_shell"]["description"]
+    # 実行環境の言い方は「sandbox で」に揃えた (2026-10-30 llens「tool の説明を削る」batch 3 / 4)
+    for name in ("run_python", "run_python_once", "run_shell"):
+        assert specs[name]["description"].startswith("sandbox で"), name
+        assert "サーバーの隔離環境" not in specs[name]["description"], name
     assert "unzip" not in specs["run_shell"]["description"]
     send = specs["send_to_workspace"]["description"].replace("\n", "")
     assert "jail" not in send

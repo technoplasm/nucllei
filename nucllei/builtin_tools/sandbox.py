@@ -1526,9 +1526,8 @@ class Tools:
         __user__: Optional[dict] = None,
     ) -> str:
         """
-        サーバーの隔離環境で Python コードを 1 回だけ実行する (状態を持たない使い捨て)。
-        run_python と違い変数は残らないが、他の会話の状態から完全に独立して走らせたい
-        単発処理向け。
+        sandbox で Python コードを 1 回だけ実行する (状態を持たない使い捨て — 変数は残らない)。
+        run_python の変数から独立させたい単発処理向け。
 
         :param code: 実行する Python コード
         :param timeout_s: wall clock 秒数 (省略時 120、上限 600)
@@ -1542,9 +1541,9 @@ class Tools:
         __user__: Optional[dict] = None,
     ) -> str:
         """
-        サーバーの隔離環境で bash コマンドを実行する。coreutils, jq, ripgrep (rg),
-        pandoc, weasyprint, unar (書庫の展開) / zip, nkf, file, poppler-utils (pdftotext / pdfinfo),
-        ffmpeg / ffprobe, python が利用可能。
+        sandbox で bash コマンドを実行する。coreutils, jq, ripgrep (rg), pandoc, weasyprint,
+        unar (書庫の展開) / zip, nkf, file, poppler-utils (pdftotext / pdfinfo), ffmpeg / ffprobe,
+        python が使える。
 
         :param command: 実行する bash コマンド (スクリプト可)
         :param timeout_s: wall clock 秒数 (省略時 120、上限 600)
