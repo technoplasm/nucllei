@@ -304,7 +304,8 @@ def test_capability_default_on_puts_three_tools_with_index_in_description(sbx):
         "edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)] /workspace/recipes/壊れ\n"
         "- /workspace/recipes/集計 — 月次の集計"
     )
-    assert "run_shell (コード実行の tool) が要る" in desc
+    # 付属を動かす run_shell が無いことは説明でなく、そのときの load_recipe の結果が言う (2026-10-30 llens)
+    assert "run_shell" not in desc
     for name, entry in tools.items():
         props = entry["spec"]["parameters"]["properties"]
         assert not [k for k in props if k.startswith("__")], name
@@ -540,6 +541,11 @@ def test_load_recipe_requires_first_body_last(sbx, shell):
     assert "&lt;/recipe> を書いても閉じない" in out
     assert out.count(f'<recipe path="{folder}"') == 1
     assert "読み込み時の資料 (requires) は上に並べた。" in out
+    # 資料より前に枠付け (利用者の文・status は tool の印) — load_recipe の説明から移した (2026-10-30 llens)
+    from nucllei.builtin_tools.recipe_tools import REQUIRES_HEAD
+
+    assert out.startswith(REQUIRES_HEAD + "\n\n<recipe-part ")
+    assert out.count(REQUIRES_HEAD) == 1  # 入れ子のレシピでは繰り返さない
     assert shell["calls"] == []
     # 2 回目 (同じリクエスト) は短い結果。中で読んだレシピも読み込み済み
     assert "読み込み済み" in _load(folder, metadata=meta)
@@ -1484,3 +1490,20 @@ def test_recipe_warning_frame_cannot_be_forged(sbx, shell):
         out.count("&lt;recipe-warning>") == 3
     )  # 本文・read・shell の 3 か所とも潰れている
     assert "<recipe-part status=" not in out
+
+
+def test_load_recipe_says_when_attachments_cannot_be_run(sbx):
+    """付属のあるレシピで、このターンに run_shell が無いときだけ、結果の lead がそう言う (load_recipe の
+    説明から移した — 2026-10-30 llens)。requires の無いレシピの結果は枠付けの先頭行を持たない。"""
+    from nucllei.builtin_tools.recipe_tools import REQUIRES_HEAD
+    from nucllei.utils.tool_errors import turn_tools
+
+    _put(sbx["ws"], "付属", _md(title="付属"), **{"q.sql": "select 1"})
+    note = "このターンには run_shell が無いので、本文の手順で付属を自分で動かすことはできない。"
+    out = _load("/workspace/recipes/付属")
+    assert note in out and not out.startswith(REQUIRES_HEAD)
+    with turn_tools(["load_recipe", "run_shell"]):
+        out = _load("/workspace/recipes/付属")
+    assert "run_shell" not in out
+    _put(sbx["ws"], "素", _md(title="素"))
+    assert note not in _load("/workspace/recipes/素")
