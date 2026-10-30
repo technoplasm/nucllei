@@ -356,18 +356,15 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
             == "ERROR: ユーザーを特定できないので添付ファイルは一覧できない。"
         )
 
-    def test_chat_files_spec_explains_deleted(self):
-        """戻り値の deleted: true の意味がモデルに届く (spec の description)。"""
+    def test_chat_files_spec_leaves_deleted_to_the_result(self):
+        """deleted: true の意味は、その印が出た結果の note が言う (2026-10-30 llens「tool の説明を削る」
+        batch 5 — 説明から移した。test_deleted_own_file_is_marked)。"""
         from nucllei.builtin_tools.chat_files import Tools
         from nucllei.utils.tools import get_tool_specs
 
         specs = {s["name"]: s for s in get_tool_specs(Tools())}
         for name in ("list_chat_files", "grep_chat_files"):
-            desc = specs[name]["description"]
-            assert (
-                "deleted: true の付いたものは削除済みで、その file_id はもう開けない"
-                in desc
-            )
+            assert "deleted" not in specs[name]["description"], name
 
     def test_result_carries_json_render_kind(self):
         """builtin tool の結果に render {kind:"json"} が付く(#99)。
@@ -561,6 +558,9 @@ class TestBuiltinChatFilesTool(AbstractPostgresTest):
         items = out["files"]
         assert items[0]["file_id"] == "f-del"
         assert items[0]["deleted"] is True
+        assert out["note"] == (
+            "deleted: true のものは削除済みで、その file_id はもう開けない (渡しても読めない)。"
+        )
 
     def test_grep_matches_filename_case_insensitive(self):
         from nucllei.builtin_tools.chat_files import Tools

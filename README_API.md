@@ -1940,8 +1940,9 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     so, and "not found" with a current chat adds 「(いま進行中のチャットは検索しない)」.
   - `builtin_chat_files` — `list_chat_files` / `grep_chat_files`: attachments
     issued in the current chat, metadata only. An entry with `deleted: true` is
-    a deleted file whose `file_id` no longer opens — the docstrings say so
-    (2026-10-19). Without a user both tools (and `builtin_history`) raise a
+    a deleted file whose `file_id` no longer opens — said by the result's
+    `note` when such an entry is present (2026-10-30; the docstrings said it
+    from 2026-10-19). Without a user both tools (and `builtin_history`) raise a
     `failure` ToolError (until 2026-10-19 a bare `ValueError`, i.e. `fatal`).
   - `builtin_attachment_text` — `read_attachment(file_id, offset?, max_chars?)`:
     the extracted text of an owned attachment (`Files.data.content` written by

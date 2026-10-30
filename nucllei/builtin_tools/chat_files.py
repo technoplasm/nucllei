@@ -142,7 +142,14 @@ class Tools:
         # text 描画に落ちて JSON ハイライトが消える。
         # 切り詰めは散文の前置きではなく total として構造に載せる — モデルが
         # 「まだある」を機械的に読めるし、表示も JSON 一本で済む。
-        return {"total": total, "files": items}
+        out = {"total": total, "files": items}
+        # deleted の意味は、その印が出たときだけ言う (2026-10-30 llens「tool の説明を削る」batch 5 —
+        # list_chat_files / grep_chat_files の説明から移した)
+        if any(item.get("deleted") for item in items):
+            out["note"] = (
+                "deleted: true のものは削除済みで、その file_id はもう開けない (渡しても読めない)。"
+            )
+        return out
 
     def list_chat_files(
         self,
@@ -151,12 +158,9 @@ class Tools:
         __chat_id__: Optional[str] = None,
         __metadata__: Optional[dict] = None,
     ) -> dict | str:
-        """このチャットで file_id 発行済みの添付ファイルを一覧する(発行順)。
-
-        ユーザーのアップロードと tool が添付した成果物の両方が対象。過去に発行された
-        file_id を思い出す用途に使い、得た file_id は file_id を受け取る他の tool に
-        そのまま渡せる。返るのはメタデータのみ(中身は読まない)。
-        deleted: true の付いたものは削除済みで、その file_id はもう開けない (渡しても読めない)。
+        """このチャットで file_id 発行済みの添付ファイル (ユーザーのアップロードと tool が添付した成果物)
+        を発行順に一覧する (メタデータのみ。中身は読まない)。過去の file_id を思い出すのに使い、得た file_id は
+        file_id を受け取る他の tool にそのまま渡せる。
 
         :param limit: 返す件数の上限(省略時 20、新しいものを優先)
         """
@@ -174,7 +178,6 @@ class Tools:
         __metadata__: Optional[dict] = None,
     ) -> dict | str:
         """このチャットの添付ファイルをファイル名で検索する(部分一致・大小文字無視)。
-        deleted: true の付いたものは削除済みで、その file_id はもう開けない。
 
         :param query: 検索文字列(ファイル名に対する部分一致)
         :param limit: 返す件数の上限(省略時 20、新しいものを優先)
