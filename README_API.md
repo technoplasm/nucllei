@@ -3074,7 +3074,7 @@ variable the list stays in the description:
 ```
 - /workspace/recipes/月次集計 — 月次の件数を集計して表にする
 - [警告: requires の read /ext/groups/EMR/notes/検査結果.md が無い。読み込めるが、その要素は実行しない] /ext/groups/EMR/recipes/抽出 — EMR の抽出
-- [壊れている: frontmatter の知らないキー: on_load (使えるのは title・description・author・updated・requires)。on_load は requires に変わった。edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)] /ext/public/recipes/共通
+- [壊れている: frontmatter の知らないキー on_load (requires に変わった)。read_file で原文 (RECIPE.md) を見て edit_recipe で直す] /ext/public/recipes/共通
 ```
 
 The `description` is folded to one line and cut at 120 characters (`…`); the
@@ -3099,6 +3099,20 @@ marks, both **computed every time** and never stored, and both shared with
   (`title` / `description` / `author` one-line strings, `updated` `YYYY-MM-DD`);
   a `requires` entry that does not fit the notation (including `skill:` — a recipe
   never loads a skill; that is the model's call). It stays in the list with its reason, so it can be fixed.
+  **The mark carries no author text** (2026-10-30, llens via ken — it sits in
+  the system prompt / the tool description as the tool's own words): it says
+  what and where — a line number, the n-th `requires` entry, a key name only
+  when it matches `[A-Za-z0-9_-]{1,32}` (otherwise 「知らないキー (名前は原文で)」),
+  a retired key's short hint (`on_load (requires に変わった)`, `tools (廃止)`) —
+  never a value, a line's content or body text, and ends with
+  「read_file で原文 (RECIPE.md) を見て edit_recipe で直す」 (「save_recipe で作り直す」 when
+  `RECIPE.md` itself is missing / not a file / not text; 「直せるのは管理者なので、
+  壊れていることをユーザーに伝える」 for a non-admin reading a broken `/ext/public`
+  recipe), so 「壊れているのを全部
+  直して」 goes read_file → edit_recipe without a `load_recipe` first (on staging
+  it took load_recipe → ERROR → read_file → edit_recipe per recipe).
+  `save_recipe` / `edit_recipe`'s check (`check_folder`, on what the model just
+  wrote) keeps the detailed reasons (values, the allowed keys, close spellings).
 - **`[警告: …]`** (`reference_warnings`, ken 2026-10-30 "dependencies get deleted
   all the time — warn, still run, and let the model recover") — the frontmatter is
   valid but a value does not pass the environment, the permissions or the layer
@@ -3282,9 +3296,11 @@ exit_code=0 (0.1s)
   recipe or entry from loading) or a frame around a fake warning (2026-10-30).
 
 A **broken** recipe (the light check above) is an ERROR, with no body and no
-entries: `レシピ <folder> は壊れている: <reasons>` with the next step
-`edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)。` — the same wording as
-the list.
+entries: `レシピ <folder> は壊れている: <reasons>` (the same reasons as the list
+mark) with the next step
+`read_file で原文 (<folder>/RECIPE.md) を見て edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)。`
+(`save_recipe で作り直す。` when `RECIPE.md` itself is unusable). A broken recipe
+in `requires` is a warning entry with the same next step.
 
 **The `requires` notation.** A recipe is written by users, so it takes a YAML
 list of single-key entries only:
@@ -3383,7 +3399,8 @@ capability is off for this model and an admin has to turn on "Recipes").
 Attachments are still written with `write_file` / `edit_file`, and the next
 `save_recipe` / `edit_recipe` checks them with the folder. `read_file` on a
 `RECIPE.md` reads it and adds
-`レシピは load_recipe(path) で読み込む (load_recipe が無いモデルではレシピが無効)。`. `run_shell`'s `mv` / `cp` cannot be
+`レシピは load_recipe(path) で読み込み、直すなら edit_recipe で直す (load_recipe が無いモデルではレシピが無効)。`
+(「直すなら edit_recipe」2026-10-30 — reading a broken recipe to fix it should not be pulled back to `load_recipe`). `run_shell`'s `mv` / `cp` cannot be
 stopped; the next write checks whatever it left.
 
 **Sandbox.** Needs the sandbox endpoints `POST /recipes/index`,

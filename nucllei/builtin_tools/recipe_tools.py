@@ -423,7 +423,7 @@ class RecipeTools:
         # 本文の前の lead、<recipe-warning> の枠と付属を動かす run_shell が無いことは lead
         # (_expand_recipe)、読み込み済みは LOADED_RECIPE_RESULT、壊れている・警告は ERROR と各要素の
         # 警告、直した後に新しい版を返すことは save / edit の結果の <recipe-reset>
-        from nucllei.utils.recipes import BROKEN_NEXT
+        from nucllei.utils.recipes import broken_next, recipe_writable
 
         sb = _sb()
         if not __user__ or not __user__.get("id"):
@@ -446,7 +446,12 @@ class RecipeTools:
         if sections is None:  # 壊れている (理由は marks に積んだ)
             raise sb.ToolCallError(
                 f"レシピ {ref.folder} は壊れている: " + "、".join(marks.broken),
-                BROKEN_NEXT + "。",
+                broken_next(
+                    marks.broken,
+                    ref.md,
+                    recipe_writable(ref.folder, __user__.get("role")),
+                )
+                + "。",
             )
         if root["children"]:
             # 資料 (requires) を読む前に枠付けを言う (load_recipe の説明から移した — 資料のあるときだけ
@@ -594,7 +599,11 @@ class RecipeTools:
         self, item, user: dict, marks, depth: int, tree: list, owner: str
     ):
         """requires の recipe: の 1 要素 (その位置に入れ子で展開する)。カードの節は `tree` に積む。"""
-        from nucllei.utils.recipes import parse_recipe_path
+        from nucllei.utils.recipes import (
+            broken_next,
+            parse_recipe_path,
+            recipe_writable,
+        )
         from nucllei.utils.tool_errors import ToolError
 
         target = parse_recipe_path(item.args["path"])
@@ -640,8 +649,11 @@ class RecipeTools:
             return line(
                 f"警告: requires の recipe {target.folder} は壊れている: "
                 + "、".join(reasons)
-                + " — 読まなかった。次の手: そのレシピを edit_recipe で直す"
-                " (直すまでこのレシピの手順はそのレシピ無しで進める)。"
+                + " — 読まなかった。次の手: "
+                + broken_next(
+                    reasons, target.md, recipe_writable(target.folder, user.get("role"))
+                )
+                + " (直すまでこのレシピの手順はそのレシピ無しで進める)。"
             )
         tree.append(child)
         return (

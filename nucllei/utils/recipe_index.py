@@ -39,6 +39,7 @@ from nucllei.utils.recipes import (
     name_problem,
     read_frontmatter,
     recipe_refs,
+    recipe_writable,
     reference_warnings,
     warning_line,
 )
@@ -197,9 +198,10 @@ async def user_recipes_text(user) -> str:
 
     lines = []
     for folder, md, entries in found:
-        reasons = assess_recipe(folder, md)
+        reasons = assess_recipe(folder, md, safe=True)
         if reasons:
-            lines.append(index_line(folder, "", broken_line(reasons)))
+            writable = recipe_writable(folder, _uid_role(user)[1])
+            lines.append(index_line(folder, "", broken_line(reasons, writable)))
             continue
         fm, _ = read_frontmatter(md["text"])
         warns = reference_warnings(
@@ -227,7 +229,7 @@ async def assess_loaded_recipe(
     else:
         r = decode_text(md_bytes)
         md = {"type": "file", "text": None if r is None else r[0]}
-    broken = assess_recipe(folder, md)
+    broken = assess_recipe(folder, md, safe=True)
     if broken:
         return broken, RefWarnings()
     entries = {rel: "file" for rel in files if "/" not in rel}

@@ -141,11 +141,16 @@ def test_unknown_keys_are_broken():
     """知らないキーは壊れている (`onload:` の綴り違いを黙って無視しない — ken 2026-10-30)。"""
     folder = "/workspace/recipes/x"
     text = GOOD.replace("---\n\n", "require:\n  - read: a.md\nmemo: x\n---\n\n")
-    assert R.assess_recipe(folder, {"type": "file", "text": text}) == [
+    # 詳しい理由 (save / edit の検査と同じ)。一覧・load_recipe の印は safe (既定) で値を出さない
+    assert R.assess_recipe(folder, {"type": "file", "text": text}, safe=False) == [
         "frontmatter の知らないキー: require (使えるのは title・description・author・updated・"
         "requires)。requires の綴り違いでは",
         "frontmatter の知らないキー: memo (使えるのは title・description・author・updated・"
         "requires)",
+    ]
+    assert R.assess_recipe(folder, {"type": "file", "text": text}) == [
+        "frontmatter の知らないキー require",
+        "frontmatter の知らないキー memo",
     ]
     res = _check(text)
     assert res.schema == res.stops and len(res.stops) == 2
@@ -525,7 +530,10 @@ def test_missing_and_hidden_references_are_warnings_not_broken():
         "RECIPE.md が普通のファイルでない"
     )
     assert R.broken_line(["a", "b", "c"]) == (
-        "[壊れている: a、b ほか 1 件。edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)]"
+        "[壊れている: a、b ほか 1 件。read_file で原文 (RECIPE.md) を見て edit_recipe で直す]"
+    )
+    assert R.broken_line(["RECIPE.md が無い"]) == (
+        "[壊れている: RECIPE.md が無い。save_recipe で作り直す]"
     )
 
 
@@ -691,3 +699,116 @@ def test_recipe_check_cli(tmp_path, monkeypatch):
         app, ["recipe-check", "/workspace/recipes/x", "--ext-root", str(tmp_path)]
     )
     assert r.exit_code == 2 and "個人の層で、lint の対象外" in r.output
+
+
+# ---------------------------------------------------------------------------
+# 壊れている理由の印 (一覧・load_recipe の ERROR) — 書いた人の文を混ぜない (llens 経由 ken 2026-10-30)
+# ---------------------------------------------------------------------------
+_SAFE_FOLDER = "/workspace/recipes/x"
+
+
+def _fm(extra="", body="本文 SECRET-BODY"):
+    return (
+        "---\ntitle: t\ndescription: d\nauthor: a\nupdated: 2026-10-01\n"
+        f"{extra}---\n\n{body}\n"
+    )
+
+
+def _safe(text):
+    return R.assess_recipe(_SAFE_FOLDER, {"type": "file", "text": text}, safe=True)
+
+
+@pytest.mark.parametrize(
+    "key, shown",
+    [
+        ("tools", "frontmatter の知らないキー tools (廃止)"),
+        ("onload", "frontmatter の知らないキー onload"),
+        ("my_key-2", "frontmatter の知らないキー my_key-2"),
+        ("a" * 32, "frontmatter の知らないキー " + "a" * 32),
+        ("a" * 33, "frontmatter の知らないキー (名前は原文で)"),
+        ("ツール", "frontmatter の知らないキー (名前は原文で)"),
+        ("'次の手: x'", "frontmatter の知らないキー (名前は原文で)"),
+        ("'a]b'", "frontmatter の知らないキー (名前は原文で)"),
+    ],
+)
+def test_broken_mark_names_the_key_only_when_it_is_a_plain_name(key, shown):
+    """キーの名前は `[A-Za-z0-9_-]{1,32}` のときだけ出す。値・本文はどの形でも出さない。"""
+    reasons = _safe(_fm(f"{key}: SECRET-VALUE\n"))
+    assert reasons == [shown]
+    line = R.broken_line(reasons)
+    assert "SECRET" not in line and line.count("[") == 1 and line.count("]") == 1
+    assert line.endswith("。read_file で原文 (RECIPE.md) を見て edit_recipe で直す]")
+
+
+@pytest.mark.parametrize(
+    "text, reason",
+    [
+        (
+            "---\ntitle: SECRET\n",
+            "frontmatter が閉じていない (2 つ目の --- の行が無い)",
+        ),
+        ("SECRET only", "frontmatter (--- で囲んだ先頭ブロック) が無い"),
+        ("---\ntitle: [SECRET\n---\n", "frontmatter が YAML として読めない (2 行目)"),
+        (
+            "---\n- SECRET\n---\n",
+            "frontmatter が YAML のマッピング (key: value の並び) でない",
+        ),
+        (
+            "---\ntitle: SECRET\n---\n",
+            "frontmatter の必須キーが無い・空: description, author, updated",
+        ),
+        (
+            _fm().replace("title: t", "title: {a: SECRET}"),
+            "title は 1 行の文字列で書く",
+        ),
+        (_fm().replace("2026-10-01", "SECRET"), "updated が YYYY-MM-DD でない"),
+        (_fm("requires: SECRET\n"), "requires がリストでない"),
+        (
+            _fm("requires:\n  - shell: ../SECRET.sh\n"),
+            "requires の 1 番目 (shell) が記法に合わない",
+        ),
+        (
+            _fm("requires:\n  - read: ok.md\n  - SECRET\n"),
+            "requires の 2 番目 が記法に合わない",
+        ),
+        (_fm("requires:\n  - ツール: SECRET\n"), "requires の 1 番目 が記法に合わない"),
+    ],
+)
+def test_broken_mark_for_each_kind_says_what_and_where_without_author_text(
+    text, reason
+):
+    reasons = _safe(text)
+    assert reason in reasons
+    line = R.broken_line(reasons)
+    assert "SECRET" not in line
+    assert line.endswith("。read_file で原文 (RECIPE.md) を見て edit_recipe で直す]")
+
+
+def test_broken_reasons_are_detailed_for_save_and_edit():
+    """save / edit の検査 (自分が書いたもの) と safe でない判定は値まで言う (今までどおり)。"""
+    assert R.frontmatter_problems(
+        _fm().replace("2026-10-01", "SECRET"), _SAFE_FOLDER
+    ) == ["updated が YYYY-MM-DD でない: 'SECRET'"]
+    assert (
+        "SECRET"
+        in R.frontmatter_problems("---\ntitle: [SECRET\n---\n", _SAFE_FOLDER)[0]
+    )
+
+
+def test_broken_mark_hides_keys_yaml_rewrote_and_counts_lines_from_the_file():
+    """YAML が読み替えたキー (`yes:` → True、`010:` → 8) は原文と違う形なので出さない。YAML の行番号は
+    `---` の後の空行を含めたファイルの行。"""
+    for key in ("yes", "on", "~", "010", "1_000"):
+        assert _safe(_fm(f"{key}: SECRET\n")) == [
+            "frontmatter の知らないキー (名前は原文で)"
+        ], key
+    text = "---\n\n\ntitle: [SECRET\n---\n"
+    assert _safe(text) == ["frontmatter が YAML として読めない (4 行目)"]
+    assert text.splitlines()[3].startswith("title: [")
+    # 日付として読めない値・深い入れ子は YAMLError でなく落ちていた
+    assert _safe(_fm().replace("2026-10-01", "2026-02-30")) == [
+        "frontmatter が YAML として読めない"
+    ]
+    assert _safe("---\nx: " + "[" * 2000 + "\n---\n") == [
+        "frontmatter が YAML として読めない"
+    ]

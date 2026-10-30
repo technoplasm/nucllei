@@ -59,8 +59,18 @@ NAME_MAX_BYTES = 200
 # 一覧の description の上限 (1 行に畳んでから)
 INDEX_DESCRIPTION_CHARS = 120
 
-# 壊れたレシピの次の手 (一覧の印・load_recipe の ERROR で同じ文面 — ken 2026-10-30)
-BROKEN_NEXT = "edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)"
+# 壊れたレシピの次の手 (一覧の印・load_recipe の ERROR — ken 2026-10-30)。印の理由は書いた人の文を
+# 含まない (`assess_recipe(safe=True)`) ので、直すには原文を見る — read_file を先に言う (staging で
+# 「壊れているのを全部直して」に load_recipe → ERROR → read_file → edit_recipe の 3 手ずつ掛かった。
+# llens 経由 ken 2026-10-30)。RECIPE.md そのものが無い・読めないものは作り直す
+BROKEN_NEXT = "read_file で原文 (RECIPE.md) を見て edit_recipe で直す"
+BROKEN_REWRITE_NEXT = "save_recipe で作り直す"
+# 直せない人 (全体の層を管理者でない人が読む) には直させない — read_file → edit_recipe の ERROR の 2 手が
+# 無駄になる (敵対レビュー)
+BROKEN_READONLY_NEXT = "直せるのは管理者なので、壊れていることをユーザーに伝える"
+# 印に出してよいキーの名前 (キーの名前も書いた人の文 — これ以外の形は名前を出さない。ken 2026-10-30
+# 「不正なキーがあるとわかればいい」)
+RE_SHOWN_KEY = re.compile(r"[A-Za-z0-9_-]{1,32}")
 
 # 能力「レシピ」で middleware が合成して差し込む tool (builtin_tools/recipe_tools.build_recipe_tools)
 RECIPE_FUNCTION_NAMES = ("load_recipe", "save_recipe", "edit_recipe")
@@ -487,14 +497,20 @@ def read_frontmatter(text: str) -> tuple[Optional[Frontmatter], Optional[str]]:
         return None, "frontmatter (--- で囲んだ先頭ブロック) が無い"
     block = m.group(1)
     lines = block.splitlines()
+    # block の 0 行目がファイルの何行目か (`---` の後の空行は RE_FM が飲むので数える)
+    first = text[: m.start(1)].count("\n") + 1
     try:
         data = yaml.safe_load(block)
     except yaml.YAMLError as e:
         mark = getattr(e, "problem_mark", None) or getattr(e, "context_mark", None)
         if mark is not None and 0 <= mark.line < len(lines):
             return None, (
-                f"frontmatter が YAML として読めない ({mark.line + 2} 行目: {lines[mark.line]!r})"
+                f"frontmatter が YAML として読めない ({first + mark.line} 行目: {lines[mark.line]!r})"
             )
+        return None, "frontmatter が YAML として読めない"
+    except (ValueError, RecursionError):
+        # 日付として読めない値 (`2026-02-30`)・深すぎる入れ子は YAMLError でなく落ちる — 一覧・load_recipe を
+        # 巻き込まない (敵対レビュー 2026-10-30)
         return None, "frontmatter が YAML として読めない"
     if not isinstance(data, dict):
         return None, "frontmatter が YAML のマッピング (key: value の並び) でない"
@@ -882,7 +898,7 @@ def recipe_refs(
             refs.paths.add(item.ref_path)
 
 
-def assess_recipe(folder: str, md: Optional[dict]) -> list[str]:
+def assess_recipe(folder: str, md: Optional[dict], safe: bool = True) -> list[str]:
     """レシピが壊れている理由 (壊れていなければ [])。一覧・load_recipe が同じこれを通る。
 
     「壊れている」は**frontmatter そのものの不正だけ** (と RECIPE.md が無い・普通のファイルでない) —
@@ -890,7 +906,8 @@ def assess_recipe(folder: str, md: Optional[dict]) -> list[str]:
     止めない — ken 2026-10-30「依存を消しちゃうのはよくあるので、warn で実行はできるが警告がモデルに
     入る」)。
 
-    - `md`: `{"type": "file"|"symlink"|…, "text": str|None}` (RECIPE.md が無ければ None)"""
+    - `md`: `{"type": "file"|"symlink"|…, "text": str|None}` (RECIPE.md が無ければ None)
+    - `safe`: 書いた人の文を混ぜない理由 (一覧の印・load_recipe の ERROR — `frontmatter_problems`)"""
     if md is None:
         return ["RECIPE.md が無い"]
     if md.get("type") != "file":
@@ -898,7 +915,27 @@ def assess_recipe(folder: str, md: Optional[dict]) -> list[str]:
     text = md.get("text")
     if text is None:
         return ["RECIPE.md がテキストでない"]
-    return frontmatter_problems(text, folder)
+    return frontmatter_problems(text, folder, safe=safe)
+
+
+def md_unusable(reasons: list[str]) -> bool:
+    """RECIPE.md そのものが無い・普通のファイルでない・テキストでない (edit_recipe では直せない)。"""
+    return bool(reasons) and reasons[0].startswith("RECIPE.md が")
+
+
+def broken_next(reasons: list[str], md_path: str = "", writable: bool = True) -> str:
+    """壊れたレシピの次の手。`md_path` (load_recipe の ERROR) があれば原文のパスを添える。`writable` は
+    読む人がその層に書けるか (`recipe_writable`)。"""
+    if not writable:
+        return BROKEN_READONLY_NEXT
+    if md_unusable(reasons):
+        return BROKEN_REWRITE_NEXT
+    if not md_path:
+        return BROKEN_NEXT
+    return (
+        f"read_file で原文 ({md_path}) を見て edit_recipe で直す"
+        " (丸ごと書き直すなら save_recipe で上書き)"
+    )
 
 
 # 廃止したキー・よくある綴り違いの案内 (近い綴りより先に出す)
@@ -907,6 +944,46 @@ RETIRED_KEYS = {
     "tools": "tools は廃止 (使える人が限られる関数は本文の関数名で判定する)",
     "tool_ids": "tool_ids は廃止 (使える人が限られる関数は本文の関数名で判定する)",
 }
+
+
+def _shown_key(k) -> Optional[str]:
+    """印に出してよいキーの名前 (`RE_SHOWN_KEY` に合うものだけ)。合わなければ None。"""
+    # 文字列のキーだけ (`yes:` → True・`010:` → 8 のように YAML が読み替えたものは原文と違う形になる)
+    if not isinstance(k, str):
+        return None
+    return k if RE_SHOWN_KEY.fullmatch(k) else None
+
+
+def _safe_requires_problems(value, folder: str) -> list[str]:
+    """requires の記法の誤り (一覧の印・load_recipe の ERROR 用)。何番目か・種類の名前 (`_shown_key` を
+    通るもの) だけを言い、値は出さない。判定は `parse_recipe_requires` を要素ごとに通す。"""
+    if value is None or value == "":
+        return []
+    if not isinstance(value, list):
+        return ["requires がリストでない"]
+    out = []
+    for n, entry in enumerate(value):
+        if not parse_recipe_requires([entry], folder)[1]:
+            continue
+        kind = None
+        if isinstance(entry, dict) and len(entry) == 1:
+            kind = _shown_key(next(iter(entry)))
+        if kind == "skill":
+            out.append(
+                f"requires の {n + 1} 番目の skill は書けない (skill はモデルが読み込む)"
+            )
+            continue
+        out.append(
+            f"requires の {n + 1} 番目"
+            + (f" ({kind})" if kind else "")
+            + " が記法に合わない"
+        )
+    return out
+
+
+_RE_YAML_LINE = re.compile(
+    r"^(frontmatter が YAML として読めない \(\d+ 行目): .*\)$", re.S
+)
 
 
 def unknown_key_problem(k) -> str:
@@ -922,15 +999,41 @@ def unknown_key_problem(k) -> str:
     )
 
 
-def frontmatter_problems(text: str, folder: str) -> list[str]:
+def frontmatter_problems(text: str, folder: str, safe: bool = False) -> list[str]:
     """frontmatter の不正 (スキーマの誤り) — 閉じていない・YAML でない・知らないキー・必須キーが無い・
     型が違う (title / description / author は 1 行の文字列、updated は YYYY-MM-DD)・requires の形が
     記法に合わない。ここに当たるものが「壊れている」で、save / edit の「frontmatter の規則」も
-    これだけ (書き込みの規則は `check_folder`)。"""
+    これだけ (書き込みの規則は `check_folder`)。
+
+    `safe` (一覧の印・load_recipe の ERROR): 書いた人の文を混ぜない — 行の中身・値は出さず、何が・どこが
+    (行番号・何番目・キーの名前は `_shown_key` を通るものだけ) だけを言う。印は system prompt に tool の
+    文として入る (llens 経由 ken 2026-10-30)。save / edit の検査 (自分が書いたもの) は詳しいまま。"""
     fm, problem = read_frontmatter(text)
     if fm is None:
-        return [problem]
-    out: list[str] = [unknown_key_problem(k) for k in fm.data if k not in KNOWN_KEYS]
+        return [_RE_YAML_LINE.sub(r"\1)", problem) if safe else problem]
+    if safe:
+        out = []
+        for k in fm.data:
+            if k in KNOWN_KEYS:
+                continue
+            name = _shown_key(k)
+            # 廃止したキーは短く添える (tool の文 — 名前の完全一致で引く)
+            retired = (
+                RETIRED_KEYS.get(str(k), "")
+                .split(" (")[0]
+                .removeprefix(f"{k} は")
+                .strip()
+            )
+            out.append(
+                (
+                    f"frontmatter の知らないキー {name}"
+                    + (f" ({retired})" if retired else "")
+                )
+                if name
+                else "frontmatter の知らないキー (名前は原文で)"
+            )
+    else:
+        out = [unknown_key_problem(k) for k in fm.data if k not in KNOWN_KEYS]
     missing = [k for k in REQUIRED_KEYS if not fm.get(k)]
     if missing:
         out.append("frontmatter の必須キーが無い・空: " + ", ".join(missing))
@@ -939,7 +1042,9 @@ def frontmatter_problems(text: str, folder: str) -> list[str]:
             out.append(f"{k} は 1 行の文字列で書く")
     upd = fm.get("updated")
     if upd and _updated_date(upd) is None:
-        out.append(f"updated が YYYY-MM-DD でない: {upd!r}")
+        out.append("updated が YYYY-MM-DD でない" + ("" if safe else f": {upd!r}"))
+    if safe:
+        return out + _safe_requires_problems(fm.data.get("requires"), folder)
     _, errors = parse_recipe_requires(fm.data.get("requires"), folder)
     return out + errors
 
@@ -1088,10 +1193,15 @@ def _shown(reasons: list[str]) -> str:
     return " ".join(shown.split()).replace("[", "［").replace("]", "］")
 
 
-def broken_line(reasons: list[str]) -> str:
+def recipe_writable(folder: str, role: Optional[str]) -> bool:
+    """読む人がそのレシピの層に書けるか。一覧に出るのは個人・所属グループ (書ける) と全体 (管理者だけ)。"""
+    return role == "admin" or not (folder == PUBLIC or folder.startswith(PUBLIC + "/"))
+
+
+def broken_line(reasons: list[str], writable: bool = True) -> str:
     """一覧の印 (`[壊れている: …]`)。行頭 (`- ` の直後) に置く — description は `—` の後にしか
     出ないので、description に同じ形を書いても印にはならない (2026-10-30 llens のレビュー)。"""
-    return f"[壊れている: {_shown(reasons)}。{BROKEN_NEXT}]"
+    return f"[壊れている: {_shown(reasons)}。{broken_next(reasons, writable=writable)}]"
 
 
 def warning_line(reasons: list[str]) -> str:

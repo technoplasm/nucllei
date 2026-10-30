@@ -2283,8 +2283,8 @@ class Tools:
             body += f"\n\n(続きあり: next_offset={end}。続きは offset={end} で読む)"
         if is_recipe_md_path(abs_path):
             body += (
-                "\n\nレシピは load_recipe(path) で読み込む (load_recipe が無いモデルでは"
-                "レシピが無効)。"
+                "\n\nレシピは load_recipe(path) で読み込み、直すなら edit_recipe で直す"
+                " (load_recipe が無いモデルではレシピが無効)。"
             )
         return _read_rendered(abs_path, body)
 
