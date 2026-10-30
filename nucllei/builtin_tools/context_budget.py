@@ -54,11 +54,8 @@ class Tools:
         __request__=None,
         __model__: Optional[dict] = None,
     ) -> dict:
-        """現在の会話の context 使用量と残量を返す。作業が伸びて(長い推論・tool の連打)
-        自分がどれだけ context を消費したか確かめたいときに呼ぶ。値は推定ではなく、
-        このターンの最新のモデル呼び出し時点でエンジンが実測した usage(入力 + 再送される
-        出力)。いま実行中のステップの tool 結果はまだ含まれない(次の呼び出しで加算される)。
-        残量が少なければ、新しい長尺タスクを避ける・結論を早めに確定する等の判断材料にする。
+        """現在の会話の context 使用量と残量を返す。作業が伸びて (長い推論・tool の連打) 残りを
+        確かめたいときに呼び、少なければ新しい長尺タスクを避ける・結論を早めに確定する判断材料にする。
 
         :return: {ok, used_tokens, remaining_tokens, context_size, used_pct, note} / 取得不能時は ToolError(ERROR: の文)
         """
