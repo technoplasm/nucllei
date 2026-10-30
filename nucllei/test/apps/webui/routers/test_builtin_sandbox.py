@@ -2375,3 +2375,22 @@ def test_reference_params_are_described_in_fixed_words():
     # 「相対も通る」は消えている
     for name in ("write_file", "read_file", "list_workspace", "fetch_from_workspace"):
         assert "相対" not in described(sandbox, name, "path"), name
+
+
+def test_run_python_says_to_use_only_executed_output():
+    """run_python の説明は「計算・集計の結果は実行した出力だけ」を言う (2026-10-30 llens staging: 呼ばずに
+    コードと作った「出力」を書く回が出た)。規則は tool の説明だけが持つ (llens の prompt には無い)。
+    共通注記の後ろに付くので、run_python 自身の説明の先頭 2 文に置く。"""
+    from nucllei.builtin_tools.sandbox import Tools
+    from nucllei.utils.tools import get_tool_specs
+
+    desc = next(s for s in get_tool_specs(Tools()) if s["name"] == "run_python")[
+        "description"
+    ].replace("\n", "")
+    assert desc.startswith(
+        "sandbox で Python コードを実行する。コードの出力やコードで出した値を答えに書くときは、必ずこれ"
+        "(か run_python_once / run_shell) で実際に実行し、返った出力だけを書く — 実行していないコードの出力・"
+        "「実行例」「実行すると〜になる」は書かない。"
+    )
+    # モデルに送る形 (get_tools) では共通注記の直後に来る (注記は run_python に前置 — toolkit_note_anchor)
+    assert Tools.toolkit_note_anchor == "run_python"

@@ -1511,12 +1511,21 @@ class Tools:
         __chat_id__: Optional[str] = None,
     ) -> str:
         """
-        sandbox で Python コードを実行する。この会話の中では変数・import・関数定義が実行を跨いで
+        sandbox で Python コードを実行する。コードの出力やコードで出した値を答えに書くときは、必ずこれ
+        (か run_python_once / run_shell) で実際に実行し、返った出力だけを書く — 実行していないコードの出力・
+        「実行例」「実行すると〜になる」は書かない。この会話の中では変数・import・関数定義が実行を跨いで
         残り、最後の式の値が表示される。
 
         :param code: 実行する Python コード
         :param timeout_s: このセルの wall clock 秒数 (省略時 120、上限 600)
         """
+        # 「実行した出力だけを使う」(2026-10-30 llens staging の batch 2 比較): P10「算定要件 + Python で
+        # 計算して」で、run_python を呼ばずにコードと作った「出力」を書く回が出た (b1 0/10 → b2 2/9)。
+        # どの版の説明にもこの規則は無い (もともと起こりうる失敗)。b2 で共通注記 (環境の事実 470 字) が
+        # run_python の説明の前に付いて「実行する tool」であることが薄まった疑いはあるが、b2 は他の tool の
+        # 説明も同時に変えており 0/10 対 2/9 は偶然でも出る (敵対レビュー)。規則は tool の説明だけが持つ
+        # (llens 決定 — どの preset にも効く。llens の prompt には足さない)。対象は「コードの出力・コードで
+        # 出した値」に絞る (「計算の結果」だと暗算の足し算まで run_python に回しうる)
         return await self._exec_cell(code, timeout_s, __user__, __chat_id__)
 
     async def run_python_once(
