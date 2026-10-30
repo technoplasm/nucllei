@@ -2236,6 +2236,36 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     only what it does, how to append and the arguments; the rest (no match,
     creating, binary, size, encoding, writable places) is said by the error or
     result of that case.
+    **`rm` guard on `run_shell` (2026-10-30, requested by llens):** asked to
+    「完全に消して」, the model sometimes ran `rm -rf /workspace/<作業フォルダ>` (and once,
+    as an admin, `rm -rf` on shared `/ext/public` recipes) instead of `remove_file`.
+    Before sending a command to the sandbox, `run_shell` looks for a plain `rm`
+    **command word** (at the start, after `;` `&&` `||` `|` `&` a newline `(` `$(` or a
+    backtick, after `if` / `then` / `do` / … and past `sudo` / `env` / `command` / `exec` /
+    `nohup` / `time` / `nice` / `timeout` (with their value-taking options) and
+    `VAR=value` prefixes; `/bin/rm`, `\rm`, `'rm'` and `unlink` count) and resolves its
+    operands — relative ones against the working directory `/workspace` (following a
+    literal `cd` / `pushd`, scoped to `( … )` subshells; after a `cd` it cannot resolve,
+    `cd -` or `popd`, relative operands are ignored), `~` / `$HOME` as `/workspace`,
+    `$PWD` as the current directory, a glob by the part before its first
+    metacharacter, `..` and a leading `//` folded; redirections (`2>/dev/null`) are
+    not operands — and refuses the whole command if any operand is under `/workspace`
+    or `/ext` (or `/` itself, so `rm -rf /*` counts):
+    「<path> を rm で消すコマンドなので、コマンド全体を実行していない。次の手: 消すのは remove_file (その置き場のゴミ箱へ移る。完全に消したいならユーザーが画面のワークスペースの「サンドボックス」で消せる)。別の手段 (find -delete・python 等) で消し直さない。」.
+    Deployment exceptions go in the sandbox valve `rm_allowed_paths` (absolute
+    paths separated by newlines / commas; `rm` **below** each is let through — not the
+    place itself; a segment may use `*` `?` `[…]`; a glob operand is let through only
+    when the part before the glob is itself below an entry, so a place cannot be
+    emptied with `…/*`); the default is none.
+    Paths are normalised before comparing, so `/workspace/memory/../x` is not under
+    `/workspace/memory`; symlinks are not resolved (nucllei does not see the sandbox
+    fs). **This is a guard against the common direct `rm`, not a security boundary**:
+    `find -delete`, `xargs rm`, `python -c "os.remove(…)"`, `mv … /dev/null`, a path
+    in a variable, `eval`, a script file that calls `rm` and the like are not looked
+    for (nor `$(…)` inside double quotes). Parsing is conservative — `rm` only as a
+    command word (`echo rm …`, `grep rm file`, `git rm` pass), `#` comments (outside
+    quotes, at a word start) and `\`-newline continuations are handled, and a command
+    it cannot read (unclosed quote, a heredoc `<<`) runs unchanged (`utils/rm_guard.py`).
     `remove_file(path)` (2026-10-27, decided by ken, requested by llens)
     **moves** a file or a folder (with its contents) to the trash of the place
     it is in — it never deletes: `/workspace/…` → `/workspace/trash/<name>`,

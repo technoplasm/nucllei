@@ -1305,6 +1305,12 @@ class Tools:
             description="read_file が /ext の proxy の置き場 (EXT_MOUNTS の http(s) の物) を断る"
             "ときの次の手 (モデル向け。その資料を読む手段の案内)",
         )
+        rm_allowed_paths: str = Field(
+            default="",
+            description="run_shell で rm してよい置き場 (改行・カンマ区切りの絶対パス。その下の rm を"
+            " 止めない。各段で * を使える)。既定は無し — /workspace と /ext の下の rm は止めて"
+            " remove_file へ向ける (歯止めであって安全の境界ではない — README_API)",
+        )
         debug: bool = Field(default=False, description="詳細ログ")
 
     def __init__(self):
@@ -1557,6 +1563,25 @@ class Tools:
         :param command: 実行する bash コマンド (スクリプト可)
         :param timeout_s: wall clock 秒数 (省略時 120、上限 600)
         """
+        # rm の歯止め (2026-10-30 llens 経由 ken): /workspace・/ext の下を直接 rm するコマンドは送らない
+        # — 「完全に消して」に rm -rf で応える回があった。消すのは remove_file (ゴミ箱)。よくある直接の
+        # rm だけを止める (安全の境界ではない — utils/rm_guard)
+        from nucllei.utils.rm_guard import blocked_rm_targets, parse_allowed
+
+        blocked = blocked_rm_targets(
+            command if isinstance(command, str) else "",
+            parse_allowed(self.valves.rm_allowed_paths),
+        )
+        if blocked:
+            shown = "、".join(dict.fromkeys(blocked[:3])) + (
+                " ほか" if len(blocked) > 3 else ""
+            )
+            raise ToolCallError(
+                f"{shown} を rm で消すコマンドなので、コマンド全体を実行していない",
+                "消すのは remove_file (その置き場のゴミ箱へ移る。完全に消したいならユーザーが画面の"
+                "ワークスペースの「サンドボックス」で消せる)。別の手段 (find -delete・python 等) で"
+                "消し直さない。",
+            )
         return await self._exec("shell", command, timeout_s, __user__)
 
     # =========================================================================
