@@ -115,3 +115,36 @@ class TestRecipeCapability(AbstractPostgresTest):
         finally:
             monkeypatch.setattr(middleware, "get_tools", real_get_tools)
         assert metadata["tools"]["load_recipe"]["tool_id"] == "recipes"
+
+    def test_variable_in_preset_system_keeps_the_description_fixed(self, monkeypatch):
+        """preset の system prompt (DB の行 — subagent の子 preset も id で同じく引く) に {{USER_RECIPES}}
+        があれば、load_recipe の説明に一覧を入れない (1 文だけ)。一覧の取得はそれでも 1 回 (変数の展開用)。
+        変数が無ければ今までどおり説明に一覧が入る。"""
+        from nucllei.builtin_tools.recipe_tools import RECIPE_INDEX_IN_PROMPT
+        from nucllei.models.models import ModelForm, ModelMeta, ModelParams, Models
+
+        Models.insert_new_model(
+            ModelForm(
+                id="rp",
+                base_model_id="base",
+                name="rp",
+                meta=ModelMeta(),
+                params=ModelParams(system="前\n{{SKILLS}}\n{{USER_RECIPES}}\n後"),
+            ),
+            "1",
+        )
+        try:
+            form_data, metadata, asked = _run_payload(_model(), monkeypatch)
+            desc = metadata["tools"]["load_recipe"]["spec"]["description"]
+            assert desc.endswith("\n\n" + RECIPE_INDEX_IN_PROMPT)
+            assert "- x" not in desc
+            assert asked == ["1"]
+        finally:
+            Models.delete_model_by_id("rp")
+        # 行が無ければ MODELS の info の params.system を見る
+        model = _model()
+        model["info"]["params"] = {"system": "{{USER_RECIPES}}"}
+        _, metadata, _ = _run_payload(model, monkeypatch)
+        assert metadata["tools"]["load_recipe"]["spec"]["description"].endswith(
+            RECIPE_INDEX_IN_PROMPT
+        )

@@ -1,6 +1,8 @@
 import logging
 import math
 import re
+import time
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Optional
 
@@ -102,6 +104,117 @@ def user_prompt_params(user) -> dict:
     }
 
 
+# {{SKILLS}} / {{USER_RECIPES}}(2026-10-30、llens 経由 ken「tool → system prompt → スキル → レシピの並び。
+# 日付・スキル・利用者・レシピ一覧を {{}} で system prompt に入れるほうが自然」): 利用者ごとに変わる
+# 一覧を tool の説明 (chat template で system より前に出る) から system prompt へ移せるようにする。
+# preset の system prompt に変数があれば load_skill / load_recipe の説明には一覧を入れない
+# (middleware — preset_system_prompt)。展開には preset (model) が要る: どの skill が載るか
+# (meta.skillIds・能力「スキル」)、能力「レシピ」が有効か。model を渡さない呼び出し (タイトル生成等)
+# では空。
+SKILLS_TOKEN = "{{SKILLS}}"
+USER_RECIPES_TOKEN = "{{USER_RECIPES}}"
+# レシピの一覧は sandbox に聞く (非同期) ので、同期の prompt_template は自分では取らない —
+# 能力「レシピ」が ON のリクエストで一度取ったもの (get_user_recipes: process_chat_payload の
+# build_recipe_tools・preset の system prompt を当てる直前の ensure_user_recipes・続きターンの wire の前)
+# をリクエストの間だけ ContextVar に持つ (1 リクエスト 1 回。念のため古い値は使わない)。
+RECIPES_NOT_FETCHED = "(レシピの一覧はここでは取れない)"
+_USER_RECIPES_TTL_S = 60
+_user_recipes: ContextVar[Optional[dict]] = ContextVar(
+    "nucllei_user_recipes", default=None
+)
+
+
+def _user_id_of(user) -> Optional[str]:
+    if user is None:
+        return None
+    if isinstance(user, str):
+        return user or None
+    if isinstance(user, dict):
+        return user.get("id") or None
+    return getattr(user, "id", None) or None
+
+
+def as_model_dict(model) -> dict:
+    """preset を app.state.MODELS の形 (`{"id", "info": {…, "meta", "params"}}`) にそろえる。
+    models テーブルの行 (ModelModel) も受ける。"""
+    if model is None:
+        return {}
+    if isinstance(model, dict):
+        return model
+    dump = model.model_dump() if hasattr(model, "model_dump") else {}
+    return {"id": dump.get("id"), "info": dump}
+
+
+def preset_system_prompt(model) -> str:
+    """preset の system prompt (params.system)。routers が当てるのと同じく DB の行から読む (MODELS の
+    キャッシュは古いことがある)。無ければ MODELS の info、どちらも無ければ空。"""
+    model = as_model_dict(model)
+    model_id = model.get("id")
+    if model_id:
+        try:
+            from nucllei.models.models import Models
+
+            row = Models.get_model_by_id(model_id)
+        except Exception as e:
+            log.warning(f"preset {model_id} の system prompt を読めない: {e!r}")
+            row = None
+        if row is not None:
+            return ((row.params.model_dump() if row.params else {}) or {}).get(
+                "system"
+            ) or ""
+    return ((model.get("info") or {}).get("params") or {}).get("system") or ""
+
+
+def recipes_available(model) -> bool:
+    """このリクエストでレシピの tool と一覧を出すか (sandbox のある配備 ∧ 能力「レシピ」が ON)。"""
+    from nucllei.env import SANDBOX_URL
+    from nucllei.utils.recipes import is_recipes_feature_enabled
+
+    return bool(SANDBOX_URL) and is_recipes_feature_enabled(as_model_dict(model))
+
+
+async def get_user_recipes(user) -> str:
+    """見えるレシピの一覧 (user_recipes_text の結果)。このリクエストで取ってあればそれを、無ければ
+    取って持つ (1 リクエスト 1 回)。呼ぶのは能力「レシピ」が ON のときだけ。"""
+    uid = _user_id_of(user)
+    cache = _user_recipes.get()
+    if cache is None:
+        cache = {}
+        _user_recipes.set(cache)
+    hit = cache.get(uid)
+    if hit is not None and time.monotonic() - hit[0] < _USER_RECIPES_TTL_S:
+        return hit[1]
+    from nucllei.utils.recipe_index import user_recipes_text
+
+    text = await user_recipes_text(user)
+    cache[uid] = (time.monotonic(), text)
+    return text
+
+
+async def ensure_user_recipes(user, model, *templates) -> None:
+    """`templates` のどれかに {{USER_RECIPES}} があり、能力「レシピ」が ON なら一覧を取っておく
+    (このリクエストで取ってあれば何もしない)。無ければ sandbox に聞かない。"""
+    if not any(isinstance(t, str) and USER_RECIPES_TOKEN in t for t in templates):
+        return
+    if not _user_id_of(user) or not recipes_available(model):
+        return
+    await get_user_recipes(user)
+
+
+def _user_recipes_block(model, user_id: Optional[str]) -> str:
+    if not model or not user_id or not recipes_available(model):
+        return ""
+    hit = (_user_recipes.get() or {}).get(user_id)
+    if hit is None or time.monotonic() - hit[0] >= _USER_RECIPES_TTL_S:
+        log.warning(
+            "{{USER_RECIPES}} を先に取っていない経路で展開した (ensure_user_recipes の呼び漏れ)"
+        )
+        return RECIPES_NOT_FETCHED
+    from nucllei.utils.recipe_index import recipe_index_block
+
+    return recipe_index_block(hit[1])
+
+
 # datetime.weekday() の順(月曜 = 0)
 _WEEKDAYS_JA = ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日")
 
@@ -113,12 +226,17 @@ def prompt_template(
     base_model_id: Optional[str] = None,
     user_role: Optional[str] = None,
     user_id: Optional[str] = None,
+    model=None,
 ) -> str:
     """サーバー既知のプロンプト変数を展開する(変数の一覧はここが単一情報源)。
 
     {{USER_ROLE}} は role の値そのまま(不明なら "Unknown")。{{USER_GROUPS}} は
     user_group_names(user_id) を ", " でつないだもの(所属なし・user 不明なら空文字列)。
     グループの DB 照会は {{USER_GROUPS}} が本文にあるときだけ、1 呼び出しにつき 1 回。
+    {{SKILLS}} は model (preset) で load_skill できる skill の一覧 (見出し + `- <id>: <説明>` —
+    load_skill の説明に入れていたものと同じ。能力「スキル」OFF・0 件・model 無しなら空)。
+    {{USER_RECIPES}} は見えるレシピの一覧 (見出し + 行頭の印付きの行。0 件はその 1 文。能力「レシピ」
+    OFF・sandbox 無し・model 無しなら空) で、非同期の入口が先に取ったものを入れる。
     """
     # Get the current date
     current_date = datetime.now()
@@ -159,6 +277,17 @@ def prompt_template(
     if "{{USER_GROUPS}}" in template:
         template = template.replace(
             "{{USER_GROUPS}}", ", ".join(user_group_names(user_id))
+        )
+    if SKILLS_TOKEN in template:
+        from nucllei.utils.skills import skills_block
+
+        template = template.replace(
+            SKILLS_TOKEN,
+            skills_block(as_model_dict(model), user_id) if model and user_id else "",
+        )
+    if USER_RECIPES_TOKEN in template:
+        template = template.replace(
+            USER_RECIPES_TOKEN, _user_recipes_block(model, user_id)
         )
 
     return template

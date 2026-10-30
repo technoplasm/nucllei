@@ -2749,9 +2749,14 @@ POST /api/v1/skills/create
   `(name.casefold(), name)`; empty string if none — admins get only their own
   memberships, not every group), `{{BASE_MODEL_ID}}` (id of the base model
   that actually runs inference — the selected preset's `base_model_id`; `Unknown`
-  if the server cannot resolve it). `{{USER_RECIPES}}` was retired on 2026-10-30
-  (the recipe list now sits in `load_recipe`'s description — §6.5) and is left
-  as literal text, like any unknown variable. The same variables are expanded in a preset's
+  if the server cannot resolve it), `{{SKILLS}}` (the skills the user can load
+  with `load_skill` in this preset — `使える skill (load_skill の skill_id にそのまま渡す):`
+  then `- <id>: <description>` lines, the same manifest as below, §6.3; empty when
+  the preset's "Skills" capability is off or no skill is listed), `{{USER_RECIPES}}`
+  (the recipes the user can see — the same block as in `load_recipe`'s
+  description, §6.5; empty when the "Recipes" capability is off or there is no
+  sandbox; fetched once per request). Both need the preset, so they are empty
+  where none is known (e.g. title generation). The same variables are expanded in a preset's
   system prompt (`params.system`). Inside a subagent's turn `{{BASE_MODEL_ID}}`
   refers to the child preset's base, while the `{{USER_*}}` variables stay those
   of the user who started the parent chat. There is no call-time parameter mechanism.
@@ -2809,6 +2814,19 @@ condition passes through as plain text (no error).
   model gets one `load_skill(skill_id)` pseudo-tool whose description embeds the
   manifest (`- <id>: <description>` lines, enum-constrained). Tools loaded this
   way are available from the next tool-loop iteration.
+  **If the preset's system prompt contains `{{SKILLS}}`** (2026-10-30, ken: "tools
+  → system prompt → skills → recipes; the lists go into the system prompt"), the
+  manifest goes there instead and `load_skill`'s description ends with the fixed
+  sentence `使える skill の一覧は system prompt の「使える skill (load_skill の skill_id
+  にそのまま渡す)」にある。`, with no `enum`. Chat templates (Kimi / MiMo / GLM) put
+  the tool declarations before the system prompt, so per-user lists in tool
+  descriptions kept the whole prompt out of the cross-user prefix cache; with
+  the variable, a preset's tool declarations are the same string for every user.
+  An id the user cannot see is still refused (`system prompt の「使える skill
+  (…)」の一覧にある id をそのまま渡す。`). Without the variable nothing changes, so a
+  preset that forgets it keeps the list. Which system prompt counts: the preset's
+  `params.system`, read from the database like the routers do (a subagent's child
+  preset the same way).
 
 - **Attachment path** (auto-load): for every skill of the preset that declares
   `auto_load_content_types`, the server checks the request's attachments — the
@@ -2968,8 +2986,12 @@ recipes the user can see are appended to `load_recipe`'s description, after
 is the author's words, not an instruction) — personal, the groups the user **belongs to**
 (admins too: memberships only, the same rule as `{{USER_GROUPS}}`), then
 everyone — one line each, ordered by layer then folder name (no recipes:
-`見えるレシピは無い (作るなら save_recipe)。`). It replaces the retired
-`{{USER_RECIPES}}` variable; no prompt has to mention it:
+`見えるレシピは無い (作るなら save_recipe)。`). **If the preset's system prompt
+contains `{{USER_RECIPES}}`**, the same block goes there instead and
+`load_recipe`'s description ends with `見えるレシピの一覧は system prompt の「見えるレシピ
+(path にそのまま渡す。…)」にある。` — the same reason and rule as `{{SKILLS}}` (§6.3):
+a preset's tool declarations become one string for every user. Without the
+variable the list stays in the description:
 
 ```
 - /workspace/recipes/月次集計 — 月次の件数を集計して表にする

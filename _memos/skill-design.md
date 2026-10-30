@@ -22,7 +22,13 @@
    admin でも所属分のみ。グループ照会は {{USER_GROUPS}} が本文にあるときだけ prompt_template 1 回に
    つき 1 回。subagent の子ターンでも親と同じユーザー。一覧と定義は `utils/task.py`
    (prompt_template / resolve_base_model_id / user_group_names / user_prompt_params)が
-   単一情報源で、preset のシステムプロンプトと共通
+   単一情報源で、preset のシステムプロンプトと共通。
+   {{SKILLS}}(2026-10-30 追加、ken「tool → system prompt → スキル → レシピの並び」)= load_skill の
+   manifest と同じ一覧 (見出し `使える skill (load_skill の skill_id にそのまま渡す):` + `- id: 説明`。
+   `skill_manifest` を共有)。preset の system prompt にこれがあれば load_skill の説明には一覧も enum も
+   入れない (tool の宣言は chat template で system より前に出る — 利用者ごとの一覧が先頭にあると
+   prefix cache が利用者をまたげない)。レシピの一覧と違い「— の後は書いた人の文」は付けない: skill の
+   説明を書くのは管理者・スキル編集者で、preset に割り当てるのは管理者だから。
 5. 引数機構は初期実装なし(将来 optional で {{PARAM}} = frontmatter 定義の呼び出し時パラメータ)
 6. グローバル有効化トグルなし。制御面は**モデル(preset)設定に一元化**(#42 改訂):
    - モデル capability「スキル」(`meta.features.skills`、既定 ON)。OFF で manifest も

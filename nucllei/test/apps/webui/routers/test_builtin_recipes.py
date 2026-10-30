@@ -364,13 +364,85 @@ def test_capability_tools_run_without_builtin_sandbox(sbx, shell):
     assert shell["calls"] and "prep.sh" in shell["calls"][0]
 
 
-def test_user_recipes_variable_is_gone():
-    """{{USER_RECIPES}} は廃止 (一覧は load_recipe の説明へ)。展開しない — 未知の変数のまま。"""
-    from nucllei.utils.task import prompt_template
-
-    assert prompt_template("前 {{USER_RECIPES}} 後", user_id="u1") == (
-        "前 {{USER_RECIPES}} 後"
+def test_user_recipes_variable_expands_the_same_list(sbx):
+    """{{USER_RECIPES}} (2026-10-30 復活 — ken「一覧は {{}} で system prompt に」) は load_recipe の説明に
+    入れていたのと同じまとまり (見出し + 行頭の印付きの行)。能力「レシピ」OFF・sandbox 無し・model 無し
+    なら空。取得はリクエストに 1 回 (get_user_recipes を ensure / build_recipe_tools が共有)。"""
+    from nucllei.builtin_tools.recipe_tools import build_recipe_tools
+    from nucllei.utils.recipe_index import RECIPE_INDEX_HEADING
+    from nucllei.utils.task import (
+        RECIPES_NOT_FETCHED,
+        _user_recipes,
+        ensure_user_recipes,
+        prompt_template,
     )
+
+    _put(sbx["ws"], "集計", _md())
+    tpl = "前\n{{USER_RECIPES}}\n後"
+
+    async def go():
+        token = _user_recipes.set(None)
+        try:
+            before = prompt_template(tpl, user_id="u1", model=_model())
+            sbx["calls"].clear()
+            await ensure_user_recipes(USER, _model(), "変数なし")
+            await ensure_user_recipes(USER, _model({"recipes": False}), tpl)
+            assert sbx["calls"] == []  # 変数が無い・能力 OFF なら聞かない
+            await ensure_user_recipes(USER, _model(), tpl)
+            await ensure_user_recipes(USER, _model(), tpl)
+            tools = await build_recipe_tools(
+                _model(), USER, {"__user__": USER}, listing_in_prompt=True
+            )
+            assert sbx["calls"] == ["/recipes/index"]  # 1 リクエスト 1 回 (共有)
+            return (
+                before,
+                prompt_template(tpl, user_id="u1", model=_model()),
+                prompt_template(tpl, user_id="u1", model=_model({"recipes": False})),
+                prompt_template(tpl, user_id="u1"),
+                tools,
+            )
+        finally:
+            _user_recipes.reset(token)
+
+    before, on, off, no_model, tools = asyncio.run(go())
+    assert before == f"前\n{RECIPES_NOT_FETCHED}\n後"
+    assert (
+        on == f"前\n{RECIPE_INDEX_HEADING}\n- /workspace/recipes/集計 — 月次の集計\n後"
+    )
+    assert off == "前\n\n後" and no_model == "前\n\n後"
+    assert tools["load_recipe"]["spec"]["description"].endswith(
+        "\n\n見えるレシピの一覧は system prompt の「見えるレシピ (path にそのまま渡す。…)」にある。"
+    )
+
+
+def test_load_recipe_spec_is_the_same_for_every_user_when_listed_in_prompt(sbx):
+    """system prompt に {{USER_RECIPES}} がある preset では、load_recipe の spec は利用者・レシピ・所属に
+    よらず同じ文字列 (tool の宣言を preset ごとに固定 — prefix cache が利用者をまたげるように)。"""
+    _put(sbx["ws"], "集計", _md())
+    _put(sbx["ext"] / "groups" / "EMR", "抽出", _md(description="EMR の抽出"))
+
+    def specs(user, in_prompt):
+        from nucllei.builtin_tools.recipe_tools import build_recipe_tools
+        from nucllei.utils.task import _user_recipes
+
+        async def go():
+            token = _user_recipes.set(None)
+            try:
+                tools = await build_recipe_tools(
+                    _model(), user, {"__user__": user}, listing_in_prompt=in_prompt
+                )
+            finally:
+                _user_recipes.reset(token)
+            return json.dumps(
+                [tools[n]["spec"] for n in sorted(tools)], ensure_ascii=False
+            )
+
+        return asyncio.run(go())
+
+    # 個人のレシピがある u1・所属の違う管理者 (a1 は EMR に居ない)・別の利用者 u2
+    assert specs(USER, True) == specs(ADMIN, True) == specs(OTHER, True)
+    # 変数の無い preset では今までどおり説明に一覧が入るので、利用者で違う
+    assert specs(USER, False) != specs(ADMIN, False)
 
 
 # ---------------------------------------------------------------------------

@@ -63,6 +63,7 @@ def activate_skill(skill, user, model=None) -> str:
         skill.content,
         **user_prompt_params(user),
         base_model_id=resolve_base_model_id(model),
+        model=model,
     )
 
 
@@ -631,7 +632,66 @@ def current_skill_activation_seeds(skill_activations) -> list:
     ]
 
 
-def build_load_skill_tool(model, user, load_tools=None, messages=None, run_hooks=None):
+# {{SKILLS}} の見出し (load_skill の説明に置く 1 文が引く文言)。skill の説明は管理者・スキル編集者が
+# 書き、preset に割り当てるのは管理者なので、レシピの一覧のような「— の後は書いた人の文」は付けない
+SKILLS_HEADING = "使える skill (load_skill の skill_id にそのまま渡す):"
+# 一覧を system prompt の {{SKILLS}} に入れたとき、load_skill の説明に代わりに置く 1 文
+SKILLS_IN_PROMPT = (
+    f"使える skill の一覧は system prompt の「{SKILLS_HEADING[:-1]}」にある。"
+)
+
+
+class _UserRef:
+    """is_skill_visible に user id だけを渡すための入れ物 ({{SKILLS}} は prompt_template から id で来る)。"""
+
+    def __init__(self, uid: str):
+        self.id = uid
+
+
+def skill_manifest(model, user) -> dict:
+    """preset `meta.skillIds` ∩ ユーザー可視 ∩ 説明あり の skill (id → skill、skillIds の順)。
+    load_skill の説明・enum と {{SKILLS}} が同じこれを通る (二重実装しない)。能力「スキル」OFF なら {}。
+    user は UserModel / dict / user id。"""
+    if not is_skills_feature_enabled(model):
+        return {}
+    uid = user if isinstance(user, str) else getattr(user, "id", None)
+    if uid is None and isinstance(user, dict):
+        uid = user.get("id")
+    if not uid:
+        return {}
+    manifest = {}
+    for skill_id in get_model_skill_ids(model):
+        skill = Skills.get_skill_by_id(skill_id)
+        if (
+            skill is not None
+            and (skill.description or "").strip()
+            and is_skill_visible(skill, _UserRef(uid))
+        ):
+            manifest[skill.id] = skill
+    return manifest
+
+
+def skills_listing(manifest: dict) -> str:
+    # llens(#43): manifest 識別子は id 一本(旧 command)。id/name の二重露出はしない。
+    return "\n".join(
+        f"- {sid}: {skill.description.strip()}" for sid, skill in manifest.items()
+    )
+
+
+def skills_block(model, user) -> str:
+    """{{SKILLS}} の中身 (見出し + 一覧)。対象が無ければ空。"""
+    manifest = skill_manifest(model, user)
+    return f"{SKILLS_HEADING}\n{skills_listing(manifest)}" if manifest else ""
+
+
+def build_load_skill_tool(
+    model,
+    user,
+    load_tools=None,
+    messages=None,
+    run_hooks=None,
+    listing_in_prompt: bool = False,
+):
     """preset `meta.skillIds` ∩ ユーザー可視 から擬似 tool `load_skill` を合成する(#35 step2a)。
 
     - manifest の識別子は **command 一本**(id と name の二重露出はモデルが name を
@@ -655,46 +715,33 @@ def build_load_skill_tool(model, user, load_tools=None, messages=None, run_hooks
     load_skill 呼び出し — 渡されたときだけ見る)か、同じターン内の先行呼び出しで
     既に読んだ skill は、短い結果(LOADED_RESULT)を返す。tool の遅延取り込みは
     冪等なのでそのまま行う。
+
+    **preset の system prompt に {{SKILLS}} があれば** (`listing_in_prompt`)、一覧は system prompt に
+    入るので説明には 1 文 (SKILLS_IN_PROMPT) だけ置き、skill_id の enum も付けない — tool の宣言は
+    chat template で system より前に出るので、利用者ごとに変わる一覧・enum を入れると prefix cache が
+    利用者をまたげない (ken 2026-10-30)。説明と spec は preset ごとに同じ文字列になる。無ければ今までどおり。
     """
-    if not is_skills_feature_enabled(model):
-        return None
-    skill_ids = get_model_skill_ids(model)
-    if not skill_ids:
-        return None
-
-    manifest = {}
-    for skill_id in skill_ids:
-        skill = Skills.get_skill_by_id(skill_id)
-        if (
-            skill is not None
-            and (skill.description or "").strip()
-            and is_skill_visible(skill, user)
-        ):
-            manifest[skill.id] = skill
-
+    manifest = skill_manifest(model, user)
     if not manifest:
         return None
 
-    # llens(#43): manifest 識別子は id 一本(旧 command)。id/name の二重露出はしない。
-    listing = "\n".join(
-        f"- {sid}: {skill.description.strip()}" for sid, skill in manifest.items()
+    base = (
+        "skill を読み込む。作業の手順書 (自分向けの指示) を返すので、それに従って作業する。"
+        "skill によっては読み込むと tool が増える (戻り値の tools)。"
+        "手順書の見出しや文言は回答に写さない。"
     )
+    skill_id_param = {"type": "string", "description": "読み込む skill の id。"}
+    if listing_in_prompt:
+        description = base + SKILLS_IN_PROMPT
+    else:
+        description = base + "使える skill:\n" + skills_listing(manifest)
+        skill_id_param["enum"] = list(manifest.keys())
     spec = {
         "name": "load_skill",
-        "description": (
-            "skill を読み込む。作業の手順書 (自分向けの指示) を返すので、それに従って作業する。"
-            "skill によっては読み込むと tool が増える (戻り値の tools)。"
-            "手順書の見出しや文言は回答に写さない。使える skill:\n" + listing
-        ),
+        "description": description,
         "parameters": {
             "type": "object",
-            "properties": {
-                "skill_id": {
-                    "type": "string",
-                    "description": "読み込む skill の id。",
-                    "enum": list(manifest.keys()),
-                }
-            },
+            "properties": {"skill_id": skill_id_param},
             "required": ["skill_id"],
         },
     }
@@ -709,7 +756,11 @@ def build_load_skill_tool(model, user, load_tools=None, messages=None, run_hooks
         if skill is None:
             raise ToolCallError(
                 f"skill が見つからない: {skill_id}",
-                "load_skill の説明の一覧にある id をそのまま渡す。",
+                (
+                    f"system prompt の「{SKILLS_HEADING[:-1]}」の一覧にある id をそのまま渡す。"
+                    if listing_in_prompt
+                    else "load_skill の説明の一覧にある id をそのまま渡す。"
+                ),
             )
         # 判定と記録は await より前(同じターンの並列呼び出しでも本文は 1 回)
         first = skill.id not in loaded_skill_ids

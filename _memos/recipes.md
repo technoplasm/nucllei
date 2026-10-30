@@ -95,9 +95,16 @@
   `/workspace/recipes/<名前>/` は、共有の層では「見えないパス」で止まる。
 - **有効化はモデルの能力「レシピ」** (`meta.features.recipes`、既定 ON — ken 2026-10-30「スキルみたいに」
   「能力として」)。builtin_sandbox の関数だったのを外し、load_skill と同じく middleware が合成する。
-  一覧は load_recipe の説明に入れる (skill の manifest と同じ) — **{{USER_RECIPES}} は廃止**
-  (変数を書かなくても一覧が入る。旧変数は未知の変数として字面のまま残る)。一覧の取得は能力が ON の
-  リクエストだけ・1 回。経緯は `_memos/builtin-tools.md` 1b'。
+  一覧は load_recipe の説明に入れる (skill の manifest と同じ)。一覧の取得は能力が ON のリクエストだけ・
+  1 回。経緯は `_memos/builtin-tools.md` 1b'。
+- **{{USER_RECIPES}} は同日に一度廃止して復活** (ken 2026-10-30「tool → system prompt → スキル → レシピの
+  並び。一覧は {{}} で system prompt に入れるほうが自然」)。Kimi / MiMo / GLM の chat template は tool の
+  宣言を system より前に出すので、利用者ごとに変わる一覧を tool の説明に入れると先頭から利用者ごとに
+  別物になり、利用者をまたいだ prefix cache から外れる。preset の system prompt (DB の行の params.system)
+  に {{USER_RECIPES}} があれば一覧はそこへ入れ、load_recipe の説明は 1 文だけ (preset ごとに固定)。
+  無ければ今までどおり説明に入れる (書き忘れた preset で一覧が消えないように)。{{SKILLS}} も同じ
+  (`_memos/skill-design.md`)。取得はリクエストに 1 回 (`get_user_recipes` を build_recipe_tools と
+  routers の ensure_user_recipes が ContextVar で共有)。
 
 ## 割り切り・未了
 

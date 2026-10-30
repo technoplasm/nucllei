@@ -55,6 +55,7 @@ from nucllei.utils.executions import (
 )
 from nucllei.utils.image_refs import split_page, stored_ref_kind
 from nucllei.utils.task import (
+    ensure_user_recipes,
     prompt_template,
     resolve_base_model_id,
     user_prompt_params,
@@ -448,6 +449,7 @@ def build_wire_messages(chat_json: dict, user, leaf_id: str, model=None) -> list
                     system,
                     **user_prompt_params(user),
                     base_model_id=resolve_base_model_id(model),
+                    model=model,
                 ),
             }
         )
@@ -828,6 +830,10 @@ async def _try_start_turn(chat, assistant_id: str, user, chain_count: int) -> No
     if model is None:
         raise _PermanentTurnFailure(f"model '{model_id}' is not resolvable")
 
+    # {{USER_RECIPES}} は sandbox に聞く (非同期) ので先に取る (能力「レシピ」が ON のときだけ)
+    await ensure_user_recipes(
+        user, model, ((chat_json.get("params") or {}).get("system"))
+    )
     wire_messages = build_wire_messages(chat_json, user, assistant_id, model)
     params = _merged_params(chat_json, user)
     chat_files = chat_json.get("files") or []

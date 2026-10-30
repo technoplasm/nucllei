@@ -36,6 +36,7 @@ from nucllei.utils.payload import (
     apply_model_system_prompt_to_body,
 )
 from nucllei.utils.sse import sse_line, sse_raw
+from nucllei.utils.task import ensure_user_recipes
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -289,6 +290,8 @@ async def generate_function_chat_completion(
 
         params = model_info.params.model_dump()
         form_data = apply_model_params_to_body_openai(params, form_data)
+        # {{USER_RECIPES}} は sandbox に聞く (非同期) ので先に取る (このリクエストで取ってあれば聞かない)
+        await ensure_user_recipes(user, model_info, params.get("system"))
         form_data = apply_model_system_prompt_to_body(
             params, form_data, metadata, user, model_info
         )

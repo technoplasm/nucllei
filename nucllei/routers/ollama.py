@@ -45,6 +45,7 @@ from nucllei.utils.payload import (
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_access
 from nucllei.utils.sse import sse_line
+from nucllei.utils.task import ensure_user_recipes
 
 
 from nucllei.config import (
@@ -997,6 +998,8 @@ async def generate_chat_completion(
             payload["options"] = apply_model_params_to_body_ollama(
                 params, payload["options"]
             )
+            # {{USER_RECIPES}} は sandbox に聞く (非同期) ので先に取る (このリクエストで取ってあれば聞かない)
+            await ensure_user_recipes(user, model_info, params.get("system"))
             payload = apply_model_system_prompt_to_body(
                 params, payload, metadata, user, model_info
             )
@@ -1186,6 +1189,8 @@ async def generate_openai_chat_completion(
 
         if params:
             payload = apply_model_params_to_body_openai(params, payload)
+            # {{USER_RECIPES}} は sandbox に聞く (非同期) ので先に取る (このリクエストで取ってあれば聞かない)
+            await ensure_user_recipes(user, model_info, params.get("system"))
             payload = apply_model_system_prompt_to_body(
                 params, payload, metadata, user, model_info
             )

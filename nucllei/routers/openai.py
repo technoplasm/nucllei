@@ -40,6 +40,7 @@ from nucllei.utils.misc import (
 
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.utils.access_control import has_access
+from nucllei.utils.task import ensure_user_recipes
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["OPENAI"])
@@ -717,6 +718,8 @@ async def generate_chat_completion(
 
         params = model_info.params.model_dump()
         payload = apply_model_params_to_body_openai(params, payload)
+        # {{USER_RECIPES}} は sandbox に聞く (非同期) ので先に取る (このリクエストで取ってあれば聞かない)
+        await ensure_user_recipes(user, model_info, params.get("system"))
         payload = apply_model_system_prompt_to_body(
             params, payload, metadata, user, model_info
         )

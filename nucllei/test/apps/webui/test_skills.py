@@ -634,6 +634,70 @@ class TestSkills(AbstractPostgresTest):
         # render ディスクリプタ(#20): result を skill 表示で描画
         assert tool["render"] == {"result": {"kind": "skill"}}
 
+    def test_skills_variable_and_fixed_load_skill_spec(self):
+        """{{SKILLS}} (ken 2026-10-30): load_skill の説明に入れていた一覧と同じ中身・並び・可視の判定
+        (skill_manifest を共有)。system prompt に変数がある preset (listing_in_prompt) では load_skill の
+        説明・spec は利用者によらず同じ文字列 (enum も付けない — 利用者ごとに変わるので)。"""
+        import asyncio
+        import json
+
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.skills import SKILLS_HEADING, build_load_skill_tool
+        from nucllei.utils.task import prompt_template
+
+        pub = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="pubcmd",
+                name="t",
+                description="全員の skill",
+                content="c",
+                access_control=None,
+            ),
+        )
+        own = Skills.insert_new_skill(
+            "7",
+            SkillForm(
+                id="owncmd",
+                name="t",
+                description="7 の私有",
+                content="c",
+                access_control={},
+            ),
+        )
+        model = {"info": {"meta": {"skillIds": [own.id, pub.id]}}}
+        u7 = types.SimpleNamespace(id="7", name="A")
+        u8 = types.SimpleNamespace(id="8", name="B")
+
+        # 変数の中身 = 見出し + 今の manifest と同じ行 (skillIds の順・可視だけ)
+        assert prompt_template("[{{SKILLS}}]", user_id="7", model=model) == (
+            f"[{SKILLS_HEADING}\n- owncmd: 7 の私有\n- pubcmd: 全員の skill]"
+        )
+        assert prompt_template("[{{SKILLS}}]", user_id="8", model=model) == (
+            f"[{SKILLS_HEADING}\n- pubcmd: 全員の skill]"
+        )
+        off = {"info": {"meta": {"skillIds": [pub.id], "features": {"skills": False}}}}
+        assert prompt_template("[{{SKILLS}}]", user_id="7", model=off) == "[]"
+        assert prompt_template("[{{SKILLS}}]", user_id="7") == "[]"  # model 無し
+
+        def spec(user, in_prompt):
+            tool = build_load_skill_tool(model, user, listing_in_prompt=in_prompt)
+            return json.dumps(tool["spec"], ensure_ascii=False)
+
+        assert spec(u7, True) == spec(u8, True)
+        fixed = json.loads(spec(u7, True))
+        assert fixed["description"].endswith(
+            "使える skill の一覧は system prompt の「使える skill (load_skill の skill_id にそのまま渡す)」にある。"
+        )
+        assert "enum" not in fixed["parameters"]["properties"]["skill_id"]
+        assert "pubcmd" not in fixed["description"]
+        # 変数の無い preset は今までどおり (説明に一覧・enum)
+        assert spec(u7, False) != spec(u8, False)
+        # 見えない skill はその利用者には呼べない (enum が無くても manifest で止まる)
+        tool = build_load_skill_tool(model, u8, listing_in_prompt=True)
+        error = asyncio.run(call_error(tool["callable"](skill_id="owncmd")))
+        assert "system prompt の「使える skill" in error.text
+
     def test_build_load_skill_tool_none_when_empty(self):
         """対象 skill が無ければ load_skill 自体を載せない(None)。"""
         from nucllei.utils.skills import build_load_skill_tool

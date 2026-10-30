@@ -45,7 +45,10 @@ from nucllei.retrieval.utils import dedupe_files_by_id, get_sources_from_files
 
 from nucllei.utils.chat import generate_chat_completion
 from nucllei.utils.task import (
+    SKILLS_TOKEN,
+    USER_RECIPES_TOKEN,
     get_task_model_id,
+    preset_system_prompt,
 )
 from nucllei.utils.misc import (
     get_message_list,
@@ -791,12 +794,18 @@ async def process_chat_payload(
     async def run_hooks(skill):
         return await run_skill_hooks(skill, tools_dict, hook_execute)
 
+    # preset の system prompt に {{SKILLS}} / {{USER_RECIPES}} があれば、一覧は system prompt に入るので
+    # load_skill / load_recipe の説明には入れない (tool の宣言を利用者によらず preset ごとに同じにする —
+    # chat template は tool を system より前に出すので、prefix cache が利用者をまたげるように。
+    # ken 2026-10-30「変わりにくいものを前に、変わりやすいものを後ろに」)
+    preset_system = await asyncio.to_thread(preset_system_prompt, model)
     load_skill_tool = build_load_skill_tool(
         model,
         user,
         load_tools=inject_skill_tools,
         messages=form_data["messages"],
         run_hooks=run_hooks,
+        listing_in_prompt=SKILLS_TOKEN in preset_system,
     )
     if load_skill_tool is not None:
         if "load_skill" in tools_dict:
@@ -813,7 +822,12 @@ async def process_chat_payload(
     from nucllei.builtin_tools.recipe_tools import build_recipe_tools
 
     for name, entry in (
-        await build_recipe_tools(model, user, tools_extra_params)
+        await build_recipe_tools(
+            model,
+            user,
+            tools_extra_params,
+            listing_in_prompt=USER_RECIPES_TOKEN in preset_system,
+        )
     ).items():
         if name in tools_dict:
             log.warning(f"tool '{name}' is shadowed by the recipe capability tool")
