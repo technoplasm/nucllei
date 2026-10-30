@@ -998,41 +998,21 @@ async def drain_load_skill_followups(entry, tools, execute, drain=None):
     return calls, results
 
 
-# load_recipe (builtin_sandbox) が積む後続 — レシピの frontmatter の on_load (2026-10-30)。
-# 置き場は request の metadata(tool は `__metadata__` で受ける)。要素は
-# `{"call_id": "recipe:<フォルダ>:on_load:<n>", "tool": <名前>, "args": {…}, "recipe": <フォルダ>}`。
-# `"warning": <文>` がある要素は実行せず、その文を結果にする (引けない参照の警告)。
-RECIPE_FOLLOWUPS_KEY = "_recipe_followups"
-RECIPE_ON_LOAD_DONE_KEY = "_recipe_on_load_done"
-# 後続の入れ子 (レシピ → skill → レシピ …) の深さの上限。循環は「読み込み済み」で止まるので保険
+# 後続の入れ子 (skill → skill …) の深さの上限。循環は「読み込み済み」で止まるので保険。
+# レシピの requires は load_recipe が 1 つの結果の中で展開する (後続を積まない — 2026-10-30)
 FOLLOWUP_MAX_DEPTH = 16
 
 
-def _recipe_followup_unavailable(call: dict, recipe: str) -> dict:
-    name = call["function"]["name"]
-    error = ToolFailure(
-        f"レシピ {recipe} の読み込み時に実行する {name} は使えない"
-        " (このターンの tool の一覧に無い)",
-        "その結果無しでレシピに従う。",
-    )
-    return {
-        "tool_call_id": call["id"],
-        "content": error.text,
-        "duration": 0.0,
-        "error_kind": error.kind,
-    }
-
-
 def make_followup_drain(tools: dict, metadata: dict, execute):
-    """load_skill / load_recipe が積んだ後続を、書いた順・深さ優先に実行して [(call, result)] で
-    返す関数を作る(native ループと apply_skill_on_load が使う)。後続の中で実行した tool が
-    さらに積んだもの(レシピ → skill → …)はその位置で続ける。"""
+    """load_skill が積んだ後続を、書いた順・深さ優先に実行して [(call, result)] で返す関数を作る
+    (native ループと apply_skill_on_load が使う)。後続の中で実行した tool がさらに積んだもの
+    (skill → skill …)はその位置で続ける。"""
     depth = 0
 
     async def drain() -> list:
         nonlocal depth
         if depth >= FOLLOWUP_MAX_DEPTH:
-            log.warning("load_skill / load_recipe の後続の入れ子が深すぎるので止めた")
+            log.warning("load_skill の後続の入れ子が深すぎるので止めた")
             return []
         depth += 1
         try:
@@ -1043,54 +1023,6 @@ def make_followup_drain(tools: dict, metadata: dict, execute):
                     entry, tools, execute, drain=drain
                 )
                 pairs += list(zip(calls, results))
-            pending = list(metadata.get(RECIPE_FOLLOWUPS_KEY) or [])
-            if pending:
-                metadata[RECIPE_FOLLOWUPS_KEY] = []
-            done = metadata.setdefault(RECIPE_ON_LOAD_DONE_KEY, set())
-            for item in pending:
-                call_id = item["call_id"]
-                if call_id in done:
-                    continue
-                done.add(call_id)
-                name = item["tool"]
-                call = {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": json.dumps(
-                            item.get("args") or {}, ensure_ascii=False
-                        ),
-                    },
-                }
-                args_render = ((tools.get(name) or {}).get("render") or {}).get("args")
-                if args_render:
-                    call["render"] = {"args": args_render}
-                if item.get("warning"):
-                    # load_recipe が引けないと判定した要素 (参照先が無い・見えない — 警告で
-                    # 止めない、ken 2026-10-30): 実行せず、その位置の結果に警告を入れる
-                    pairs.append(
-                        (
-                            call,
-                            {
-                                "tool_call_id": call_id,
-                                "content": item["warning"],
-                                "duration": 0.0,
-                                "error_kind": "outcome",
-                            },
-                        )
-                    )
-                    continue
-                if name not in tools:
-                    log.warning(
-                        f"レシピ {item.get('recipe')} の on_load の tool {name!r} はこのターンに無い"
-                    )
-                    pairs.append(
-                        (call, _recipe_followup_unavailable(call, item.get("recipe")))
-                    )
-                    continue
-                pairs.append((call, (await execute([call]))[0]))
-                pairs += await drain()
             return pairs
         finally:
             depth -= 1

@@ -117,15 +117,17 @@ def test_cp932_and_binary_attachments():
         (
             GOOD.replace("---\n\n", "tool_ids: emr\n---\n\n"),
             "frontmatter の知らないキー: tool_ids (使えるのは title・description・author・"
-            "updated・tools・on_load)。tools の綴り違いでは",
+            "updated・requires)。tool_ids は廃止 (使える人が限られる関数は本文の関数名で判定する)",
         ),
         (
             GOOD.replace("---\n\n", "tools: query_emr\n---\n\n"),
-            "本文が呼んでいない: query_emr",
+            "frontmatter の知らないキー: tools (使えるのは title・description・author・"
+            "updated・requires)。tools は廃止 (使える人が限られる関数は本文の関数名で判定する)",
         ),
         (
-            GOOD.replace("---\n\n", "tools: '[a]'\n---\n\n"),
-            "tools は関数名のカンマ区切り",
+            GOOD.replace("---\n\n", "on_load: []\n---\n\n"),
+            "frontmatter の知らないキー: on_load (使えるのは title・description・author・"
+            "updated・requires)。on_load は requires に変わった",
         ),
     ],
 )
@@ -138,25 +140,19 @@ def test_frontmatter_findings(md, want):
 def test_unknown_keys_are_broken():
     """知らないキーは壊れている (`onload:` の綴り違いを黙って無視しない — ken 2026-10-30)。"""
     folder = "/workspace/recipes/x"
-    text = GOOD.replace("---\n\n", "onload:\n  - read: a.md\nmemo: x\n---\n\n")
+    text = GOOD.replace("---\n\n", "require:\n  - read: a.md\nmemo: x\n---\n\n")
     assert R.assess_recipe(folder, {"type": "file", "text": text}) == [
-        "frontmatter の知らないキー: onload (使えるのは title・description・author・updated・"
-        "tools・on_load)。on_load の綴り違いでは",
+        "frontmatter の知らないキー: require (使えるのは title・description・author・updated・"
+        "requires)。requires の綴り違いでは",
         "frontmatter の知らないキー: memo (使えるのは title・description・author・updated・"
-        "tools・on_load)",
+        "requires)",
     ]
     res = _check(text)
     assert res.schema == res.stops and len(res.stops) == 2
-    # 書き込みの規則 (未来の updated・tools の使い残し) は壊れているではない
+    # 書き込みの規則 (未来の updated) は壊れているではない
     later = GOOD.replace("2026-10-30", "2026-12-01")
     assert R.assess_recipe(folder, {"type": "file", "text": later}) == []
     assert _check(later).stops and not _check(later).schema
-
-
-def test_tools_called_in_body_passes():
-    assert _check(
-        GOOD.replace("---\n\n", "tools: query_emr\n---\n\n") + "`query_emr` で引く\n"
-    ).ok
 
 
 def test_updated_behind_mtime_only_for_lint():
@@ -177,14 +173,13 @@ def test_build_recipe_md_round_trips():
         author="山田 太郎",
         updated=TODAY,
         body="\n\n1. 手順\n",
-        tools=["query_emr"],
-        on_load=[{"read": "q.sql"}, {"shell": "prep.sh --since '30 d'"}],
+        requires=[{"read": "q.sql"}, {"shell": "prep.sh --since '30 d'"}],
     )
     fm, problem = R.read_frontmatter(md)
     assert problem is None
     assert fm.get("title") == "退院: 第2版" and fm.get("description") == "複数 行"
-    assert fm.get("updated") == "2026-10-30" and fm.get("tools") == "query_emr"
-    assert fm.data["on_load"] == [
+    assert fm.get("updated") == "2026-10-30" and "tools" not in fm.data
+    assert fm.data["requires"] == [
         {"read": "q.sql"},
         {"shell": "prep.sh --since '30 d'"},
     ]
@@ -301,14 +296,13 @@ def test_restricted_env_broken_is_empty(monkeypatch):
     assert R.restricted_tools() == {"query_emr": "EMR", "x": None}
 
 
-# ---- on_load ------------------------------------------------------------------
+# ---- requires ------------------------------------------------------------------
 
 
-def test_parse_recipe_on_load_forms():
+def test_parse_recipe_requires_forms():
     folder = "/workspace/recipes/集計"
-    items, errors = R.parse_recipe_on_load(
+    items, errors = R.parse_recipe_requires(
         [
-            {"skill": "/emr"},
             {"recipe": "/ext/public/recipes/共通/RECIPE.md"},
             {"read": "notes/a.md"},
             {"read": "/ext/groups/EMR/notes/全体.md"},
@@ -319,7 +313,6 @@ def test_parse_recipe_on_load_forms():
     )
     assert errors == []
     assert [(i.tool, i.args) for i in items] == [
-        ("load_skill", {"skill_id": "emr"}),
         ("load_recipe", {"path": "/ext/public/recipes/共通"}),
         ("read_file", {"path": f"{folder}/notes/a.md"}),
         ("read_file", {"path": "/ext/groups/EMR/notes/全体.md"}),
@@ -347,32 +340,33 @@ def test_parse_recipe_on_load_forms():
         ({"recipe": "/workspace/recipes/集計"}, "自分自身"),
         ({"tool": "run_shell", "args": {}}, "1 行で書く"),
         ({"curl": "x"}, "使えない"),
-        ({"skill": ""}, "値が空"),
+        ({"read": ""}, "値が空"),
+        ({"skill": "emr"}, "skill は書けない (レシピから skill は読み込まない"),
     ],
 )
-def test_parse_recipe_on_load_refuses(entry, want):
-    items, errors = R.parse_recipe_on_load([entry], "/workspace/recipes/集計")
+def test_parse_recipe_requires_refuses(entry, want):
+    items, errors = R.parse_recipe_requires([entry], "/workspace/recipes/集計")
     assert items == [] and len(errors) == 1 and want in errors[0], errors
 
 
 def test_on_load_must_be_a_list_and_missing_attachment_does_not_stop():
-    assert R.parse_recipe_on_load({"read": "a"}, "/workspace/recipes/x")[1][0].endswith(
-        "(リスト) で書く"
-    )
+    assert R.parse_recipe_requires({"read": "a"}, "/workspace/recipes/x")[1][
+        0
+    ].endswith("(リスト) で書く")
     # 付属が無いのは止めない (警告 — 後から write_file で置ける。ken 2026-10-30)
-    assert _check(GOOD.replace("---\n\n", "on_load:\n  - shell: prep.sh\n---\n\n")).ok
-    res = _check(GOOD.replace("---\n\n", "on_load:\n  - python: prep.sh\n---\n\n"))
+    assert _check(GOOD.replace("---\n\n", "requires:\n  - shell: prep.sh\n---\n\n")).ok
+    res = _check(GOOD.replace("---\n\n", "requires:\n  - python: prep.sh\n---\n\n"))
     assert any("python で実行できるのは .py の付属だけ" in p for p in res.stops)
-    assert any(R.ON_LOAD_FORM in f for f in res.fixes)
+    assert any(R.REQUIRES_FORM in f for f in res.fixes)
 
 
-# ---- on_load の層の規則 (llens 依頼・ken 2026-10-30) -------------------------------
+# ---- requires の層の規則 (llens 依頼・ken 2026-10-30) -------------------------------
 
 EMR = R.group_layer("EMR")
 
 
-def _with_on_load(lines: str) -> str:
-    return GOOD.replace("---\n\n", f"on_load:\n{lines}---\n\n")
+def _with_requires(lines: str) -> str:
+    return GOOD.replace("---\n\n", f"requires:\n{lines}---\n\n")
 
 
 @pytest.mark.parametrize(
@@ -382,58 +376,58 @@ def _with_on_load(lines: str) -> str:
         (
             EMR,
             "  - shell: prep.sh\n",
-            "グループ「EMR」のレシピの on_load では shell は使えない (共有の層では付属の実行は不可。"
+            "グループ「EMR」のレシピの requires では shell は使えない (共有の層では付属の実行は不可。"
             "使うなら個人のレシピから recipe: で読む)",
         ),
         (
             R.PUBLIC_LAYER,
             "  - python: calc.py\n",
-            "全体のレシピの on_load では python は使えない (共有の層では付属の実行は不可。"
+            "全体のレシピの requires では python は使えない (共有の層では付属の実行は不可。"
             "使うなら個人のレシピから recipe: で読む)",
         ),
         # 共有 → 個人
         (
             EMR,
             "  - read: /workspace/memory/記憶.md\n",
-            "グループ「EMR」のレシピの on_load の read では /workspace/memory/記憶.md を読まない"
+            "グループ「EMR」のレシピの requires の read では /workspace/memory/記憶.md を読まない"
             " (グループ「EMR」のレシピが読めるのはこのグループ・全体の置き場、このレシピのフォルダ、"
             "全員が読める /ext の置き場だけ)",
         ),
         (
             EMR,
             "  - recipe: /workspace/recipes/前処理\n",
-            "グループ「EMR」のレシピの on_load の recipe では /workspace/recipes/前処理 を読まない"
+            "グループ「EMR」のレシピの requires の recipe では /workspace/recipes/前処理 を読まない"
             " (グループ「EMR」のレシピから読めるのはこのグループと全体のレシピだけ)",
         ),
         # グループ同士
         (
             EMR,
             "  - recipe: /ext/groups/OTHER/recipes/x\n",
-            "グループ「EMR」のレシピの on_load の recipe では /ext/groups/OTHER/recipes/x を読まない",
+            "グループ「EMR」のレシピの requires の recipe では /ext/groups/OTHER/recipes/x を読まない",
         ),
         (
             EMR,
             "  - read: /ext/groups/OTHER/a.md\n",
-            "グループ「EMR」のレシピの on_load の read では /ext/groups/OTHER/a.md を読まない",
+            "グループ「EMR」のレシピの requires の read では /ext/groups/OTHER/a.md を読まない",
         ),
         # 全体 → グループ
         (
             R.PUBLIC_LAYER,
             "  - recipe: /ext/groups/EMR/recipes/x\n",
-            "全体のレシピの on_load の recipe では /ext/groups/EMR/recipes/x を読まない"
+            "全体のレシピの requires の recipe では /ext/groups/EMR/recipes/x を読まない"
             " (全体のレシピから読めるのは全体のレシピだけ)",
         ),
         (
             R.PUBLIC_LAYER,
             "  - read: /ext/groups/EMR/a.md\n",
-            "全体のレシピの on_load の read では /ext/groups/EMR/a.md を読まない",
+            "全体のレシピの requires の read では /ext/groups/EMR/a.md を読まない",
         ),
     ],
 )
 def test_layer_rule_violations_are_warnings(layer, entry, want):
     """層の規則の違反は frontmatter としては正しいので壊れているにせず、警告 (その要素を実行しない)。"""
     folder = f"{layer.recipes}/x"
-    text = _with_on_load(entry)
+    text = _with_requires(entry)
     assert R.assess_recipe(folder, {"type": "file", "text": text}) == []
     ((n, (reason, next_step)),) = R.layer_warnings(folder, text).items()
     assert n == 0 and reason.startswith(want) and next_step == R.WARN_NEXT_LAYER
@@ -469,7 +463,6 @@ def test_layer_rule_violations_are_warnings(layer, entry, want):
         (EMR, "  - read: /ext/doc/ガイドライン.md\n"),  # 全員に ro の /ext
         (EMR, "  - recipe: /ext/groups/EMR/recipes/y\n"),
         (EMR, "  - recipe: /ext/public/recipes/y\n"),
-        (EMR, "  - skill: emr\n"),
         (R.PUBLIC_LAYER, "  - read: /ext/public/a.md\n"),
         (R.PUBLIC_LAYER, "  - read: /ext/doc/a.md\n"),
         (R.PUBLIC_LAYER, "  - recipe: /ext/public/recipes/y\n"),
@@ -477,7 +470,9 @@ def test_layer_rule_violations_are_warnings(layer, entry, want):
 )
 def test_layer_rule_allows_narrow_to_wide(layer, entry):
     folder = f"{layer.recipes}/x"
-    assert R.assess_recipe(folder, {"type": "file", "text": _with_on_load(entry)}) == []
+    assert (
+        R.assess_recipe(folder, {"type": "file", "text": _with_requires(entry)}) == []
+    )
 
 
 def test_skill_shorthand():
@@ -501,9 +496,9 @@ def test_skill_shorthand():
 
 def test_missing_and_hidden_references_are_warnings_not_broken():
     folder = "/workspace/recipes/x"
-    text = _with_on_load(
-        "  - read: /a.md\n  - recipe: /ext/public/recipes/y\n  - skill: gone\n"
-        "  - skill: hidden\n  - recipe: /ext/groups/OTHER/recipes/z\n  - shell: prep.sh\n"
+    text = _with_requires(
+        "  - read: /a.md\n  - recipe: /ext/public/recipes/y\n"
+        "  - recipe: /ext/groups/OTHER/recipes/z\n  - shell: prep.sh\n"
         "  - read: /ext/groups/EMR/b.md\n"
     )
     md = {"type": "file", "text": text}
@@ -516,25 +511,22 @@ def test_missing_and_hidden_references_are_warnings_not_broken():
         {"RECIPE.md": "file"},
         {"/a.md": None, "/ext/public/recipes/y/RECIPE.md": "dir"},
         member_groups=["EMR"],
-        skills=({"hidden"}, set()),
     )
     assert w.items == {
-        0: ("on_load の read /a.md が無い", R.WARN_NEXT_MISSING),
+        0: ("requires の read /a.md が無い", R.WARN_NEXT_MISSING),
         1: (
-            "on_load の recipe /ext/public/recipes/y が普通のファイルでない (dir)",
+            "requires の recipe /ext/public/recipes/y が普通のファイルでない (dir)",
             R.WARN_NEXT_MISSING,
         ),
-        2: ("on_load の skill gone が無い", R.WARN_NEXT_MISSING),
-        3: ("on_load の skill hidden がこの利用者に見えない", R.WARN_NEXT_HIDDEN),
-        4: (
-            "on_load の recipe /ext/groups/OTHER/recipes/z は所属していないグループ「OTHER」のもの",
+        2: (
+            "requires の recipe /ext/groups/OTHER/recipes/z は所属していないグループ「OTHER」のもの",
             R.WARN_NEXT_HIDDEN,
         ),
-        5: ("on_load の shell の付属 prep.sh がフォルダに無い", R.WARN_NEXT_MISSING),
+        3: ("requires の shell の付属 prep.sh がフォルダに無い", R.WARN_NEXT_MISSING),
     }
     assert R.warning_line(w.reasons()) == (
-        "(警告: on_load の read /a.md が無い、on_load の recipe /ext/public/recipes/y が普通の"
-        "ファイルでない (dir) ほか 4 件。読み込めるが、その要素は実行しない)"
+        "(警告: requires の read /a.md が無い、requires の recipe /ext/public/recipes/y が普通の"
+        "ファイルでない (dir) ほか 2 件。読み込めるが、その要素は実行しない)"
     )
     # 所属していないグループの参照先は stat しない (見えない人のために聞かない)
     refs = R.RecipeRefs()
@@ -557,7 +549,7 @@ def test_own_group_refs_are_usable_for_a_reader_outside_it():
     """管理者が所属していないグループのレシピを開けたとき (load_recipe の今の挙動)、そのグループの中の
     参照は使えないにしない。別のグループの参照は (規則で書けないので) 壊れている側。"""
     folder = "/ext/groups/EMR/recipes/x"
-    text = _with_on_load(
+    text = _with_requires(
         "  - read: /ext/groups/EMR/a.md\n  - recipe: /ext/groups/EMR/recipes/y\n"
     )
     w = R.reference_warnings(
@@ -570,13 +562,14 @@ def test_restricted_tools_warn_for_non_members(monkeypatch):
     monkeypatch.setenv(
         "RECIPE_RESTRICTED_TOOLS", json.dumps({"query_emr": "EMR", "mine": None})
     )
-    text = GOOD.replace("---\n\n", "tools: query_emr, mine\n---\n\n")
+    # 本文に名前が出てくるかで判定する (旧 tools は廃止。説明に書いただけでも当たる — 厳しい側)
+    text = GOOD + "1. query_emr で引き、mine で書く。query_emrx は別の関数\n"
     folder = "/workspace/recipes/x"
     assert not R.reference_warnings(folder, text, {}, {}, member_groups=["EMR"])
     w = R.reference_warnings(folder, text, {}, {}, member_groups=[])
     assert w.recipe == [
         (
-            "tools の query_emr はグループ「EMR」の人だけが使える",
+            "このレシピが使う query_emr はグループ「EMR」の人だけが使える",
             R.WARN_NEXT_HIDDEN + "。query_emr を使う手順は飛ばす",
         )
     ]  # null (個人だけ) の mine は誰が使えるか分からないので判定しない
@@ -626,25 +619,25 @@ def test_recipe_check_cli(tmp_path, monkeypatch):
     _put(
         tmp_path,
         "public/recipes/参照切れ",
-        _with_on_load("  - read: /ext/doc/無い.md\n  - read: /ext/public/有る.md\n")
+        _with_requires("  - read: /ext/doc/無い.md\n  - read: /ext/public/有る.md\n")
         + "1. 手順\n",
     )
     (tmp_path / "public" / "有る.md").write_text("x")
     _put(
         tmp_path,
         "groups/EMR/recipes/個人を読む",
-        _with_on_load("  - read: /workspace/memory/a.md\n") + "1. 手順\n",
+        _with_requires("  - read: /workspace/memory/a.md\n") + "1. 手順\n",
     )
     _put(
         tmp_path,
         "groups/EMR/recipes/付属を動かす",
-        _with_on_load("  - shell: prep.sh\n") + "1. 手順\n",
+        _with_requires("  - shell: prep.sh\n") + "1. 手順\n",
     )
     (tmp_path / "groups/EMR/recipes/付属を動かす/prep.sh").write_text("echo")
     _put(
         tmp_path,
         "public/recipes/綴り違い",
-        _with_on_load("").replace("on_load", "onload"),
+        _with_requires("").replace("requires", "require"),
     )
     r = runner.invoke(
         app,
@@ -652,13 +645,13 @@ def test_recipe_check_cli(tmp_path, monkeypatch):
     )
     lines = [ln for ln in r.stdout.splitlines() if ln]
     assert (
-        "note\t/ext/public/recipes/参照切れ\ton_load の read /ext/doc/無い.md が無い"
+        "note\t/ext/public/recipes/参照切れ\trequires の read /ext/doc/無い.md が無い"
         in lines
     )
     assert not any("有る.md" in ln for ln in lines)
     # 層の規則の違反は note (警告)。/workspace/memory は既存の書き込みの規則 (見えないパス) で stop も
     assert (
-        "note\t/ext/groups/EMR/recipes/付属を動かす\tグループ「EMR」のレシピの on_load では shell は"
+        "note\t/ext/groups/EMR/recipes/付属を動かす\tグループ「EMR」のレシピの requires では shell は"
         "使えない (共有の層では付属の実行は不可。使うなら個人のレシピから recipe: で読む)"
     ) in lines
     assert not any(
@@ -670,12 +663,12 @@ def test_recipe_check_cli(tmp_path, monkeypatch):
         " /workspace/memory/…"
     )
     assert mine[1].startswith(
-        "note\t/ext/groups/EMR/recipes/個人を読む\tグループ「EMR」のレシピの on_load の read では"
+        "note\t/ext/groups/EMR/recipes/個人を読む\tグループ「EMR」のレシピの requires の read では"
     )
     # 知らないキー (frontmatter の不正) は stop
     assert any(
         ln.startswith(
-            "stop\t/ext/public/recipes/綴り違い\tRECIPE.md: frontmatter の知らないキー: onload"
+            "stop\t/ext/public/recipes/綴り違い\tRECIPE.md: frontmatter の知らないキー: require"
         )
         for ln in lines
     )

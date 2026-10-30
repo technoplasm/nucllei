@@ -4,8 +4,8 @@
 ここは sandbox と DB に問い合わせて材料を集める:
 
 - sandbox `/recipes/index` 1 回 — 各層の `recipes/<名前>/` と RECIPE.md の先頭・フォルダ直下の種類
-- sandbox `/files/stat_many` 1 回 — 全レシピの on_load の参照先 (`read:` `recipe:`) の有無
-- DB 1 回 — 全レシピの on_load の `skill:` が有るか・この利用者に見えるか
+- sandbox `/files/stat_many` 1 回 — 全レシピの requires の参照先 (`read:` `recipe:`) の有無
+- DB 1 回 — 読む人の所属グループ (一覧に出す層と、所属していないグループの参照・関数の警告)
 
 一覧と `load_recipe` は同じ判定を通る (片方だけ直って片方が壊れている、を作らない)。
 「壊れている」は frontmatter の不正だけで、層の規則の違反・参照先が無い・見えないは「警告」(読み込めて、通らない要素だけ
@@ -75,36 +75,6 @@ def member_places(user, groups=None) -> list[str]:
     if groups is None:
         groups = member_groups(user)
     return [WORKSPACE] + [f"{GROUPS}/{g}" for g in groups] + [PUBLIC]
-
-
-def seen_skill_ids(user, ids) -> tuple[set, set]:
-    """`ids` のうち (有る skill, この利用者に見える skill)。DB 1 回。"""
-    from nucllei.models.skills import Skills
-    from nucllei.utils.skills import is_skill_visible
-
-    if not ids:
-        return set(), set()
-    existing, visible = set(), set()
-    for skill in Skills.get_skills_by_ids(sorted(ids)):
-        existing.add(skill.id)
-        try:
-            if is_skill_visible(skill, _as_user(user)):
-                visible.add(skill.id)
-        except Exception:
-            continue
-    return existing, visible
-
-
-class _U:
-    def __init__(self, uid, role):
-        self.id, self.role = uid, role
-
-
-def _as_user(user):
-    """is_skill_visible は `.id` を読む (tool の `__user__` は dict)。"""
-    if isinstance(user, dict):
-        return _U(user.get("id"), user.get("role"))
-    return user
 
 
 async def stat_paths(user, paths) -> dict:
@@ -206,7 +176,6 @@ async def user_recipes_text(user) -> str:
     # stat が取れなかった参照先はキーが無い = 「分からない」で、警告しない
     # (sandbox の一時的な失敗で警告を出さない — reference_warnings)
     path_types = await stat_paths(user, refs.paths) if refs.paths else {}
-    skills = seen_skill_ids(user, refs.skills)
 
     lines = []
     for folder, md, entries in found:
@@ -217,7 +186,7 @@ async def user_recipes_text(user) -> str:
         fm, _ = read_frontmatter(md["text"])
         line = index_line(folder, fm.get("description"))
         warns = reference_warnings(
-            folder, md["text"], entries, path_types, member_groups=groups, skills=skills
+            folder, md["text"], entries, path_types, member_groups=groups
         )
         if warns:
             line += " " + warning_line(warns.reasons())
@@ -255,12 +224,11 @@ async def assess_loaded_recipe(
 async def reference_warnings_for(
     user, folder: str, md_text: str, entries: Optional[dict]
 ) -> RefWarnings:
-    """読む人 `user` から見た、1 つのレシピの警告 (sandbox 1 回 + DB 2 回 — load_recipe・save / edit)。"""
+    """読む人 `user` から見た、1 つのレシピの警告 (sandbox 1 回 + DB 1 回 — load_recipe・save / edit)。"""
     groups = member_groups(user)
     refs = RecipeRefs()
     recipe_refs(md_text, folder, refs, groups)
     path_types = await stat_paths(user, refs.paths) if refs.paths else {}
-    skills = seen_skill_ids(user, refs.skills)
     return reference_warnings(
-        folder, md_text, entries, path_types, member_groups=groups, skills=skills
+        folder, md_text, entries, path_types, member_groups=groups
     )
