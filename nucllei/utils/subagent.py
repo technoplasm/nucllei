@@ -48,7 +48,7 @@ from nucllei.utils.access_control import has_access
 from nucllei.utils.chat import generate_chat_completion
 from nucllei.utils.completion_events import CompletionEventStream
 from nucllei.utils.content_blocks import convert_content_blocks_to_messages
-from nucllei.utils.executions import in_exec
+from nucllei.utils.executions import current_exec_id, exec_count_started, in_exec
 from nucllei.utils.misc import get_message_list
 from nucllei.utils.tool_errors import ToolCallError, ToolFailure, ToolFatal
 from nucllei.env import (
@@ -56,6 +56,7 @@ from nucllei.env import (
     SUBAGENT_MAX_CONCURRENCY,
     SUBAGENT_MAX_DEPTH,
     SUBAGENT_QUEUE_TIMEOUT_S,
+    SUBAGENT_TURN_TIMEOUT_S,
 )
 
 log = logging.getLogger(__name__)
@@ -395,6 +396,8 @@ async def start_internal_turn(
     # ターン境界で False に戻す — reset せず False を敷くのは、この関数を抜けた
     # 後も runner 側の in_exec=True を保つため(finally で元に戻す)。
     exec_token = in_exec.set(False)
+    # runner の exec id も子ターンへ持ち込まない (子の tool が親の exec を数えないように)
+    exec_id_token = current_exec_id.set(None)
 
     # 親の scope(headers / scheme / server / client …)を引き継ぐ — __request__ を読む
     # tool が子ターンでも親と同じ Host / X-Forwarded-* を見られるように(受信 Request の
@@ -465,6 +468,32 @@ async def start_internal_turn(
         return turn_task_id, get_task(turn_task_id)
     finally:
         in_exec.reset(exec_token)
+        current_exec_id.reset(exec_id_token)
+
+
+# finally から投げた子の stop (参照を持って GC に消されないように)
+_background_stops: set = set()
+
+
+def _started_child_task(child_chat_id, tasks_before):
+    """start_internal_turn を呼んだ後に子 chat に増えた、走っている turn task (無ければ None)。
+    (task_id, task)。"""
+    if not child_chat_id:
+        return None
+    for task_id in reversed(list_task_ids_by_chat_id(child_chat_id)):
+        if task_id in tasks_before:
+            continue
+        task = get_task(task_id)
+        if task is not None and not task.done():
+            return task_id, task
+    return None
+
+
+async def _stop_quietly(task_id) -> None:
+    try:
+        await stop_task(task_id)
+    except ValueError:
+        pass  # 既に完走・回収済み
 
 
 async def _await_child_task(child_task_id, child_task):
@@ -654,6 +683,11 @@ async def run_subagent_turn(
     # 移譲前のエラー経路 (待ちの cancel・時間切れを含む) は finally が解放する。
     handed_off = False
     waited = 0.0
+    child_chat_id = None
+    # start_internal_turn を呼ぶ前からその子 chat にあった task (呼んでいなければ None)。finally が
+    # 「呼んだ後に増えた task」だけを今回の子として扱う
+    tasks_before = None
+    slot_deadline = None
     try:
         # 実行時再チェック(mount 後に状態が変わりうる)。認可は enum 構築と
         # 同一述語をその場で再評価する(履歴・enum に委ねない)。
@@ -716,6 +750,11 @@ async def run_subagent_turn(
         # 席: 空いていなければ到着順に待つ (入れ子は待たない — _acquire_slot)
         waited = await _acquire_slot(nested=parent.depth > 0)
         slot_taken = True
+        if SUBAGENT_TURN_TIMEOUT_S > 0:
+            # 子ターンの上限は席を取ったときから数える (子 chat の用意・起動の時間も含めて席を持てる長さ)
+            slot_deadline = asyncio.get_running_loop().time() + SUBAGENT_TURN_TIMEOUT_S
+        # background なら、ここからユーザーごとの同時数に数える (待っている間は数えない)
+        exec_count_started()
         if waited:
             # 待っている間に親チャットが消された (cascade) なら子を作らない
             parent = await asyncio.to_thread(Chats.get_chat_by_id, parent_chat_id)
@@ -799,6 +838,7 @@ async def run_subagent_turn(
         wire_messages = _wire_messages_from_history(
             chat_json["history"]["messages"], assistant_message_id
         )
+        tasks_before = set(list_task_ids_by_chat_id(child_chat_id))
         child_task_id, child_task = await start_internal_turn(
             request,
             child_model,
@@ -817,6 +857,7 @@ async def run_subagent_turn(
         )
 
         stopped = False
+        timed_out = False
         if child_task is not None:
             # 会計の解放を子 task の done callback へ移譲(#109 決定事項 4)。
             # cancel(親 stop / exec stop)で callable が先に消えても、
@@ -827,10 +868,25 @@ async def run_subagent_turn(
             )
             handed_off = True
 
-            stopped = await _await_child_task(child_task_id, child_task)
+            # 子ターンの上限は席を取ってからの時間で見る (外側の per-tool timeout は待ちの分を足した
+            # 歯止め)。席を持てるのは SUBAGENT_TURN_TIMEOUT_S までなので、待っている呼び出しは既定の
+            # 待ちの上限 (子ターンの上限 + 余裕) より前に席が回る。時間切れは子を止め (_await_child_task が
+            # cancel を受けて stop 連鎖)、途中までの回答を返す
+            try:
+                if slot_deadline is not None:
+                    async with asyncio.timeout_at(slot_deadline):
+                        stopped = await _await_child_task(child_task_id, child_task)
+                else:
+                    stopped = await _await_child_task(child_task_id, child_task)
+            except TimeoutError:
+                stopped = timed_out = True
 
         # 完走後の子 chat を読み直し、最終 assistant メッセージだけを親へ返す
         result = await _format_turn_result(child_chat_id, assistant_message_id, stopped)
+        if timed_out:
+            result["error"] = (
+                f"サブエージェントが {SUBAGENT_TURN_TIMEOUT_S} 秒で終わらず、止めた (回答は途中まで)。"
+            )
         if waited and waited >= WAIT_NOTE_MIN_S:
             # 待ったことは結果に 1 句だけ (応答が遅れた理由)
             note = f"枠が空くまで {int(waited)} 秒待った。"
@@ -838,7 +894,26 @@ async def run_subagent_turn(
         return result
     finally:
         if not handed_off:
-            if slot_taken:
-                _release_slot()
-            if running_session_id is not None:
-                _running_agent_sessions.discard(running_session_id)
+            orphan = (
+                _started_child_task(child_chat_id, tasks_before)
+                if slot_taken and tasks_before is not None
+                else None
+            )
+            if orphan is not None:
+                # 子 task を作った後、done callback を付ける前に抜けた (start_internal_turn の中での
+                # cancel 等)。今返すと子が走ったまま席が次へ回り、上限を超えて走る — 席は子の終わりに
+                # 返し、子は止める (孤児にしない)
+                orphan_id, orphan_task = orphan
+                orphan_task.add_done_callback(
+                    lambda t, sid=running_session_id: _release_turn_slot(sid)
+                )
+                stopper = asyncio.get_running_loop().create_task(
+                    _stop_quietly(orphan_id)
+                )
+                _background_stops.add(stopper)
+                stopper.add_done_callback(_background_stops.discard)
+            else:
+                if slot_taken:
+                    _release_slot()
+                if running_session_id is not None:
+                    _running_agent_sessions.discard(running_session_id)

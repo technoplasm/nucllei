@@ -108,6 +108,16 @@ _exec_tasks: dict[str, Optional[str]] = {}
 # per-user 同時数会計(0 で pop)
 _active_execs_by_user: dict[str, int] = {}
 
+# まだ数えていない exec (exec_id → user_id)。entry の `exec_count_on_start` (run_subagent) は spawn で
+# 数えず、tool が走り出したと言ったとき (exec_count_started) に数える — サブエージェントの席を待っている
+# だけのタスクが、子の run_python 等の background を上限で弾かないように (2026-10-30 llens 決定)
+_uncounted_execs: dict[str, str] = {}
+
+# いま走っている exec の id (runner の中だけ — exec_count_started が自分の exec を見つける)
+current_exec_id: ContextVar[Optional[str]] = ContextVar(
+    "nucllei_current_exec_id", default=None
+)
+
 # 走行中 exec の sink(check_task の progress 読み出し用。done callback で pop)
 _exec_sinks: dict[str, "_ExecSink"] = {}
 
@@ -366,6 +376,24 @@ def _decrement_user(user_id: str) -> None:
         _active_execs_by_user[user_id] = count
 
 
+def _uncount_or_decrement(exec_id: str, user_id: str) -> None:
+    """exec の会計を返す。まだ数えていない exec (exec_count_on_start で走り出す前) は数を減らさない。"""
+    if _uncounted_execs.pop(exec_id, None) is None:
+        _decrement_user(user_id)
+
+
+def exec_count_started() -> None:
+    """background の runner の中で、`exec_count_on_start` の tool が走り出したときに呼ぶ — ここから
+    ユーザーごとの同時数に数える (上限は見ない — 起動は spawn で受けている)。runner の外 (同期の呼び出し)
+    と、数え済みの exec では何もしない。"""
+    exec_id = current_exec_id.get()
+    if exec_id is None:
+        return
+    user_id = _uncounted_execs.pop(exec_id, None)
+    if user_id is not None:
+        _active_execs_by_user[user_id] = _active_execs_by_user.get(user_id, 0) + 1
+
+
 def _release_spawn_slot(exec_id: str, user_id: str) -> None:
     """spawn が task 起動まで到達しなかったときの解放(同期のみ)。
 
@@ -374,7 +402,7 @@ def _release_spawn_slot(exec_id: str, user_id: str) -> None:
     以後その exec_id は「走行中」と誤認され続ける。
     """
     _exec_tasks.pop(exec_id, None)
-    _decrement_user(user_id)
+    _uncount_or_decrement(exec_id, user_id)
 
 
 def _on_exec_task_done(exec_id: str, user_id: str) -> None:
@@ -385,7 +413,7 @@ def _on_exec_task_done(exec_id: str, user_id: str) -> None:
     """
     _exec_tasks.pop(exec_id, None)
     _exec_sinks.pop(exec_id, None)
-    _decrement_user(user_id)
+    _uncount_or_decrement(exec_id, user_id)
 
 
 async def spawn_execution(
@@ -411,23 +439,44 @@ async def spawn_execution(
             "background を付けずに呼び直す。",
         )
 
+    exec_id = str(uuid.uuid4())
+    # 走り出してから数える tool (run_subagent — 席が空くのを待つ間は数えない) は、spawn では上限を
+    # 見ず数えない (exec_count_started で数える)。待つ間の歯止めは tool 側 (待ちの上限)
+    count_on_start = bool(entry.get("exec_count_on_start"))
     # 同時数 check → 同期で increment(check→increment 間に await を挟まない —
     # subagent.py の規律)。超過は即エラー(行を作らない)。
-    if _active_execs_by_user.get(user_id, 0) >= ASYNC_EXEC_MAX_CONCURRENCY:
-        raise ToolFailure(
-            f"バックグラウンドタスクの同時数がユーザーごとの上限"
-            f" ({ASYNC_EXEC_MAX_CONCURRENCY}) に達している (起動していない)",
-            _user_limit_next(),
-        )
-    if sum(_active_execs_by_user.values()) >= ASYNC_EXEC_MAX_TOTAL:
+    # サーバー全体の上限は、まだ数えていない (待っている) 分も入れて見る — 呼び直しを繰り返すモデルが
+    # background を際限なく積まないように (敵対レビュー)
+    if (
+        count_on_start
+        and sum(_active_execs_by_user.values()) + len(_uncounted_execs)
+        >= ASYNC_EXEC_MAX_TOTAL
+    ):
         raise ToolFailure(
             f"バックグラウンドタスクの同時数がサーバー全体の上限"
             f" ({ASYNC_EXEC_MAX_TOTAL}) に達している (起動していない)",
             "background を付けずに呼び直す。",
         )
-    _active_execs_by_user[user_id] = _active_execs_by_user.get(user_id, 0) + 1
+    if count_on_start:
+        _uncounted_execs[exec_id] = user_id
+    elif _active_execs_by_user.get(user_id, 0) >= ASYNC_EXEC_MAX_CONCURRENCY:
+        raise ToolFailure(
+            f"バックグラウンドタスクの同時数がユーザーごとの上限"
+            f" ({ASYNC_EXEC_MAX_CONCURRENCY}) に達している (起動していない)",
+            _user_limit_next(),
+        )
+    elif (
+        sum(_active_execs_by_user.values()) + len(_uncounted_execs)
+        >= ASYNC_EXEC_MAX_TOTAL
+    ):
+        raise ToolFailure(
+            f"バックグラウンドタスクの同時数がサーバー全体の上限"
+            f" ({ASYNC_EXEC_MAX_TOTAL}) に達している (起動していない)",
+            "background を付けずに呼び直す。",
+        )
+    else:
+        _active_execs_by_user[user_id] = _active_execs_by_user.get(user_id, 0) + 1
 
-    exec_id = str(uuid.uuid4())
     # spawn したターンの tool の名前(runner は別 task — ERROR・次の手で名指ししてよい
     # tool を runner の中でも同じにする。2026-10-19 llens 監査 (13))
     turn_tool_names = current_turn_tools()
@@ -587,6 +636,7 @@ async def _run_execution(
     _exec_sinks[exec_id] = sink
     sink_token = tool_output.current_sink.set(sink)
     exec_token = in_exec.set(True)
+    exec_id_token = current_exec_id.set(exec_id)
     turn_tools_token = set_turn_tools(turn_tool_names)
     started_at = time.monotonic()
     outcome: Optional[dict] = None
@@ -688,6 +738,7 @@ async def _run_execution(
         # cancel 経路もここだけ通る: ContextVar reset / sink close のみ(D2)
         reset_turn_tools(turn_tools_token)
         in_exec.reset(exec_token)
+        current_exec_id.reset(exec_id_token)
         tool_output.current_sink.reset(sink_token)
         sink.close()
 

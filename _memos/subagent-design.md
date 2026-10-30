@@ -37,6 +37,11 @@
    タスクの中で待つ、cancel・stop_task・切断は待ち手を外し、渡しと cancel が同時なら席を次へ。入れ子
    (親 depth ≥ 1) は待たずに即エラー — 親は席を持ったまま子を待つので、子が待つと席が「子を待つ親」で
    埋まって時間切れまで詰まる。
+   追補 (同日 llens 決定): 待ちの上限の既定は子ターンの上限 + 30 秒 (env を明示したときだけその値)、子ターンの
+   上限は席を取ってから数える (超えたら止めて途中までの回答)。background の run_subagent はユーザーごとの
+   background 同時数に走り出してから数える (`exec_count_on_start` — 待っているだけのタスクが子の run_python 等を
+   弾かない・5 本目以降の background も待つ)。子 task を作った後・done callback を付ける前に抜けたら、席は子の
+   終わりに返して子を止める (上限超えの窓と孤児を塞ぐ)。順番は到着順のまま。
 10. **stop 連鎖**: `asyncio.shield(child_task)` + `Task.cancelling()` で親 cancel と子側発 cancel を判別。
     親 stop / turn timeout → 子を stop して伝播。子の外部 stop → 部分回答を tool result で返し**親は続行**。
 11. **usage は親子で合算しない**(既存機構で自動成立)。親へは tool result に子 usage の要点を載せる。

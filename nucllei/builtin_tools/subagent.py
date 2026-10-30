@@ -40,8 +40,8 @@ import re
 from typing import Annotated, Optional, Union
 
 from nucllei.env import (
-    ASYNC_EXEC_MAX_CONCURRENCY,
     SUBAGENT_MAX_CONCURRENCY,
+    SUBAGENT_QUEUE_GRACE_S,
     SUBAGENT_QUEUE_TIMEOUT_S,
     SUBAGENT_TURN_TIMEOUT_S,
 )
@@ -62,7 +62,7 @@ class Tools:
     - 使う: 長大な資料・多数のページを読んで結論だけ欲しいとき / 互いに独立した調べものを並行させたいとき
     - 使わない: 自分で数手で済む作業、会話の流れに強く依存する判断(子はこの会話を見ていない)
     - instruction は単独で完結させる: 目的・対象・返してほしい形を書く。開かせたいもの(/workspace や /ext のパス・URL・file_id・doc の path)は受け取った形のまま書き、中身は貼らない
-    - 並行させるなら 1 回の応答の中に run_subagent を並べる(サブエージェントどうしは同時に走り、全部そろってから次の手。1 本ずつ別の手で出すと直列になる)。待たずに別の作業を進めたいときだけ background: true。同時に走るのはサーバー全体で 4 本まで(ほかの利用者の分も数える)で、超えた分はエラーにならず、枠が空くまで待ってから順に走る — 5 本以上も一度に並べてよい (background を付けて起動できるのは 1 人 4 本まで)
+    - 並行させるなら 1 回の応答の中に run_subagent を並べる(サブエージェントどうしは同時に走り、全部そろってから次の手。1 本ずつ別の手で出すと直列になる)。待たずに別の作業を進めたいときだけ background: true。同時に走るのはサーバー全体で 4 本まで(ほかの利用者の分も数える)で、超えた分はエラーにならず、枠が空くまで待ってから順に走る — 5 本以上も一度に並べてよい (background でも同じ)
     - 結果は子のまとめであって原文ではない。根拠が要る点・食い違いは自分で確かめる。追加の質問は session_id で同じ子に続ける
     """
 
@@ -70,15 +70,23 @@ class Tools:
     # 共有 background 引数は middleware が spec のコピーへ注入する — ここで宣言すると
     # 恒久不適格の衝突ガードに掛かる。
     backgroundable = ("run_subagent",)
+    # background のユーザーごとの同時数には走り出してから数える — 席が空くのを待っているだけのタスクが
+    # 子の run_python 等の background を上限で弾かないように (2026-10-30 llens 決定。get_tools が
+    # per-entry キーへ落とす — utils/executions.exec_count_started)
+    exec_count_on_start = ("run_subagent",)
 
     # #107 決定 7: 子ターン全体(モデル呼び出しと tool 実行の反復)を包むので
     # TOOL_EXEC_TIMEOUT_S より長い。-1 等の非正値は「システム側上限なし」
     # (get_tools が非正値も per-entry timeout として通す)。
     # 2026-10-30: 席が空くのを待つ分 (SUBAGENT_QUEUE_TIMEOUT_S) を足す — 待ちで子ターンの持ち時間を
     # 削らない (どちらかが非正値 = 無制限なら子ターンの値のまま)
+    # 外側の歯止めには、子を止めて途中までの回答を組む間の余裕 (2 × SUBAGENT_QUEUE_GRACE_S) も足す —
+    # 待ちと子ターンが両方とも上限近くまで使われても、内側の時間切れ (途中までの回答) が先に効く
     timeouts = {
         "run_subagent": (
-            SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_TIMEOUT_S
+            SUBAGENT_TURN_TIMEOUT_S
+            + SUBAGENT_QUEUE_TIMEOUT_S
+            + 2 * SUBAGENT_QUEUE_GRACE_S
             if SUBAGENT_TURN_TIMEOUT_S > 0 and SUBAGENT_QUEUE_TIMEOUT_S > 0
             else SUBAGENT_TURN_TIMEOUT_S
         )
@@ -160,8 +168,4 @@ if SUBAGENT_MAX_CONCURRENCY != 4:
             f"サーバー全体で {SUBAGENT_MAX_CONCURRENCY} 本まで",
         )
         .replace("5 本以上も", f"{SUBAGENT_MAX_CONCURRENCY + 1} 本以上も")
-    )
-if ASYNC_EXEC_MAX_CONCURRENCY != 4:
-    Tools.__doc__ = (Tools.__doc__ or "").replace(
-        "1 人 4 本まで", f"1 人 {ASYNC_EXEC_MAX_CONCURRENCY} 本まで"
     )

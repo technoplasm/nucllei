@@ -289,7 +289,7 @@ separate reasoning block.
 | `SUBAGENT_TURN_TIMEOUT_S`                                      | env  | `1800` s (`-1` off)   | timeout of one `run_subagent` child turn (§5.8)                                                                                                                           |
 | `SUBAGENT_MAX_DEPTH`                                           | env  | `2`                   | nesting limit of agent sessions (user chat = depth 0); `run_subagent` is not offered beyond it (§5.8)                                                                     |
 | `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                   | per-process cap on simultaneously running subagents; excess calls wait for a slot in arrival order (since 2026-10-30; before, they failed immediately) (§5.8)           |
-| `SUBAGENT_QUEUE_TIMEOUT_S`                                     | env  | `600` s (`-1` off)    | how long an excess `run_subagent` call waits for a slot before failing; added to its per-tool timeout; nested calls never wait (§5.8)                                     |
+| `SUBAGENT_QUEUE_TIMEOUT_S`                                     | env  | `SUBAGENT_TURN_TIMEOUT_S` + 30 s (`-1` off) | how long an excess `run_subagent` call waits for a slot before failing — unset, it follows the child-turn limit (+30 s to stop a child), so the first N waiters outlast the children holding the slots; added to its per-tool timeout; nested calls never wait (§5.8) |
 | `ASYNC_EXEC_TIMEOUT_S`                                         | env  | `1800` s (`-1` off)   | timeout of one background execution unless the tool declares its own (§5.9)                                                                                               |
 | `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`            | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                            |
 | `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                   | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                             |
@@ -2578,8 +2578,18 @@ users (`_slot_waiters`); a released slot is handed to the head waiter without
 being decremented, so a new call cannot jump the queue. A sync call waits in
 the parent turn (the tool card shows 「サブエージェントの枠が空くのを待っている (N 番目、T 秒)」, re-sent every 30 s);
 a background call returns its task id at once and waits inside the task. The
-wait is bounded by `SUBAGENT_QUEUE_TIMEOUT_S` (default 600 s), which is added to
-the per-tool timeout so waiting does not eat the child turn's time; on timeout
+wait is bounded by `SUBAGENT_QUEUE_TIMEOUT_S` — when unset, the child-turn
+limit `SUBAGENT_TURN_TIMEOUT_S` + 30 s (default 1830 s; unbounded when the turn
+limit is). The child-turn limit counts from taking the slot (the child is
+stopped and the partial answer returned with 「サブエージェントが N 秒で終わらず、止めた (回答は途中まで)。」),
+so a slot is held at most that long: the first N waiters (N = the cap) do not
+time out before the children holding the slots would have been stopped; a
+waiter further back waits for slots to turn over more than once and can still
+time out. The per-tool timeout (sync and background) is turn limit + queue
+limit + 60 s, a backstop that lets the inner limit (partial answer) fire first.
+With `SUBAGENT_QUEUE_TIMEOUT_S` set to a non-positive value the backstop is the
+turn limit alone, so waiting eats into it and a timed-out child gives the
+generic tool timeout instead of the partial answer. On timeout
 the call fails with 「サブエージェントの枠 (N 本、ほかの利用者の分も数える) が T 秒空かず、起動しなかった。次の手: 自分で処理する。」
 and no child chat is created (the slot is taken after validation and before the
 child chat is created or appended to). A user stop, `stop_task` or a disconnect
@@ -2590,11 +2600,21 @@ so if every slot were held by parents waiting on queued children nothing would
 free up until the timeout — and fails at once with
 「サブエージェントの枠 (N 本) が埋まっていて、サブエージェントの中からは待てない (この分は起動していない)。次の手: 自分で処理する。」.
 A call that waited carries `note` 「枠が空くまで N 秒待った。」 (from 1 s). The
-docstring says 「同時に走るのはサーバー全体で 4 本まで (ほかの利用者の分も数える) で、超えた分はエラーにならず、枠が空くまで待ってから順に走る — 5 本以上も一度に並べてよい (background を付けて起動できるのは 1 人 4 本まで)」
-(background spawns beyond `ASYNC_EXEC_MAX_CONCURRENCY` per user still fail at
-spawn with 「…急ぐなら background を付けずに呼び直す。」 — §5.9; a queued
-background run holds an exec slot while it waits). If the parent chat was
-deleted while waiting, no child is created.
+docstring says 「同時に走るのはサーバー全体で 4 本まで (ほかの利用者の分も数える) で、超えた分はエラーにならず、枠が空くまで待ってから順に走る — 5 本以上も一度に並べてよい (background でも同じ)」.
+A background `run_subagent` is not counted toward the per-user
+`ASYNC_EXEC_MAX_CONCURRENCY` until it takes its slot (`Tools.exec_count_on_start`
+→ entry key `exec_count_on_start`; the spawn neither checks nor counts it,
+`utils/executions.exec_count_started` counts it once started), so a 5th+
+background call queues instead of failing, and a merely waiting task never
+makes the child's own background `run_python` etc. fail. Waiting tasks still
+count toward the process-wide `ASYNC_EXEC_MAX_TOTAL` (so they cannot pile up
+without bound). Running background subagents do count per user, so with 4 of
+them running the children's own background `run_python` can still be refused
+(unchanged). If the parent chat was
+deleted while waiting, no child is created. If the call ends after the child
+task was created but before its done callback was attached (a cancel inside
+`start_internal_turn`), the slot is released when the child ends and the child
+is stopped — no over-cap window, no orphan.
 and that subagents placed in one response run **concurrently**, while sandbox
 tools placed in one response run **one at a time** (§5.5 `serial`). A call
 with no parent chat or a missing parent chat fails with 「次の手: 自分で処理する。」.

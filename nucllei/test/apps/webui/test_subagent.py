@@ -77,6 +77,9 @@ class TestRunSubagent(AbstractPostgresTest):
         subagent._active_turns = 0
         subagent._running_agent_sessions.clear()
         subagent._slot_waiters.clear()
+        from nucllei.utils import executions as _executions
+
+        _executions._uncounted_execs.clear()
 
         Models.insert_new_model(
             ModelForm(
@@ -292,7 +295,13 @@ class TestRunSubagent(AbstractPostgresTest):
         # 席を待つ分を足す (2026-10-30)
         from nucllei.env import SUBAGENT_QUEUE_TIMEOUT_S
 
-        assert tool["timeout"] == SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_TIMEOUT_S
+        from nucllei.env import SUBAGENT_QUEUE_GRACE_S
+
+        assert tool["timeout"] == (
+            SUBAGENT_TURN_TIMEOUT_S
+            + SUBAGENT_QUEUE_TIMEOUT_S
+            + 2 * SUBAGENT_QUEUE_GRACE_S
+        )
         assert tool["render"] == {"result": {"kind": "subagent"}}
 
     def test_spec_overrides_do_not_leak_into_stored_spec(self):
@@ -1065,6 +1074,9 @@ class TestRunSubagent(AbstractPostgresTest):
                     break
                 await asyncio.sleep(0.01)
             assert len(subagent._slot_waiters) == 1  # タスクの中で待っている
+            # 待っている間はユーザーごとの background の同時数に数えない (子の run_python 等を弾かない)
+            assert executions._active_execs_by_user.get("1", 0) == 0
+            assert exec_id in executions._uncounted_execs
             await executions.stop_execution(exec_id)
             for _ in range(200):
                 if not subagent._slot_waiters and exec_id not in executions._exec_tasks:
@@ -1072,6 +1084,8 @@ class TestRunSubagent(AbstractPostgresTest):
                 await asyncio.sleep(0.01)
             assert not subagent._slot_waiters
             assert subagent._active_turns == cap  # 席は取っていないので数は変わらない
+            assert not executions._uncounted_execs
+            assert executions._active_execs_by_user.get("1", 0) == 0
             return exec_id
 
         exec_id = asyncio.run(main())
@@ -1126,19 +1140,200 @@ class TestRunSubagent(AbstractPostgresTest):
         asyncio.run(main())
         subagent._active_turns = 0
 
+    def test_background_calls_over_the_user_exec_cap_queue_too(self, monkeypatch):
+        """background の run_subagent は 1 人 4 本 (ASYNC_EXEC_MAX_CONCURRENCY) を超えても spawn で弾かれず、
+        席を待つ。走り出したら数える (exec_count_started)。"""
+        from nucllei.env import ASYNC_EXEC_MAX_CONCURRENCY
+        from nucllei.utils import executions, subagent
+
+        executions._exec_tasks.clear()
+        executions._active_execs_by_user.clear()
+        executions._exec_sinks.clear()
+        executions._uncounted_execs.clear()
+        gate = self._patch_gated_child_pipeline(monkeypatch)
+        monkeypatch.setattr(subagent, "SUBAGENT_MAX_CONCURRENCY", 1)
+        tool = self._build_tool()
+        assert tool["exec_count_on_start"] is True
+        n = ASYNC_EXEC_MAX_CONCURRENCY + 2
+
+        async def main():
+            ids = []
+            for i in range(n):
+                spawned = await executions.spawn_execution(
+                    user_id="1",
+                    chat_id=self.parent.id,
+                    message_id="pm-a",
+                    tool_call_id=f"functions.run_subagent:{i}",
+                    tool_name="run_subagent",
+                    entry=tool,
+                    params={"preset_id": "researcher", "instruction": f"{i}"},
+                )
+                assert spawned["status"] == "running", i
+                ids.append(spawned["task_id"])
+            for _ in range(300):
+                if len(subagent._slot_waiters) == n - 1:
+                    break
+                await asyncio.sleep(0.01)
+            assert subagent._active_turns == 1
+            assert len(subagent._slot_waiters) == n - 1
+            # 走っている 1 本だけが数えられている
+            assert executions._active_execs_by_user.get("1", 0) == 1
+            assert len(executions._uncounted_execs) == n - 1
+            gate.set()
+            for _ in range(500):
+                if not executions._exec_tasks:
+                    break
+                await asyncio.sleep(0.02)
+            assert not executions._exec_tasks
+            return ids
+
+        ids = asyncio.run(main())
+        from nucllei.models.executions import Executions
+
+        assert [Executions.get_execution_by_id(i).status for i in ids] == ["done"] * n
+        assert executions._active_execs_by_user.get("1", 0) == 0
+        assert not executions._uncounted_execs
+        assert subagent._active_turns == 0 and not subagent._slot_waiters
+
+    def test_waiting_background_calls_still_count_toward_the_server_total(
+        self, monkeypatch
+    ):
+        """まだ数えていない (席を待っている) background も、サーバー全体の background 上限
+        (ASYNC_EXEC_MAX_TOTAL) には入れて見る — 際限なく積ませない。"""
+        from nucllei.utils import executions, subagent
+        from nucllei.utils.tool_errors import ToolError
+
+        executions._exec_tasks.clear()
+        executions._active_execs_by_user.clear()
+        executions._exec_sinks.clear()
+        executions._uncounted_execs.clear()
+        self._patch_child_pipeline(monkeypatch)
+        monkeypatch.setattr(executions, "ASYNC_EXEC_MAX_TOTAL", 3)
+        tool = self._build_tool()
+
+        async def main():
+            subagent._active_turns = subagent.SUBAGENT_MAX_CONCURRENCY
+            ids = []
+            for i in range(3):
+                spawned = await executions.spawn_execution(
+                    user_id="1",
+                    chat_id=self.parent.id,
+                    message_id="pm-a",
+                    tool_call_id=f"functions.run_subagent:{i}",
+                    tool_name="run_subagent",
+                    entry=tool,
+                    params={"preset_id": "researcher", "instruction": f"{i}"},
+                )
+                ids.append(spawned["task_id"])
+            try:
+                await executions.spawn_execution(
+                    user_id="1",
+                    chat_id=self.parent.id,
+                    message_id="pm-a",
+                    tool_call_id="functions.run_subagent:9",
+                    tool_name="run_subagent",
+                    entry=tool,
+                    params={"preset_id": "researcher", "instruction": "9"},
+                )
+                raise AssertionError("上限で弾かれていない")
+            except ToolError as e:
+                assert "サーバー全体の上限 (3)" in e.text
+            for i in ids:
+                await executions.stop_execution(i)
+            for _ in range(300):
+                if not executions._exec_tasks:
+                    break
+                await asyncio.sleep(0.01)
+
+        asyncio.run(main())
+        subagent._active_turns = 0
+        assert not executions._uncounted_execs and not subagent._slot_waiters
+
+    def test_child_turn_is_limited_from_taking_the_slot(self, monkeypatch):
+        """子ターンの上限は席を取ってからの時間で見る — 超えたら子を止めて途中までの回答を返し、席を返す。"""
+        from nucllei import tasks as task_registry
+        from nucllei.utils import subagent
+
+        self._patch_gated_child_pipeline(monkeypatch)  # gate を開けない = 終わらない子
+        monkeypatch.setattr(subagent, "SUBAGENT_TURN_TIMEOUT_S", 0.3)
+        tool = self._build_tool()
+
+        async def main():
+            result = await tool["callable"](preset_id="researcher", instruction="x")
+            await self._wait_turn_slot_release()
+            return result
+
+        result = asyncio.run(main())
+        assert result["ok"] is False
+        assert (
+            result["error"]
+            == "サブエージェントが 0.3 秒で終わらず、止めた (回答は途中まで)。"
+        )
+        assert subagent._active_turns == 0
+        child_id = result["session_id"]
+        assert task_registry.list_task_ids_by_chat_id(child_id) == []
+
+    def test_failure_after_the_child_task_started_keeps_the_slot_until_it_stops(
+        self, monkeypatch
+    ):
+        """子 task を作った後、done callback を付ける前に抜けたら (start_internal_turn の中での cancel 等)、
+        席はすぐ返さずに子の終わりで返し、子は止める — 上限を超えて走らない・孤児を作らない。"""
+        from nucllei import tasks as task_registry
+        from nucllei.utils import subagent
+
+        self._patch_gated_child_pipeline(monkeypatch)
+        original = subagent.start_internal_turn
+
+        async def start_then_fail(*args, **kwargs):
+            await original(*args, **kwargs)
+            raise RuntimeError("callback を付ける前に抜ける")
+
+        monkeypatch.setattr(subagent, "start_internal_turn", start_then_fail)
+        tool = self._build_tool()
+
+        async def main():
+            try:
+                await tool["callable"](preset_id="researcher", instruction="x")
+                raise AssertionError("例外が出ていない")
+            except RuntimeError:
+                pass
+            # 席はまだ子が持っている (子を止め終わるまで)
+            held = subagent._active_turns
+            for _ in range(300):
+                if subagent._active_turns == 0:
+                    break
+                await asyncio.sleep(0.01)
+            return held
+
+        held = asyncio.run(main())
+        assert held == 1
+        assert subagent._active_turns == 0 and not subagent._running_agent_sessions
+        (child,) = self.Chats.get_child_chats_by_parent_id(self.parent.id, "1")
+        assert task_registry.list_task_ids_by_chat_id(child.id) == []
+
     def test_wait_is_added_to_the_tool_timeout_and_described(self):
         from nucllei.builtin_tools.subagent import Tools
         from nucllei.env import SUBAGENT_QUEUE_TIMEOUT_S, SUBAGENT_TURN_TIMEOUT_S
 
+        from nucllei.env import SUBAGENT_QUEUE_GRACE_S as grace
+
+        # 外側の歯止め = 子ターン + 待ち + 子を止めて回答を組む間の余裕
         assert Tools.timeouts["run_subagent"] == (
-            SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_TIMEOUT_S
+            SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_TIMEOUT_S + 2 * grace
         )
         assert (
             "超えた分はエラーにならず、枠が空くまで待ってから順に走る — 5 本以上も一度に並べてよい"
             in Tools.__doc__
         )
         assert "即エラー" not in Tools.__doc__
-        assert "(background を付けて起動できるのは 1 人 4 本まで)" in Tools.__doc__
+        assert "5 本以上も一度に並べてよい (background でも同じ)" in Tools.__doc__
+        # 待ちの上限の既定は子ターンの上限 + 余裕 (2026-10-30 llens 決定 — 席がすべて長い子で埋まって
+        # いても、後から並んだ呼び出しはその子が止められる前に時間切れにならない)
+        from nucllei.env import SUBAGENT_QUEUE_GRACE_S
+
+        assert (
+            SUBAGENT_QUEUE_TIMEOUT_S == SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_GRACE_S
+        )
 
     def test_long_answer_is_truncated(self, monkeypatch):
         from nucllei.utils import subagent

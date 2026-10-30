@@ -473,6 +473,17 @@ def get_tools(
                 if getattr(module, "serial", False) is True:
                     tool_dict["serial"] = True
 
+                # 2026-10-30: background のユーザーごとの同時数 (ASYNC_EXEC_MAX_CONCURRENCY) に、spawn
+                # したときでなく走り出したときから数える関数 (`Tools` クラス属性 `exec_count_on_start`
+                # に関数名の列)。run_subagent — 席が空くのを待っている間は数えない
+                # (utils/executions.exec_count_started)
+                count_on_start = getattr(module, "exec_count_on_start", None)
+                if (
+                    isinstance(count_on_start, (list, tuple, set, frozenset))
+                    and function_name in count_on_start
+                ):
+                    tool_dict["exec_count_on_start"] = True
+
                 _add_tool(tools_dict, function_name, tool_dict)
 
     return tools_dict

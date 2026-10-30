@@ -281,17 +281,27 @@ try:
 except ValueError:
     SUBAGENT_MAX_CONCURRENCY = 4
 
-# 席が空くのを待つ上限 (秒、-1 等の非正値で無制限)。超えたら起動せずにエラー。run_subagent の
-# per-tool timeout (同期・background とも) はこの分を SUBAGENT_TURN_TIMEOUT_S に足す — 待ちで子ターンの
-# 持ち時間を削らない (無制限にすると足せないので、待った分だけ SUBAGENT_TURN_TIMEOUT_S が削られる)。
-# サブエージェントの中からの呼び出し (入れ子) は待たない (詰まり防止)。
-SUBAGENT_QUEUE_TIMEOUT_S = os.environ.get("SUBAGENT_QUEUE_TIMEOUT_S", "600")
+# 席が空くのを待つ上限 (秒、-1 等の非正値で無制限)。超えたら起動せずにエラー。既定は子ターンの上限
+# (SUBAGENT_TURN_TIMEOUT_S) + 子を止める間の余裕 SUBAGENT_QUEUE_GRACE_S — 子ターンは席を取ってから
+# SUBAGENT_TURN_TIMEOUT_S で止めるので、席がすべて長い子で埋まっていても、列の先頭から席の数までの
+# 呼び出しはその子が止められる前に時間切れにならない (それより後ろは席が何周か入れ替わるのを待つので、
+# 時間切れになりうる。2026-10-30 llens 決定)。明示したときだけその値。
+# 子ターンの上限が非正値 (無制限) なら既定も無制限。run_subagent の per-tool timeout (同期・background
+# とも) は子ターンの上限 + この値 (外側の歯止め)。サブエージェントの中からの呼び出し (入れ子) は待たない。
+SUBAGENT_QUEUE_GRACE_S = 30
+_queue_timeout = os.environ.get("SUBAGENT_QUEUE_TIMEOUT_S", "").strip()
 try:
-    SUBAGENT_QUEUE_TIMEOUT_S = float(SUBAGENT_QUEUE_TIMEOUT_S)
-    if SUBAGENT_QUEUE_TIMEOUT_S.is_integer():
-        SUBAGENT_QUEUE_TIMEOUT_S = int(SUBAGENT_QUEUE_TIMEOUT_S)
+    SUBAGENT_QUEUE_TIMEOUT_S = float(_queue_timeout) if _queue_timeout else None
 except ValueError:
-    SUBAGENT_QUEUE_TIMEOUT_S = 600
+    SUBAGENT_QUEUE_TIMEOUT_S = None
+if SUBAGENT_QUEUE_TIMEOUT_S is None:
+    SUBAGENT_QUEUE_TIMEOUT_S = (
+        SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_GRACE_S
+        if SUBAGENT_TURN_TIMEOUT_S > 0
+        else -1
+    )
+elif SUBAGENT_QUEUE_TIMEOUT_S.is_integer():
+    SUBAGENT_QUEUE_TIMEOUT_S = int(SUBAGENT_QUEUE_TIMEOUT_S)
 
 # llens(#110): 非同期 tool 実行(execution)1 本のタイムアウト(秒、-1 で無効)。
 # per-tool の timeout 宣言が最優先で、無ければこれ。sync 既定
