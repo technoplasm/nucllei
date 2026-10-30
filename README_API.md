@@ -2240,7 +2240,9 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     (also with a trailing `/`) is accepted and the place itself (`/workspace`,
     `/ext/groups/<g>`, `/ext/public`) is refused. Refused before asking the
     sandbox: the trash itself and anything in it (next step: nothing to do, it
-    empties itself; ask the user to empty it sooner), a name starting with `.`,
+    empties itself; to empty it sooner the user can delete it on screen under
+    the workspace's 「サンドボックス」 — said in the error since 2026-10-30, not
+    left to the deployment prompt), a name starting with `.`,
     and `/workspace/imports`. The sandbox endpoint is the new
     `POST /files/trash` — `/files/delete` is unchanged (its `/ext` delete stays
     permanent, so the workspace file browser behaves as before); a sandbox

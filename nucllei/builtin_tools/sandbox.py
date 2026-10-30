@@ -672,9 +672,12 @@ def _place_itself(abs_path: str) -> ToolError:
 # `.` 始まりは sandbox も断る (`_check_mutable`) — 先に言い分けるために同じ範囲をここにも持つ
 _TRASH_DIR = "trash"
 _WORKSPACE_SYSTEM_DIRS = ("imports",)
+# 「ユーザーに頼む」だけでは何を頼むか system prompt に頼る — 画面で本人が消せると言う。期限は
+# sandbox の設定 (cache_ttl_days) で変わるので日数を決め打ちしない (2026-10-30 batch 3 の敵対レビュー)
 _TRASH_INSIDE_NEXT = (
-    "何もしなくてよい (ゴミ箱のものは移してから一定期間 (既定 30 日) で自動で消える)。"
-    "すぐ空けたいならユーザーに頼む。"
+    "何もしなくてよい (ゴミ箱のものは移してから一定期間で自動で消える)。"
+    "すぐ空けたいなら、ユーザーが画面のワークスペースの「サンドボックス」で自分で消せる"
+    " (消したものは戻らない) と伝える。"
 )
 # 古い sandbox (`/files/trash` が無い) の 404 は FastAPI の既定の本文 — 「ファイルが無い」の
 # 404 (`not found: <path>`) と本文で見分ける
@@ -707,7 +710,8 @@ def _trash_error(e: Exception, abs_path: str) -> ToolError:
         if e.status == 409:
             return ToolOutcome(
                 f"ゴミ箱に {posixpath.basename(abs_path)} と同じ名前のものが多すぎて移せない",
-                "ファイルはそのまま残っている。ユーザーに伝え、ゴミ箱を空にしてもらう。",
+                "ファイルはそのまま残っている。ユーザーに伝え、画面のワークスペースの「サンドボックス」で"
+                "ゴミ箱の中を消してもらう。",
             )
     return _files_error(e, abs_path)
 
@@ -2038,16 +2042,15 @@ class Tools:
         __user__: Optional[dict] = None,
     ) -> str:
         """
-        sandbox のファイル・フォルダをゴミ箱へ移す (完全には消さない。フォルダは中身ごと)。
-        移す先はその置き場のゴミ箱の直下で、`/workspace/…` は `/workspace/trash/`、
-        `/ext/groups/<グループ名>/…` は `/ext/groups/<グループ名>/trash/`、`/ext/public/…` は
-        `/ext/public/trash/` (元のフォルダ構成は持たず、同じ名前があれば `-2` `-3` … を付ける)。
-        ゴミ箱のものは移してから一定期間 (既定 30 日) で自動で消え、それまでは run_shell の mv で戻せる。
-        ファイルを消すときは run_shell の rm ではなくこちらを使う (例外は system prompt の決まりに従う)。
-        ゴミ箱の中のものは扱わない。
+        sandbox のファイル・フォルダ (中身ごと) をその置き場のゴミ箱 (`trash/`) へ移す (完全には消さず、
+        一定期間は戻せる)。ファイルを消すときは run_shell の rm ではなくこちらを使う
+        (例外は system prompt の決まりに従う)。
 
-        :param path: 移すファイルかフォルダ。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` のものも移せる (管理者はすべてのグループの置き場と `/ext/public/…` のものも移せる)。
+        :param path: 移すファイルかフォルダ。sandbox の絶対パス (`/workspace/…`・`/ext/groups/<グループ名>/…`。管理者は `/ext/public/…` も)
         """
+        # 説明から外した細目 (2026-10-30 llens「tool の説明を削る」batch 3) は結果・ERROR が言う: 移した先の
+        # パス (置き場ごとの trash/ の直下・同じ名前なら -2 …)・消えるまでの日数・戻す mv のコマンドは結果、
+        # ゴミ箱の中・置き場そのもの・. 始まりは ERROR
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         abs_path, target, ext = self._write_target(path, __user__, allow_dir=True)

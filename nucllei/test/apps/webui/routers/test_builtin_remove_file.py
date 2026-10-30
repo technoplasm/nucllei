@@ -97,8 +97,9 @@ def test_refused_before_asking_the_sandbox(path, fact):
 def test_trash_inside_points_to_the_automatic_expiry():
     out = _rm(_tool(), "/workspace/trash/a.md")
     assert out.endswith(
-        "次の手: 何もしなくてよい (ゴミ箱のものは移してから一定期間 (既定 30 日) で自動で消える)。"
-        "すぐ空けたいならユーザーに頼む。"
+        "次の手: 何もしなくてよい (ゴミ箱のものは移してから一定期間で自動で消える)。"
+        "すぐ空けたいなら、ユーザーが画面のワークスペースの「サンドボックス」で自分で消せる"
+        " (消したものは戻らない) と伝える。"
     )
 
 
@@ -186,7 +187,10 @@ def test_spec():
     spec = specs["remove_file"]
     assert list(spec["parameters"]["properties"]) == ["path"]
     assert spec["parameters"]["required"] == ["path"]
-    assert "ゴミ箱へ移す" in spec["description"]
+    assert "ゴミ箱 (`trash/`) へ移す" in spec["description"]
+    # 移す先の細目・期限・戻し方は結果が言う (2026-10-30 llens「tool の説明を削る」batch 3)
+    for gone in ("/workspace/trash/", "-2", "30 日", "mv"):
+        assert gone not in spec["description"], gone
     assert "rm ではなくこちらを使う" in spec["description"]
     # rm でなく remove_file は remove_file の説明だけが言う (2026-10-30 batch 2 で toolkit の共通注記から
     # 外した)。記憶・EMR の抽出物の rm の例外は system prompt に委ねる
