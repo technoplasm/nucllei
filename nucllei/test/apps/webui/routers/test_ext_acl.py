@@ -690,6 +690,51 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         out = _text(tool.list_workspace("/ext/groups/OTHER", __user__=MEMBER))
         assert "は無い" in out and tool.calls == []
 
+    def test_list_workspace_marks_groups_admin_is_not_in(self):
+        # 管理者には全グループが見えて書ける — 所属していないものはそう添える
+        # (2026-10-30 llens: モデルが見えるだけのグループにレシピを上げた)
+        from nucllei.models.groups import GroupUpdateForm, Groups
+
+        g = next(x for x in Groups.get_groups() if x.name == "EMR")
+        Groups.update_group_by_id(
+            g.id, GroupUpdateForm(name="EMR", description="", user_ids=["admin1"])
+        )
+        note = "所属していない (管理者なので見えている)"
+        out = _text(_tool({}).list_workspace("/ext/groups", __user__=ADMIN))
+        lines = out.splitlines()
+        assert "- /ext/groups/EMR/ (グループの共有の置き場。書ける)" in lines
+        assert f"- /ext/groups/OTHER/ (グループの共有の置き場。書ける。{note})" in lines
+        assert (
+            f"- /ext/groups/内科外来/ (グループの共有の置き場。書ける。{note})" in lines
+        )
+        # 所属している一般ユーザーには添えない
+        out = _text(_tool({}).list_workspace("/ext/groups", __user__=MEMBER))
+        assert note not in out
+
+        listing = {
+            "/files/list": {
+                "entries": [{"path": "/ext/groups/OTHER/a.md", "size": 3}],
+                "exists": True,
+                "is_dir": True,
+            }
+        }
+        out = _text(_tool(listing).list_workspace("/ext/groups/OTHER", __user__=ADMIN))
+        assert (
+            out
+            == f"- /ext/groups/OTHER/a.md (3B)\n(/ext/groups/OTHER (OTHER に{note}))"
+        )
+        out = _text(
+            _tool(
+                {"/files/list": {"entries": [], "exists": True, "is_dir": True}}
+            ).list_workspace("/ext/groups/OTHER/sub", __user__=ADMIN)
+        )
+        assert out == f"/ext/groups/OTHER/sub は空 (ファイルが無い) (OTHER に{note})。"
+        listing["/files/list"]["entries"] = [
+            {"path": "/ext/groups/EMR/a.md", "size": 3}
+        ]
+        out = _text(_tool(listing).list_workspace("/ext/groups/EMR", __user__=ADMIN))
+        assert out == "- /ext/groups/EMR/a.md (3B)"
+
     def test_fetch_from_workspace(self, monkeypatch, tmp_path):
         _tree(monkeypatch, tmp_path)
         tool = _tool({})

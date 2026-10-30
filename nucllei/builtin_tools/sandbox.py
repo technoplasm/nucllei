@@ -48,6 +48,7 @@ from nucllei.utils.ext_acl import (
     ext_access,
     ext_visible_groups,
     is_acl_rel,
+    member_group_names,
     sandbox_ext_mounts,
 )
 from nucllei.utils.file_limit import (
@@ -285,6 +286,9 @@ def _acl_place_depth(rel: str) -> int:
     置き場の外 (`/ext/groups` 自体)、同じならディレクトリそのもの。"""
     return 2 if rel.split("/", 1)[0] == GROUPS else 1
 
+
+# list_workspace が管理者の見ている「所属していないグループ」に添える (2026-10-30 llens 依頼)
+_NOT_MEMBER_NOTE = "所属していない (管理者なので見えている)"
 
 # sandbox が jail の env (`NUCLLEI_USER_ROLE`) で渡せるロール (sandbox の `USER_ROLES` と同じ)
 _SANDBOX_USER_ROLES = frozenset({"admin", "user", "pending"})
@@ -1824,9 +1828,11 @@ class Tools(RecipeTools):
                 if acl == GROUPS:
                     raise ToolCallError(
                         f"{abs_path} はグループの置き場の一覧",
-                        "`/ext/groups/<グループ名>/<名前>` まで指定する。"
-                        if allow_dir
-                        else "`/ext/groups/<グループ名>/<ファイル名>` まで指定する。",
+                        (
+                            "`/ext/groups/<グループ名>/<名前>` まで指定する。"
+                            if allow_dir
+                            else "`/ext/groups/<グループ名>/<ファイル名>` まで指定する。"
+                        ),
                     )
                 if ext_access(user, acl) == "none":
                     raise _ext_not_found(abs_path)
@@ -2380,16 +2386,27 @@ class Tools(RecipeTools):
         )
 
     def _list_groups(self, user: dict) -> str:
-        """`/ext/groups` 直下 = この user に見えるグループの置き場 (#152。ACL の `ext_visible_groups`)。"""
+        """`/ext/groups` 直下 = この user に見えるグループの置き場 (#152。ACL の `ext_visible_groups`)。
+
+        管理者には所属していないグループも見えて書けるので、その行に「所属していない」を添える
+        (2026-10-30 llens 依頼: 所属の無い管理者に「グループに上げて」と頼むと、モデルが
+        {{USER_GROUPS}} より tool の結果を信じて見えるだけのグループに上げた)。所属は
+        NUCLLEI_USER_GROUPS と同じ (ディレクトリ名にできる所属グループ)。"""
         try:
             names = ext_visible_groups(user)
+            # 管理者以外に見えるのは所属グループだけ — 引き直さない
+            admin = user.get("role") == "admin"
+            member = set(member_group_names(user["id"]) if admin else names)
         except Exception as e:
             log.error(f"[sandbox] visible groups for {user.get('id')} failed: {e!r}")
             raise ToolFailure("グループの所属を確かめられない")
         if not names:
             return f"{_GROUPS_ROOT} に見える置き場は無い (所属しているグループが無い)。"
         return "\n".join(
-            f"- {_GROUPS_ROOT}/{n}/ (グループの共有の置き場。書ける)" for n in names
+            f"- {_GROUPS_ROOT}/{n}/ (グループの共有の置き場。書ける"
+            + ("" if n in member else f"。{_NOT_MEMBER_NOTE}")
+            + ")"
+            for n in names
         )
 
     async def _list_ext(self, abs_path: str, rel: str, user: dict) -> str:
@@ -2416,13 +2433,23 @@ class Tools(RecipeTools):
                 "一覧するならディレクトリを渡す (中身を読むなら read_file、ユーザーに"
                 "渡すなら fetch_from_workspace)。",
             )
-        ro = "" if access == "rw" else " (read-only — 書けるのは管理者だけ)"
+        note = "" if access == "rw" else " (read-only — 書けるのは管理者だけ)"
+        # 管理者が所属していないグループの中 (直下の一覧と同じ注記 — `_list_groups`)
+        # (管理者以外は所属グループの中しか見えないので引かない)
+        parts = rel.split("/")
+        if (
+            parts[0] == GROUPS
+            and user.get("role") == "admin"
+            and parts[1] not in member_group_names(user["id"])
+        ):
+            group = parts[1]
+            note = f" ({group} に{_NOT_MEMBER_NOTE})"
         entries = res.get("entries", [])
         if not entries:
-            return f"{abs_path} は空 (ファイルが無い){ro}。"
+            return f"{abs_path} は空 (ファイルが無い){note}。"
         lines = [f"- {e['path']} ({_human_size(e['size'])})" for e in entries]
-        if ro:
-            lines.append(f"({abs_path}{ro})")
+        if note:
+            lines.append(f"({abs_path}{note})")
         return "\n".join(lines + _list_truncated_note(res, entries))
 
     async def fetch_from_workspace(

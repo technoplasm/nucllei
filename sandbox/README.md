@@ -596,7 +596,7 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 | `edit_file(path, old_text, new_text)` | テキストファイルの一部を直す (`/files/stat` → `/files/read` → `/files/write`)。`old_text` がちょうど 1 か所一致するときだけ `new_text` に置き換え、0 か所・2 か所以上・`old_text` 空は断る (追記の専用引数は無い)。読んだ文字コード (BOM 付き UTF-8 / UTF-8 / cp932) のまま書き戻す。`path` の範囲と上限は `write_file` と同じ |
 | `remove_file(path)` | ファイル・フォルダ (中身ごと) をその置き場のゴミ箱の直下へ移す (`/files/trash`)。`/workspace/…` → `/workspace/trash/`、`/ext/groups/<g>/…` → `/ext/groups/<g>/trash/`、`/ext/public/…` → `/ext/public/trash/`。完全には消さない。同名は `-2` `-3`…。ゴミ箱の中・ゴミ箱そのもの・置き場の root・`.` 始まり・`/workspace/imports` と末端の symlink は断る。`path` の範囲は `write_file` と同じ |
 | `load_recipe(path)` / `save_recipe(…)` / `edit_recipe(path, old_text, new_text)` | レシピ (`<層>/recipes/<名前>/RECIPE.md`) を読み込む・作る・直す。読み出しと検査は `/recipes/folder`、前の版は `/files/trash` (`name`) で `<層>/trash/<名前>.RECIPE.md` へ、書き込みは `/files/write`。一覧は `/recipes/index` (`{{USER_RECIPES}}`)。判定と引数は nucllei の README_API |
-| `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
+| `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧。管理者が所属していないグループには「所属していない (管理者なので見えている)」を添える — その中の一覧も同じ)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
 | `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/ext/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。nucllei 側にも在る (= 既に URL `/ext/…` で配信されている) `/ext/…` のファイルは添付せず、その URL (同じ文字列) を返す (下記) |
 
 - **`send_to_workspace(url=)` の URL は nucllei の共有 resolver (`nucllei/utils/image_refs.py`) で解決する**

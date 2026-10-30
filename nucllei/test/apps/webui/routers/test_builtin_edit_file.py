@@ -321,9 +321,8 @@ def test_spec():
     spec = specs["edit_file"]
     assert list(spec["parameters"]["properties"]) == ["path", "old_text", "new_text"]
     assert spec["parameters"]["required"] == ["path", "old_text", "new_text"]
-    assert (
-        "sandbox の絶対パス (`/workspace/…`)。"
-        in (spec["parameters"]["properties"]["path"]["description"])
+    assert "sandbox の絶対パス (`/workspace/…`)。" in (
+        spec["parameters"]["properties"]["path"]["description"]
     )
     # write_file / read_file から「一部だけ直すなら edit_file」へ向ける
     assert "一部だけを直すなら edit_file" in specs["write_file"]["description"]

@@ -1304,7 +1304,10 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "`/ext/public/` に書ける" in note
         assert "send_to_workspace(file_id)" in note
         # 消すときは rm せず remove_file でその置き場の trash/ へ移す (同じ規則で消える。2026-10-27)
-        assert "rm せず" in note and "remove_file でその置き場のゴミ箱 (`trash/`) へ移す" in note
+        assert (
+            "rm せず" in note
+            and "remove_file でその置き場のゴミ箱 (`trash/`) へ移す" in note
+        )
         # 例外 (LLENS の記憶・電子カルテの抽出物は rm 等) は配備の system prompt が決める。
         # 「配備」「Files」はモデルに見せない内部語 (2026-10-19 llens 監査)
         assert "例外は system prompt の決まりに従う" in note
