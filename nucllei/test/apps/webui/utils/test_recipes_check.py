@@ -475,22 +475,6 @@ def test_layer_rule_allows_narrow_to_wide(layer, entry):
     )
 
 
-def test_skill_shorthand():
-    assert R.normalize_skill_on_load_shorthand({"skill": "emr"}) == {
-        "tool": "load_skill",
-        "args": {"skill_id": "emr"},
-    }
-    assert R.normalize_skill_on_load_shorthand({"tool": "x"}) == {"tool": "x"}
-    for bad in (
-        {"shell": "a"},
-        {"python": "a.py"},
-        {"read": "rel.md"},
-        {"recipe": "x"},
-    ):
-        with pytest.raises(ValueError):
-            R.normalize_skill_on_load_shorthand(bad)
-
-
 # ---- 軽い検査 (一覧・load_recipe) ----------------------------------------------
 
 

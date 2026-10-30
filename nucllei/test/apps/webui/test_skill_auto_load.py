@@ -8,7 +8,8 @@ skill が `auto_load_content_types`(content_type の前方一致リスト)を宣
 - 条件の宣言: API で保存でき、正規化される(小文字化・空要素と重複の除去)
 - 発火する / 条件に合わなければしない(content_type は DB の値で判定)
 - 認可は `/command` と同じ AND(機能有効 ∧ モデル紐づき ∧ read 可視)+ 読めない添付は無視
-- 後のターン(添付の無い発言)でも再導出される / カード(current)は添付の付いたターンだけ
+- 発火は 1 回: 応答に残った発火(load_skill 往復)が履歴にあれば足さない。履歴に無ければ
+  添付の無い発言のターンでも発火する(位置は最初の user メッセージの直後)
 - 二重発火しない(`/command`・モデル自律 load_skill が既にあれば足さない / 添付複数でも 1 回)
 - `/command`・load_skill との併用(位置と tool_ids の再導出)
 - 画像(user メッセージの image_url パート)は付いたメッセージの直後
@@ -98,10 +99,10 @@ class TestSkillAutoLoad(AbstractPostgresTest):
         assert file is not None
         return _file_entry(file_id)
 
-    def _apply(self, form_data, model, metadata=None, user=None):
+    def _apply(self, form_data, model, user=None):
         from nucllei.utils.skills import apply_skill_auto_load
 
-        return apply_skill_auto_load(form_data, user or self.user, model, metadata)
+        return apply_skill_auto_load(form_data, user or self.user, model)
 
     # ── 条件の宣言 ──────────────────────────────────────────────
 
@@ -263,8 +264,9 @@ class TestSkillAutoLoad(AbstractPostgresTest):
 
     # ── 持続 ────────────────────────────────────────────────────
 
-    def test_persists_on_later_turns(self):
-        """添付はチャットの一覧として毎リクエスト届く — 添付の無い発言のターンでも再導出される。"""
+    def test_fires_on_later_turn_when_not_in_history(self):
+        """添付はチャットの一覧として毎リクエスト届く — 発火がまだ履歴に無ければ、添付の無い
+        発言のターンでも発火する。"""
         skill = self._skill(tool_ids=["audio-tools"])
         files = [self._file("rec", "audio/webm")]
 
@@ -287,58 +289,39 @@ class TestSkillAutoLoad(AbstractPostgresTest):
             "user",
         ]
         assert activations[0]["tool_ids"] == ["audio-tools"]
-        # chat 文脈なし(headless)ではカードの seed 対象にしない
-        assert activations[0]["current"] is False
 
-    def test_card_is_seeded_only_on_the_turn_the_attachment_was_added(self):
-        """current(UI カードの seed)は「いまの user メッセージに付いた添付」で決める。"""
-        from nucllei.models.chats import ChatForm, Chats
-
+    def test_not_refired_once_in_history(self):
+        """発火したターンの応答に残った load_skill 往復(`skill:<id>:auto`)が履歴にあれば、
+        添付が毎リクエスト届いても発火し直さない(本文・before / after は 1 回)。"""
         skill = self._skill()
-        entry = self._file("rec", "audio/webm")
-        chat = Chats.insert_new_chat(
-            "1",
-            ChatForm(
-                chat={
-                    "title": "t",
-                    "history": {
-                        "currentId": "a2",
-                        "messages": {
-                            "u1": {"id": "u1", "role": "user", "parentId": None},
-                            "a1": {"id": "a1", "role": "assistant", "parentId": "u1"},
-                            "u2": {
-                                "id": "u2",
-                                "role": "user",
-                                "parentId": "a1",
-                                "files": [entry],
+        files = [self._file("rec", "audio/webm")]
+        call_id = f"skill:{skill.id}:auto"
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "これ聞いて"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": "load_skill",
+                                "arguments": json.dumps({"skill_id": skill.id}),
                             },
-                            "a2": {"id": "a2", "role": "assistant", "parentId": "u2"},
-                            "u3": {"id": "u3", "role": "user", "parentId": "a2"},
-                            "a3": {"id": "a3", "role": "assistant", "parentId": "u3"},
-                        },
-                    },
-                }
-            ),
-        )
-        model = _model_with_skills(skill.id)
-
-        def current(message_id, n_turns):
-            messages = []
-            for i in range(n_turns):
-                messages.append({"role": "user", "content": f"発言 {i}"})
-                if i < n_turns - 1:
-                    messages.append({"role": "assistant", "content": "応答"})
-            _, activations = self._apply(
-                {"messages": messages, "files": [entry]},
-                model,
-                metadata={"chat_id": chat.id, "message_id": message_id},
-            )
-            return activations[0]["current"]
-
-        # 2 ターン目(録音を添付した発言への応答 a2)= カードを出す
-        assert current("a2", 2) is True
-        # 3 ターン目(添付の無い発言への応答 a3)= 発火は続くがカードは出さない
-        assert current("a3", 3) is False
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": call_id, "content": "{}"},
+                {"role": "assistant", "content": "聞きました"},
+                {"role": "user", "content": "もう一度"},
+            ],
+            "files": files,
+        }
+        result, activations = self._apply(form_data, _model_with_skills(skill.id))
+        assert activations == []
+        assert len(result["messages"]) == 5
 
     # ── 二重発火 ────────────────────────────────────────────────
 
@@ -467,8 +450,6 @@ class TestSkillAutoLoad(AbstractPostgresTest):
             "assistant",
             "tool",
         ]
-        # 画像はメッセージに載って来るので、付いたターンが payload だけで分かる
-        assert activations[0]["current"] is True
 
         # data URL(headless API クライアント)は MIME で判定
         form_data = {"messages": [image_message("data:image/jpeg;base64,AAAA")]}

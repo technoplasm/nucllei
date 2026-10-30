@@ -46,7 +46,8 @@
 - **load_recipe の結果は 1 つ** (ken 2026-10-30「資料を先・指示を最後」): requires を書いた順に中で
   実行して見出し付きで先に並べ、本文を最後。recipe: は深さ優先で「その requires → その本文」。
   前の「本文を返して、on_load は後続の synthetic exchange」は止めた (`/command`・添付の 2 ターン目に
-  並びが崩れる)。make_followup_drain からレシピの分岐は外した (skill の後続はそのまま)。
+  並びが崩れる)。make_followup_drain からレシピの分岐は外した (make_followup_drain そのものも、skill の
+  before / after への作り直し — 同日 — で無くなった。skill もレシピも 1 つの結果に入る)。
 - **「読み込み済み」は履歴の load_recipe の結果に出ている印で見る**: `<recipe path="…">` (本文を
   渡したレシピ) と `<recipe-part key="…">` (実行した要素。失敗・警告の要素には付けない)。前の
   call id の永続 (tool_calls ブロック) が無くなったので。load_recipe 以外の結果・利用者の文に同じ

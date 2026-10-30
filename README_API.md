@@ -2723,10 +2723,10 @@ POST /api/v1/skills/create
   "content": "You now have vault access tools. Use secret_password to retrieve the stored secret.\nToday is {{CURRENT_DATE}}; the user is {{USER_NAME}}.",
   "tool_ids": ["vault-tools"],
   "auto_load_content_types": [],
-  "on_load": [
-    {"tool": "read_file", "args": {"path": "/ext/groups/EMR/notes/index.md"}},
-    {"tool": "load_skill", "args": {"skill_id": "vault-basics"}}
+  "before": [
+    {"tool": "read_file", "args": {"path": "/ext/groups/EMR/notes/index.md"}}
   ],
+  "after": [],
   "access_control": null
 }
 ```
@@ -2760,36 +2760,23 @@ POST /api/v1/skills/create
   automatically (§6.3). Empty (the default) disables it. Normalized on save
   (trimmed, lowercased, empty entries and duplicates dropped). **An update
   replaces the list** — omit the field and it is reset to `[]`.
-- `on_load` — steps processed **in the order written** whenever the skill is
-  loaded (§6.4): `[{"tool": "<function name>", "args": {…}}]` (`args` defaults
-  to `{}`; no other keys). The arguments are the fixed values written here only.
-  Two kinds of entries:
-  - `{"tool": "load_skill", "args": {"skill_id": "<id>"}}` loads another skill
-    **together with** this one. `args` takes `skill_id` only; a leading `/` is
-    dropped; empty or the skill itself is rejected.
-  - any other tool is run by the server **once per chat**. `{"tool": "load_recipe",
-    "args": {"path": "<recipe folder>"}}` (§6.5) is one of these; `path` is
-    normalized to the folder (`…/RECIPE.md` accepted).
-  **Short forms (2026-10-30)** — a notation like a recipe's `requires` (§6.5), plus
-  `skill:`, is accepted and stored in the full form: `{"skill": "<id>"}` → `load_skill`,
-  `{"recipe": "<absolute folder path>"}` → `load_recipe`, `{"read": "<absolute
-  path>"}` → `read_file`. `{"shell": …}` / `{"python": …}` are **400** for a skill
-  (they run a file attached to a recipe folder, which a skill does not have) —
-  write `{"tool": "run_shell", "args": {"command": "…"}}` instead (admin-only).
-  Relative paths are 400 for a skill.
-  Shape errors are 400. Permissions: an `on_load` made of `load_skill` /
-  `load_recipe` entries only may be set by skill editors (the target is checked
-  against the user's read access when it fires). Creating, updating or deleting
-  a skill whose stored or submitted `on_load` has **any other tool** (including
-  `read_file` from `{"read": …}`) is **admin-only**, like `tool_ids` (the code is
-  the same 401).
-- `on_load` on update: **omitted (or `null`) keeps the stored value**; send `[]`
-  to clear. (Unlike `tool_ids` / `auto_load_content_types`, which an update
-  replaces.) It is a top-level field of `POST /skills/create`,
-  `POST /skills/id/{id}/update` and the skill responses (always a list).
-  There is no separate `requires` field (it was merged into `on_load` before
-  release, 2026-10-29); a `requires` key in the body is ignored as an unknown
-  field.
+- `before` / `after` — tools the server runs when the skill is loaded (§6.4):
+  `[{"tool": "<function name>", "args": {…}}]` (`args` defaults to `{}`; no other
+  keys). The arguments are the fixed values written here only. Their results go
+  into the skill's one `load_skill` result — `before` results (in the order
+  written), then the skill content, then `after` results. `load_skill` /
+  `load_recipe` and the short forms (`{"skill": …}`, `{"read": …}`, …) are 400:
+  a skill does not load another skill or a recipe (whether to load one is the
+  model's call). Other shape errors are 400. Creating, updating or deleting a
+  skill whose stored or submitted `before` / `after` is **non-empty** is
+  **admin-only**, like `tool_ids` (the code is the same 401); a skill editor can
+  save a skill with both empty.
+- `before` / `after` on update: **omitted (or `null`) keeps the stored value**;
+  send `[]` to clear. (Unlike `tool_ids` / `auto_load_content_types`, which an
+  update replaces.) They are top-level fields of `POST /skills/create`,
+  `POST /skills/id/{id}/update` and the skill responses (always lists).
+  `on_load` is gone (replaced before release, 2026-10-30); an `on_load` key in
+  the body is ignored as an unknown field.
 - `access_control` — `null` public / `{}` private / `{"read":{group_ids,user_ids}}`.
 
 ### 6.2 Permissions (three tiers)
@@ -2797,8 +2784,8 @@ POST /api/v1/skills/create
 - **user** — uses skills they can read (via `/command` or model auto-load).
 - **skill editor** (`USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS`) — browses all
   skills, creates skills (forced private), edits/deletes their own.
-- **admin** — everything, including sharing (ACL), `tool_ids` and `on_load`
-  entries other than `load_skill` / `load_recipe` (editors may write those two).
+- **admin** — everything, including sharing (ACL), `tool_ids`, `before` and
+  `after`.
 
 ### 6.3 Activation
 
@@ -2808,10 +2795,13 @@ A skill fires only if all three hold: the model preset has skills enabled
 condition passes through as plain text (no error).
 
 - **User path**: a message starting with `/<id>` (first line). The server injects,
-  right after that message, a synthetic assistant `load_skill` call plus its tool
-  result. Activation is **conversation-persistent and stateless**: every request
-  re-derives it by scanning the user messages, so branching from before the
-  command deactivates it naturally.
+  right after that message, an assistant `load_skill` call (call id
+  `skill:<id>:<n>`) plus its tool result. **It fires once**: the same exchange is
+  stored at the head of that turn's response as an ordinary tool block, so the
+  next request carries it back as history and the server does not inject it
+  again (a skill already loaded anywhere in the history is never injected).
+  Branching from before the command drops it with the response; regenerating
+  that response fires it again.
 - **Model path**: when a preset lists skills with non-empty descriptions, the
   model gets one `load_skill(skill_id)` pseudo-tool whose description embeds the
   manifest (`- <id>: <description>` lines, enum-constrained). Tools loaded this
@@ -2823,116 +2813,93 @@ condition passes through as plain text (no error).
   parts of user messages (internal `/api/v1/files/{id}/content` URLs and
   `data:` URLs). The content type is always the one stored with the file, never
   a client-supplied value or the file extension. On a match the server injects
-  the same synthetic `load_skill` exchange as the user path (call id
+  the same `load_skill` exchange as the user path (call id
   `skill:<id>:auto`) and loads the skill's tools. Same AND condition as above;
   if it fails, nothing happens.
   - Placement: an image match goes right after the first user message carrying
     a matching image. A match from `files` goes right after the **first user
     message** — `files` is a per-chat list and does not say which message a
     file was attached to.
-  - Persistence: stateless. Attachments are part of every request, so the
-    activation is re-derived each time and the tools stay available on later
-    turns that add no attachment. A headless client keeps it active simply by
-    sending the same `files` again.
+  - It fires once, like the user path: the exchange is stored in that turn's
+    response and comes back as history; the tools stay available on later
+    turns through the history (below).
   - No double activation: if the history already contains a `load_skill` call
-    for that skill (from `/command` or from the model), nothing is added.
+    for that skill (from `/command`, an earlier auto-load or the model), nothing
+    is added.
     Several matching attachments still activate a skill once; several matching
     skills all activate, in `meta.skillIds` order.
-  - In the UI the `load_skill` card appears on the response to the message the
-    attachment was added with.
+  - In the UI the `load_skill` card appears on the response of the turn that
+    fired it.
 
 All paths return the same tool result:
 
 ```json
-{ "result": "<expanded skill content>", "tools": ["secret_password"] }
+{ "result": "<before results> <expanded skill content> <after results>", "tools": ["secret_password"] }
 ```
 
 `result` enters the model history as a `role:"tool"` message (not a system
 message); the UI renders it as a collapsible "load_skill" card with the loaded
-tool names. All entry points persist for the rest of the conversation: the
-`/command` and attachment paths re-derive their activation (and tool ids) from
-the request on every turn, and the model path re-derives its tool ids by
-replaying the `load_skill` calls found in the history (`replay_skill_tool_ids`). The model does not need to call `load_skill`
-again on a later turn to keep the tools.
+tool names. All entry points persist for the rest of the conversation in the
+same way: the `load_skill` exchange is part of the stored history, and the tool
+ids are re-derived on every request by replaying the `load_skill` calls found
+in the history (`replay_skill_tool_ids`). The model does not need to call
+`load_skill` again on a later turn to keep the tools. The content is expanded
+once, when the skill is loaded (`{{CURRENT_DATE}}` etc. are those of that turn).
 
 Authorization is never inherited from the history. Every re-derivation re-checks
 the same AND as the `/command` path (feature flag, the model's `meta.skillIds`,
 and read visibility), so removing a skill from the preset drops its tools even
 though the earlier `load_skill` call is still sitting in the conversation.
 
-### 6.4 `on_load`
+### 6.4 `before` / `after`
 
-`on_load` takes effect whenever a skill is loaded — by `/command`, by the
-model's `load_skill`, or by an attachment — including a skill that was itself
-pulled in by another skill's `on_load`. The entries are processed **in the order
-written**. A skill pulled in by a `load_skill` entry has its own `on_load`
-expanded **at that position**, depth-first. So "read the notes, then load the
-recipes skill" can be written as two entries.
+`before` and `after` run whenever a skill is loaded — by `/command`, by the
+model's `load_skill`, or by an attachment. The server really executes each tool,
+through the same function as a model tool call (`execute_tool_calls`), one at a
+time in the order written (`before` first, then `after`), and puts the results
+into the skill's `load_skill` result:
 
-**`load_skill` entries** — the server adds the same kind of exchange as for the
-skill itself (a `load_skill` call + the expanded content) and loads the target's
-`tool_ids` too. Like the skill's own exchange it is **re-derived on every
-request** and not stored.
+```text
+<skill-hook skill="emr" phase="before" n="1" tool="run_shell">
+### 読み込み時に実行した run_shell の結果 (before 1)
+exit_code=0 (0.1s)
+--- stdout ---
+…
+</skill-hook>
 
-- The target only needs to be **readable by the user**. It does not have to be
-  in the preset's `meta.skillIds` (the skill that names it already passed the
-  AND of §6.3), and its `description` may be empty.
-- Already loaded (earlier in the history, or earlier in the same request):
-  not added again, and its `on_load` is not expanded again. Cycles (A → B → A)
-  stop at the first repeat, with one warning in the server log.
-- Not readable / not existing: not loaded, and the `result` of the skill that
-  names it gets one extra line:
-  `skill <id> は使えない (…)。次の手: その skill 無しでこの手順書に従う。`
-- Call id: `skill:<id of the skill that names it>:on_load:<n>` (n = 0-based
-  position in that skill's `on_load`). The target's tools are re-derived on
-  later turns like the naming skill's own (`replay_skill_tool_ids` follows the
-  `load_skill` entries).
+<the skill content>
 
-**Other tool entries** — the server really executes the tool, through the same
-function as a model tool call, and inserts it at its position as an ordinary
-assistant `tool_calls` + `role:"tool"` result. Consecutive tool entries share
-one exchange. In the UI it is a normal tool card.
+<skill-hook skill="emr" phase="after" n="1" tool="read_file">
+### 手順書の後に実行した read_file の結果 (after 1)
+…
+</skill-hook>
+```
 
-- **Once per chat.** The call id is deterministic,
-  `skill:<skill id>:on_load:<n>` (n = 0-based position in `on_load`). If the
-  history sent with the request already has a tool result with that id, the
-  tool is not run again. The first run is stored in that turn's response as a
-  normal (non-synthetic) tool block, so the next request carries it back as
-  history. This is the difference from the `load_skill` exchanges, which are
-  re-derived on every request and shown as a synthetic card.
+There is no separate tool card or tool exchange for them. A skill with both
+empty returns its content alone, as before.
+
+- **Once per chat.** They run only when the skill's content enters the context
+  — the activation of `/command` / an attachment (which fires once, §6.3) or
+  the model's first `load_skill`. A later `load_skill` of the same skill returns
+  the short "already loaded" result and runs nothing.
+- **The same order on every turn.** The result is one stored tool result, so
+  later requests carry it back exactly as the model first saw it.
+- **Tools first.** The skill's own `tool_ids` are loaded before `before` /
+  `after` run, so they may use them.
 - The tool must be **available in that turn** — in the turn's tool list (the
   preset's `meta.toolIds` after the per-user read ACL, plus the tools of the
-  loaded skills). It does not have to be in the skill's own `tool_ids`.
-  Otherwise it is not run and the result is one ERROR line
-  (`ERROR: skill <id> の読み込み時に実行する <tool> は使えない (…)。次の手: …`,
-  `error_kind: "failure"`).
-- An exception or timeout becomes the ERROR result of that call, as for any
-  tool. Loading the skill never fails because of `on_load`.
+  loaded skills). Otherwise it is not run and its place holds one ERROR line
+  (`ERROR: skill <id> の読み込み時に実行する <tool> は使えない (このターンの tool の一覧に無い)。次の手: その結果無しで手順書に従う。`).
+- An exception or timeout becomes that tool's ERROR text, as for any tool; the
+  remaining entries still run and the skill still loads.
+- Images a tool returns (`context_images`) are not carried into the skill result.
 - Inside a subagent's turn the same rules apply (same user); the result is
   stored in the child chat.
-
-**Known trade-offs**
-
-- **Order on later turns (`/command`, attachment).** The written order holds on
-  the turn that first loads the skill. On later turns the `load_skill`
-  exchanges are re-derived at their entry point while the tool results come
-  back from the stored response, so all the `load_skill` exchanges come first
-  and the stored tool results after them. With the model's `load_skill` every
-  step is an ordinary stored round trip of that turn, so the written order
-  holds on later turns too.
-- **Position (attachment from `files`).** The `load_skill` exchange is placed
-  after the first user message (§6.3), so on later turns the tool results
-  appear further down than the skill body.
-- **Re-run.** If the response holding a result is deleted, regenerated or
-  branched away, the next load runs the tool again (the history is the only
-  state).
-- **Inlet filters** do not see the tool results inserted for `/command` and
-  attachments (they are inserted after the inlet filters run).
-- **Forged history.** The history comes from the client, so a forged result
-  with the same call id stops the tool from running. It only affects what that
-  user's own context receives; it grants nothing.
-- A model `load_skill` of a skill that is already loaded returns the short
-  result and processes no `on_load`.
+- **Headless clients** that do not send the stored `load_skill` exchange back
+  (only the text) get the `/command` / attachment activation again on every
+  request, and with it `before` / `after` run again.
+- **Inlet filters** see the injected `load_skill` exchange before `before` /
+  `after` have run (the result is rewritten after the inlet filters).
 
 ### 6.5 Recipes (user-written procedures)
 
@@ -3038,8 +3005,7 @@ unknown — no warning. If the sandbox is too old
 empty list. Expansion is synchronous, so the async entry points fetch the list
 first and keep it for the request (`ensure_user_recipes`): before a preset's
 system prompt is applied (`routers/openai` · `ollama` · `functions`), at the top
-of `process_chat_payload` (skills the model can reach — its `meta.skillIds` and
-their `load_skill` chains), and before a server-driven continuation's wire.
+of `process_chat_payload` (skills the model can reach — its `meta.skillIds`), and before a server-driven continuation's wire.
 Where the variable could not be fetched, it reads `(レシピの一覧はここでは取れない)`.
 
 **`load_recipe(path)`** — `path` is the folder (`…/RECIPE.md` accepted). It
@@ -3049,8 +3015,7 @@ tool **in the order written**, each under a heading, and **this recipe's body
 last**. A `recipe:` entry is expanded depth-first at its position — that
 recipe's own `requires`, then its body. (Until this change the body came first
 and the entries followed as separate synthetic tool exchanges; that order broke
-on `/command` and attachment turns, so it is gone. `make_followup_drain` no
-longer carries recipe entries.) Example (personal recipe; `read` · `recipe` ·
+on `/command` and attachment turns, so it is gone.) Example (personal recipe; `read` · `recipe` ·
 `shell` · a warning):
 
 ```

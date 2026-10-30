@@ -562,8 +562,6 @@ REQUIRES_FORM = (
     "requires は `- recipe: <レシピのフォルダの絶対パス>` `- read: <パス>` "
     "`- shell: <付属のファイル> [引数…]` `- python: <付属の .py> [引数…]` の並び"
 )
-# skill の on_load の短い記法 (skill 側の規則 — レシピの requires とは別。今回は変えない)
-SKILL_SHORTHAND_KINDS = ("skill", "recipe", "read", "shell", "python")
 
 
 @dataclass
@@ -701,35 +699,6 @@ def parse_recipe_requires(value, folder: str) -> tuple[list[RequireItem], list[s
                 )
             )
     return items, errors
-
-
-def normalize_skill_on_load_shorthand(entry):
-    """skill の on_load の 1 要素の短い記法を正規形 `{tool, args}` にする (それ以外はそのまま)。
-    skill の `recipe` / `read` は絶対パスだけ。`shell` / `python` は付属の概念が無いので ValueError。"""
-    if not isinstance(entry, dict) or "tool" in entry or len(entry) != 1:
-        return entry
-    ((kind, raw),) = entry.items()
-    if kind not in SKILL_SHORTHAND_KINDS:
-        return entry
-    if kind in ("shell", "python"):
-        raise ValueError(
-            f"skill の on_load では {kind}: は使えない (付属のファイルが無い)。"
-            '{"tool": "run_shell", "args": {"command": …}} と書く (管理者のみ)'
-        )
-    if not isinstance(raw, str) or not raw.strip():
-        raise ValueError(f"on_load の {kind}: の値が空か文字列でない")
-    raw = raw.strip()
-    if kind == "skill":
-        return {"tool": "load_skill", "args": {"skill_id": raw}}
-    if not raw.startswith("/"):
-        raise ValueError(f"skill の on_load の {kind}: は絶対パスで書く: {raw!r}")
-    if kind == "recipe":
-        try:
-            ref = parse_recipe_path(raw)
-        except RecipePathError as e:
-            raise ValueError(f"on_load の recipe: {e}")
-        return {"tool": "load_recipe", "args": {"path": ref.folder}}
-    return {"tool": "read_file", "args": {"path": posixpath.normpath(raw)}}
 
 
 # ---------------------------------------------------------------------------

@@ -73,7 +73,8 @@
 					tool_ids: _skill?.tool_ids ?? [],
 					auto_load_content_types: _skill?.auto_load_content_types ?? [],
 					// llens#22: 保存(ID 変更の作り直しを含む)で消さないよう持ち回る
-					on_load: _skill?.on_load ?? [],
+					before: _skill?.before ?? [],
+					after: _skill?.after ?? [],
 					access_control: _skill?.access_control ?? null
 				};
 			} else {

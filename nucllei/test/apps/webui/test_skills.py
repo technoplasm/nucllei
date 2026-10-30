@@ -249,12 +249,11 @@ class TestSkills(AbstractPostgresTest):
         assert msgs[2]["tool_call_id"] == call["id"]
         # result は構造化 JSON {result, tools}(tools は後段のロードで書き足される)
         assert json.loads(msgs[2]["content"]) == {"result": "展開: Taro", "tools": []}
-        # UI seed 用の発火情報
+        # 応答に残す発火情報
         assert activations[0]["call_id"] == call["id"]
         assert activations[0]["id"] == "mycmd"
         assert activations[0]["content"] == "展開: Taro"
         assert activations[0]["result_message"] is msgs[2]  # 書き戻し用の同一参照
-        assert activations[0]["current"] is True
 
         # 未知 command は素通し(注入なし)
         form_data = {"messages": [{"role": "user", "content": "/nope そのまま"}]}
@@ -270,9 +269,9 @@ class TestSkills(AbstractPostgresTest):
         assert activations == []
 
     def test_slash_command_activation_seed_keys(self):
-        """UI seed(metadata["skill_activations"])のキー整合(#43 rename 回帰)。
+        """応答に残す発火(metadata["skill_activations"])のキー整合(#43 rename 回帰)。
 
-        process_chat_response の synthetic tool_calls ブロックは
+        process_chat_response の発火の tool_calls ブロックは
         call_id / id / result の 3 キーを読む。#43 の command→id 改名時に
         seed 側だけ旧キー a["command"] が残り、`/command` 発火のたびに
         KeyError で払い出しが落ちていた。
@@ -309,14 +308,15 @@ class TestSkills(AbstractPostgresTest):
         )
 
         seeds = current_skill_activation_seeds(activations)
-        # current(最後の user メッセージ)の発火だけが seed される
-        assert len(seeds) == 1
-        assert set(seeds[0].keys()) == {"call_id", "id", "result"}
-        assert seeds[0]["id"] == "seedcmd"
-        assert json.loads(seeds[0]["result"])["result"] == "指示"
+        # このリクエストで発火した分(過去ターンの `/command` も、履歴にまだ発火が無ければ
+        # 今発火する — 応答に残して次からは履歴になる)
+        assert [seed["id"] for seed in seeds] == ["seedpast", "seedcmd"]
+        assert set(seeds[1].keys()) == {"call_id", "id", "result"}
+        assert json.loads(seeds[1]["result"])["result"] == "指示"
 
     def test_slash_command_multi_turn_scan(self):
-        """全 user メッセージ走査(会話持続)— 過去ターンの `/command` も毎リクエスト展開される。"""
+        """全 user メッセージ走査 — 過去ターンの `/command` も、その発火が履歴に無ければ展開される
+        (発火が応答に残っていれば足さない — test_slash_command_not_refired_once_in_history)。"""
         from nucllei.models.skills import SkillForm, Skills
         from nucllei.utils.skills import apply_skill_command
 
@@ -342,7 +342,7 @@ class TestSkills(AbstractPostgresTest):
         }
         result, activations = apply_skill_command(form_data, user, model)
         msgs = result["messages"]
-        # 各ヒットの直後に合成 exchange が入る(1 ターン目も毎リクエスト再注入 = 揮発しない)
+        # 各ヒットの直後に合成 exchange が入る
         roles = [m["role"] for m in msgs]
         assert roles == [
             "user",  # /multia(生のまま)
@@ -359,11 +359,39 @@ class TestSkills(AbstractPostgresTest):
         assert msgs[0]["content"] == "/multia 最初の依頼"
         assert json.loads(msgs[2]["content"])["result"] == "指示A"
         assert json.loads(msgs[7]["content"])["result"] == "指示B"
-        # current は最後の user メッセージでの発火のみ(UI 表示は当該ターンだけ)
-        assert [(a["id"], a["current"]) for a in activations] == [
-            ("multia", False),
-            ("multib", True),
-        ]
+        assert [a["id"] for a in activations] == ["multia", "multib"]
+
+    def test_slash_command_not_refired_once_in_history(self):
+        """発火したターンの応答に残った load_skill 往復(`skill:<id>:<n>`)が履歴にあれば、
+        同じ `/command` は発火し直さない(本文・before / after は chat につき 1 回)。"""
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.skills import apply_skill_command
+
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(id="once", name="t", content="指示O", access_control=None),
+        )
+        call = {
+            "id": "skill:once:0",
+            "type": "function",
+            "function": {"name": "load_skill", "arguments": '{"skill_id": "once"}'},
+        }
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "/once はじめる"},
+                {"role": "assistant", "content": "", "tool_calls": [call]},
+                {"role": "tool", "tool_call_id": call["id"], "content": "{}"},
+                {"role": "assistant", "content": "了解"},
+                {"role": "user", "content": "つづけて"},
+            ]
+        }
+        result, activations = apply_skill_command(
+            form_data,
+            types.SimpleNamespace(id="1", name="Taro"),
+            _model_with_skills(skill.id),
+        )
+        assert activations == []
+        assert len(result["messages"]) == 5
 
     def test_slash_command_invisible_skill_passes_through(self):
         """他人の私有 skill(access_control={})は発火せず素通し。"""
@@ -732,7 +760,7 @@ class TestSkills(AbstractPostgresTest):
         bodies = [m for m in msgs if m["role"] == "tool" and "指示T" in m["content"]]
         assert len(bodies) == 1
         assert json.loads(msgs[2]["content"])["result"] == "指示T"
-        assert [(a["id"], a["current"]) for a in activations] == [("twice", False)]
+        assert [a["id"] for a in activations] == ["twice"]
 
         # 先行する履歴にモデル自律の load_skill があれば `/command` は足さない
         form_data = {
@@ -1036,7 +1064,7 @@ class TestSkills(AbstractPostgresTest):
         ) == ["secret-password"]
 
     def test_replay_skill_tool_ids_blocks_dedup_and_garbage(self):
-        """content_blocks 形も拾う / synthetic 除外 / 重複排除 / 壊れた引数は無視(#101)。"""
+        """content_blocks 形も拾う / 重複排除 / 壊れた引数は無視(#101)。"""
         from nucllei.models.skills import SkillForm, Skills
         from nucllei.utils.skills import replay_skill_tool_ids
 
@@ -1078,17 +1106,12 @@ class TestSkills(AbstractPostgresTest):
                 # OpenAI 形 + 同一 skill の重複呼び出し
                 {"role": "assistant", "content": "", "tool_calls": [call("audio")]},
                 {"role": "assistant", "content": "", "tool_calls": [call("audio")]},
-                # content_blocks 形(UI 履歴)から doc を拾う。synthetic は除外
+                # content_blocks 形(UI 履歴)から doc を拾う
                 {
                     "role": "assistant",
                     "content": "",
                     "content_blocks": [
                         {"type": "tool_calls", "content": [call("doc")]},
-                        {
-                            "type": "tool_calls",
-                            "synthetic": True,
-                            "content": [call("vault")],
-                        },
                     ],
                 },
                 # 壊れた引数・別 tool・function 欠落は無視(落ちない)

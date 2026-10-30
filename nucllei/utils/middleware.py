@@ -58,10 +58,10 @@ from nucllei.utils.misc import (
 from nucllei.utils.skills import (
     apply_skill_auto_load,
     apply_skill_command,
-    apply_skill_on_load,
+    apply_skill_hooks,
     build_load_skill_tool,
-    make_followup_drain,
     reachable_skill_contents,
+    run_skill_hooks,
     current_skill_activation_seeds,
     replay_skill_tool_ids,
     skill_activation_seed_block,
@@ -526,10 +526,10 @@ async def process_chat_payload(
     # ヒットした user メッセージの直後へ注入する。
     form_data, skill_activations = apply_skill_command(form_data, user, model)
 
-    # 今回のターンの発火は UI 表示用に応答先頭の tool_calls ブロックとして seed する
-    # (process_chat_response 側。synthetic マーカ付きでモデル履歴へは再送しない —
-    # 実体は上で form_data["messages"] に注入済み)。result は tool ロード後に
-    # 確定するため、metadata への搭載は後段(tools 合流の後)で行う。
+    # 今回の発火は応答先頭の tool_calls ブロックとして残す(process_chat_response 側。
+    # 次のリクエストからは履歴の load_skill 往復 — 同じターンの追撃では in_payload の印で
+    # 二重にしない。実体は上で form_data["messages"] に注入済み)。result は tool ロードと
+    # before / after の実行の後に確定するため、metadata への搭載は後段で行う。
 
     # llens(#40): クライアント供給の file/collection 参照を読取権限で絞る(IDOR 防止)。
     # 後段で追加されるサーバー生成項目より前に絞ることで、被害者ファイルを指す
@@ -550,7 +550,7 @@ async def process_chat_payload(
     # (content_type の前方一致)に合う添付があれば `/command` と同じ合成 exchange を
     # 足す。読取権限で絞った後の files を見る。DB read を含むのでワーカースレッドで。
     form_data, auto_loaded_skills = await asyncio.to_thread(
-        apply_skill_auto_load, form_data, user, model, metadata
+        apply_skill_auto_load, form_data, user, model
     )
     skill_activations.extend(auto_loaded_skills)
 
@@ -724,38 +724,29 @@ async def process_chat_payload(
         for a in skill_activations:
             if not a["tool_ids"]:
                 continue
-            names = [
+            a["tool_names"] = [
                 name
                 for name, tool in skill_tools.items()
                 if tool.get("tool_id") in a["tool_ids"]
             ]
             a["result"] = json.dumps(
-                {"result": a["content"], "tools": names}, ensure_ascii=False
+                {"result": a["content"], "tools": a["tool_names"]}, ensure_ascii=False
             )
             a["result_message"]["content"] = a["result"]
 
-    # llens#22: 読み込まれた skill(`/command`・自動ロード・その on_load の load_skill で入った
-    # skill)の on_load の tool の要素を chat につき 1 回だけ実行し、書いた順の位置に差し込む。tool は
+    # llens#22: skill の before / after(読み込み時にサーバが実行する tool)。tool は
     # このターンの tools_dict にある物だけ(モデルの tool の read ACL・skill の tool を
-    # 通った物)、実行はモデルの call と同じ execute_tool_calls。応答には synthetic でない
-    # tool_calls ブロックとして残す(次のリクエストからは履歴の実体 — 再実行しない)。
-    def on_load_execute(calls):
+    # 通った物)、実行はモデルの call と同じ execute_tool_calls。結果は before → 本文 → after の
+    # 順に 1 つの load_skill の結果へ入る(`/command`・自動ロードはここ、モデル自律の
+    # load_skill は下の run_hooks で同じ関数を通る)。
+    def hook_execute(calls):
         return execute_tool_calls(
             calls, tools_dict, events_stream=events_stream, metadata=metadata
         )
 
-    on_load_blocks = await apply_skill_on_load(
-        skill_activations,
-        form_data["messages"],
-        tools_dict,
-        on_load_execute,
-        # on_load の load_recipe が積むレシピの後続(その on_load)をこの位置に続ける
-        drain=make_followup_drain(tools_dict, metadata, on_load_execute),
-    )
-    if on_load_blocks:
-        metadata["skill_on_load_blocks"] = on_load_blocks
+    await apply_skill_hooks(skill_activations, tools_dict, hook_execute)
 
-    # 今回のターンの発火を UI seed 用に metadata へ(result 確定後)。
+    # 今回の発火を応答に残す形で metadata へ(result 確定後)。
     current_skill_activations = current_skill_activation_seeds(skill_activations)
     if current_skill_activations:
         metadata["skill_activations"] = current_skill_activations
@@ -806,8 +797,15 @@ async def process_chat_payload(
     # load_skill として常載する(tool result = 展開済み content)。
     # messages: `/command` の合成 exchange・過去ターンの load_skill を見て、読み込み済みの
     # skill は本文を再注入しない(46b5ff9ed — 同じターンの冗長ロードで本文が 2 回入る)。
+    async def run_hooks(skill):
+        return await run_skill_hooks(skill, tools_dict, hook_execute)
+
     load_skill_tool = build_load_skill_tool(
-        model, user, load_tools=inject_skill_tools, messages=form_data["messages"]
+        model,
+        user,
+        load_tools=inject_skill_tools,
+        messages=form_data["messages"],
+        run_hooks=run_hooks,
     )
     if load_skill_tool is not None:
         if "load_skill" in tools_dict:
@@ -2446,16 +2444,13 @@ async def process_chat_response(
     async def post_response_handler(response, events):
         tool_calls = []
 
-        # llens(#35): この turn の `/command` 発火を、モデル自律起動と同じ
-        # 「View Result from load_skill」として応答先頭に表示する。
+        # llens(#35): この turn の `/command`・自動ロードの発火を、モデル自律起動と同じ
+        # load_skill 往復として応答先頭に置く(保存され、次のリクエストからは履歴になる)。
         seed_blocks = []
         if metadata.get("skill_activations"):
             seed_blocks.append(
                 skill_activation_seed_block(metadata["skill_activations"])
             )
-        # llens#22: skill の on_load の実行結果(通常の tool_calls ブロック。payload に
-        # 差し込み済みなので in_payload の印で同じターンの追撃には再送しない)
-        seed_blocks.extend(metadata.get("skill_on_load_blocks") or [])
 
         # llens(#17/#23): デルタ → content_blocks の組み立ては assembler
         # (utils/response_assembler.py)へ分離。reasoning は SGLang reasoning
@@ -2540,24 +2535,6 @@ async def process_chat_response(
                 )
 
                 assembler.set_tool_results(results)
-
-                # llens#22: load_skill が積んだ後続(on_load の load_skill と tool の要素)を
-                # 同じ応答の tool 往復として続けて足す(通常のブロック — 保存されて
-                # 次のリクエストからは履歴の実体になる)
-                # load_recipe が積んだ後続(レシピの on_load — 2026-10-30)も同じく、書いた順・
-                # 深さ優先に
-                drain_followups = make_followup_drain(
-                    tools,
-                    metadata,
-                    lambda calls: execute_tool_calls(
-                        calls, tools, events_stream=events_stream, metadata=metadata
-                    ),
-                )
-                followup_pairs = await drain_followups()
-                followup_calls = [c for c, _ in followup_pairs]
-                followup_results = [r for _, r in followup_pairs]
-                if followup_calls:
-                    assembler.append_tool_exchange(followup_calls, followup_results)
 
                 snapshot = blocks_event_data(assembler.content_blocks)
                 await event_emitter(

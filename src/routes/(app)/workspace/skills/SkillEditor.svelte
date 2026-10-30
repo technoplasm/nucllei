@@ -48,13 +48,12 @@
 	// 正規化(小文字化・空要素と重複の除去)はバックエンドが行う。
 	let autoLoadContentTypes = $state('');
 
-	// llens#22: on_load(読み込み時に書いた順に処理する手順)は JSON の配列で編集する。
-	// load_skill の要素(別の skill を一緒に読み込む)だけなら誰でも書けるが、それ以外の tool
-	// (サーバが実行する)を含むものは admin のみ(バックエンドの admin ゲートと整合)。
-	// 非 admin が開いた skill に tool の要素が入っていれば欄は読み取り専用で、保存では
-	// 送らない(= 既存値を保つ。その skill はバックエンドが非 admin の更新を断る)。
-	let onLoadText = $state('');
-	let onLoadLocked = $state(false);
+	// llens#22: before / after(読み込み時にサーバが実行する tool の並び。結果は本文の前 / 後に
+	// 入る)は JSON の配列で編集する。書けるのは admin だけ(バックエンドの admin ゲートと整合)。
+	// 非 admin には欄を出さず(入っていれば読み取り専用で見せる)、保存でも送らない(= 既存値を
+	// 保つ。入っている skill はバックエンドが非 admin の更新を断る)。
+	let hooks = $state({ before: '', after: '' });
+	const isAdmin = $derived($user?.role === 'admin');
 
 	let accessControl = $state<any>({});
 
@@ -84,17 +83,12 @@
 			return;
 		}
 
-		if (!onLoadLocked) {
-			const parsed = parseOnLoad(onLoadText);
-			if (parsed === null) {
-				toast.error($i18n.t('On load must be a JSON array.'));
-				return;
-			}
-			if ($user?.role !== 'admin' && hasToolEntries(parsed)) {
-				toast.error(
-					$i18n.t('Only admins can set tools other than load_skill and load_recipe in On load.')
-				);
-				return;
+		if (isAdmin) {
+			for (const field of hookFields) {
+				if (parseHooks(hooks[field.key]) === null) {
+					toast.error($i18n.t('{{name}} must be a JSON array.', { name: field.label }));
+					return;
+				}
 			}
 		}
 
@@ -117,28 +111,15 @@
 			content,
 			tool_ids: toolIds,
 			auto_load_content_types: autoLoadContentTypes.split(',').map((type) => type.trim()),
-			...(onLoadLocked ? {} : { on_load: parseOnLoad(onLoadText) }),
+			...(isAdmin ? { before: parseHooks(hooks.before), after: parseHooks(hooks.after) } : {}),
 			access_control: accessControl
 		});
 		loading = false;
 	};
 
-	// load_skill・load_recipe 以外の tool(サーバが実行する)の要素があるか — あれば admin のみ。
-	// バックエンド(models/skills.py の on_load_tool_entries)と同じ規則で、短い記法の
-	// `{"skill": …}` `{"recipe": …}` も読み込みとして数える(`{"read": …}` は read_file = tool)
-	const LOADING_TOOLS = ['load_skill', 'load_recipe'];
-	const LOADING_SHORT_KEYS = ['skill', 'recipe'];
-	const isLoadingEntry = (entry: unknown) => {
-		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-		const keys = Object.keys(entry);
-		if (keys.length === 1 && LOADING_SHORT_KEYS.includes(keys[0])) return true;
-		return LOADING_TOOLS.includes((entry as { tool?: unknown }).tool as string);
-	};
-	const hasToolEntries = (entries: unknown[]) => entries.some((entry) => !isLoadingEntry(entry));
-
-	// 空欄は [](on_load 無し)。配列でない・JSON でないものは null(保存させない)。
+	// 空欄は [](無し)。配列でない・JSON でないものは null(保存させない)。
 	// 要素の形(tool・args)の検証はバックエンドが行い、400 の detail を toast に出す
-	const parseOnLoad = (text: string): unknown[] | null => {
+	const parseHooks = (text: string): unknown[] | null => {
 		if (text.trim() === '') return [];
 		try {
 			const value = JSON.parse(text);
@@ -147,6 +128,23 @@
 			return null;
 		}
 	};
+
+	// 文言は literal の $i18n.t で書く(i18next-parser が拾えるように)
+	const hookFields: { key: 'before' | 'after'; label: string; placeholder: string }[] = $derived([
+		{
+			key: 'before',
+			label: $i18n.t('Run before'),
+			placeholder: '[{"tool": "run_shell", "args": {"command": "cat /ext/public/notes.md"}}]'
+		},
+		{
+			key: 'after',
+			label: $i18n.t('Run after'),
+			placeholder: '[{"tool": "read_file", "args": {"path": "/ext/public/checklist.md"}}]'
+		}
+	]);
+
+	const hooksText = (entries: unknown[] | undefined) =>
+		(entries ?? []).length ? JSON.stringify(entries, null, 2) : '';
 
 	const validateCommandString = (inputString: string) => {
 		// 英数字とハイフンのみ許可(PromptEditor 踏襲)
@@ -165,8 +163,7 @@
 			_content = content;
 			toolIds = skill?.tool_ids ?? [];
 			autoLoadContentTypes = (skill?.auto_load_content_types ?? []).join(', ');
-			onLoadText = (skill?.on_load ?? []).length ? JSON.stringify(skill.on_load, null, 2) : '';
-			onLoadLocked = $user?.role !== 'admin' && hasToolEntries(skill?.on_load ?? []);
+			hooks = { before: hooksText(skill?.before), after: hooksText(skill?.after) };
 
 			accessControl = skill?.access_control ?? null;
 		}
@@ -277,38 +274,46 @@
 			</div>
 		</div>
 
-		<div class="flex items-start gap-2 my-2">
-			<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-on-load">
-				{$i18n.t('On load')}
-			</label>
-			<div class="flex-1 min-w-0">
-				{#if onLoadLocked}
-					<pre
-						id="skill-on-load"
-						class="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs whitespace-pre-wrap break-all text-content-muted">{onLoadText}</pre>
-					<div class="text-xs text-content-muted mt-0.5">
-						{$i18n.t(
-							'Only admins can change this, because it runs tools other than load_skill and load_recipe.'
-						)}
+		{#if isAdmin || hooks.before || hooks.after}
+			{#each hookFields as field (field.key)}
+				<div class="flex items-start gap-2 my-2">
+					<label class="w-24 shrink-0 text-sm font-semibold pt-1" for="skill-{field.key}">
+						{field.label}
+					</label>
+					<div class="flex-1 min-w-0">
+						{#if isAdmin}
+							<Textarea
+								id="skill-{field.key}"
+								className="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs outline-hidden overflow-y-hidden resize-none"
+								placeholder={field.placeholder}
+								bind:value={hooks[field.key]}
+								rows={2}
+							/>
+						{:else}
+							<pre
+								id="skill-{field.key}"
+								class="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs whitespace-pre-wrap break-all text-content-muted">{hooks[
+									field.key
+								] || '—'}</pre>
+						{/if}
 					</div>
-				{:else}
-					<Textarea
-						id="skill-on-load"
-						className="w-full px-2 py-1 text-sm font-mono bg-surface-form rounded-xs outline-hidden overflow-y-hidden resize-none"
-						placeholder={'[{"tool": "load_skill", "args": {"skill_id": "recipes"}}]'}
-						bind:value={onLoadText}
-						rows={2}
-					/>
-					<div class="text-xs text-content-muted mt-0.5">
+				</div>
+			{/each}
+			<div class="flex items-start gap-2 -mt-1 mb-2">
+				<div class="w-24 shrink-0"></div>
+				<div class="flex-1 min-w-0 text-xs text-content-muted">
+					{#if isAdmin}
 						{$i18n.t(
-							'Steps run in order when this skill is loaded (JSON array). load_skill loads another skill and load_recipe loads a recipe together with this one; any other tool is run by the server once per chat with these fixed arguments, and its result is added to the chat. Only admins can set tools other than load_skill and load_recipe.'
+							'Tools the server runs when this skill is loaded, once per chat, with these fixed arguments (JSON array of {"tool", "args"}). Their results are put before / after the skill content, in the order written, in the one load result. Only admins can set these.'
 						)}
-					</div>
-				{/if}
+					{:else}
+						{$i18n.t('Only admins can change these, because the server runs these tools.')}
+					{/if}
+				</div>
 			</div>
-		</div>
+		{/if}
 
-		{#if $user?.role === 'admin'}
+		{#if isAdmin}
 			<div class="flex items-start gap-2 my-2">
 				<div class="w-24 shrink-0 text-sm font-semibold pt-0.5">{$i18n.t('Tools')}</div>
 				<div class="flex-1 min-w-0">

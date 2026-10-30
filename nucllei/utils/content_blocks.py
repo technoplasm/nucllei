@@ -71,11 +71,6 @@ def snapshot_content_blocks(content_blocks: list) -> list:
                 "calls": copy.deepcopy(block.get("content", [])),
                 "results": copy.deepcopy(block.get("results", [])),
             }
-            if block.get("synthetic"):
-                # `/command` 発火の合成 exchange(#35)。フロントの履歴再構成(#18-2)が
-                # このマーカでスキップする(実体は inlet が毎リクエスト再注入するため、
-                # 再送すると二重になる)。
-                snapshot["synthetic"] = True
             blocks.append(snapshot)
 
     return blocks
@@ -135,9 +130,8 @@ def convert_content_blocks_to_messages(
       capabilities.preserve_reasoning、middleware.is_reasoning_preserved)。
       既定 False は次ターン以降の履歴と同じ形(FE expandAssistantToolHistory も
       reasoning を送らない)— 続きターン・subagent・carried 計測はこちらを使う。
-    - synthetic ブロック(`/command` 発火の UI 表示用 #35)はスキップ:
-      実体の tool exchange は form_data["messages"] に注入済みで、変換すると
-      二重になる。
+    - in_payload のブロック(`/command`・自動ロードの発火 #35 — 実体の tool exchange は
+      form_data["messages"] に注入済み)はスキップ: 変換すると二重になる。
     - tool_calls は OpenAI 形 {id, type, function} だけを綴じ込む(llens #20):
       render(表示ディスクリプタ)・index 等の内部キーを漏らさない。
     - tool 結果の画像(results[].context_images — tool が emitter
@@ -167,11 +161,9 @@ def convert_content_blocks_to_messages(
 
     temp_blocks = []
     for block in content_blocks:
-        if block.get("synthetic") or block.get("in_payload"):
-            # in_payload: skill の on_load(llens#22)を payload の messages に差し込み済みの
-            # ブロック。同じターンの追撃では二重にしない(印は永続化で落ちる —
-            # snapshot_content_blocks は知っているキーしか写さないので、次のターンからは
-            # 通常の tool 往復として読まれる)
+        if block.get("in_payload"):
+            # 同じターンの追撃では二重にしない(印は永続化で落ちる — snapshot_content_blocks は
+            # 知っているキーしか写さないので、次のターンからは通常の tool 往復として読まれる)
             continue
         if block["type"] == "tool_calls":
             # call 列のキーは 2 形ある(#110 敵対検証 4): 組み立て中の内部表現は

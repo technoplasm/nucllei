@@ -11,14 +11,14 @@ export type SkillItem = {
 	tool_ids?: string[];
 	// 自動ロード条件: content_type の前方一致リスト(例 ['audio/'])。空 = 自動ロードしない
 	auto_load_content_types?: string[];
-	// llens#22: 読み込まれたときに書いた順に処理する手順(固定引数)。load_skill の要素は別の
-	// skill を一緒に読み込み、それ以外の tool はサーバが chat につき 1 回実行する。load_skill
-	// 以外を含む保存は admin のみ。省略 = 更新で既存値を保つ
-	on_load?: SkillOnLoad[];
+	// llens#22: 読み込まれたときにサーバが chat につき 1 回実行する tool(固定引数)。結果は本文の
+	// 前(before)・後(after)に入る。保存は admin のみ。省略 = 更新で既存値を保つ
+	before?: SkillHook[];
+	after?: SkillHook[];
 	access_control?: null | object;
 };
 
-export type SkillOnLoad = { tool: string; args?: Record<string, unknown> };
+export type SkillHook = { tool: string; args?: Record<string, unknown> };
 
 export const createNewSkill = async (skill: SkillItem) => {
 	let error = null;

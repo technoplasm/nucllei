@@ -456,9 +456,11 @@ class TestFinishStream:
 
 class TestSeedBlocks:
     def test_seed_blocks_precede_initial_text(self):
-        seed = [{"type": "tool_calls", "synthetic": True, "content": [], "results": []}]
+        seed = [
+            {"type": "tool_calls", "in_payload": True, "content": [], "results": []}
+        ]
         a = make_assembler(seed_blocks=seed)
-        assert a.content_blocks[0]["synthetic"] is True
+        assert a.content_blocks[0]["in_payload"] is True
         assert a.content_blocks[1] == {"type": "text", "content": ""}
 
 

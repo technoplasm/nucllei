@@ -35,7 +35,6 @@ export interface ContentBlock {
 	duration?: number;
 	calls?: unknown[];
 	results?: unknown[];
-	synthetic?: boolean;
 }
 
 export interface ApplyResult {

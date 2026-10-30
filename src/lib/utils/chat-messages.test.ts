@@ -52,11 +52,10 @@ describe('expandAssistantToolHistory(#18-2)', () => {
 		]);
 	});
 
-	it('synthetic な tool_calls(/command の合成 exchange)はスキップする', () => {
+	it('/command の発火(応答に残った load_skill 往復)も通常の tool 往復として送る', () => {
 		const blocks = [
 			{
 				type: 'tool_calls',
-				synthetic: true,
 				calls: [
 					{
 						id: 'skill:vault:0',
@@ -65,22 +64,11 @@ describe('expandAssistantToolHistory(#18-2)', () => {
 				],
 				results: [{ tool_call_id: 'skill:vault:0', content: '{"result": "指示", "tools": []}' }]
 			},
-			{
-				type: 'tool_calls',
-				calls: [
-					{
-						id: 'functions.secret_password:1',
-						function: { name: 'secret_password', arguments: '{}' }
-					}
-				],
-				results: [{ tool_call_id: 'functions.secret_password:1', content: 'pw' }]
-			},
-			{ type: 'text', content: 'パスワードは pw です。' }
+			{ type: 'text', content: '了解です。' }
 		];
-		const messages = expandAssistantToolHistory('パスワードは pw です。', blocks);
-		// 合成分は消え、実 tool 往復と最終 text だけが残る
+		const messages = expandAssistantToolHistory('了解です。', blocks);
 		expect(messages.map((m) => m.role)).toEqual(['assistant', 'tool', 'assistant']);
-		expect(messages[0].tool_calls?.[0].function.name).toBe('secret_password');
+		expect(messages[0].tool_calls?.[0].id).toBe('skill:vault:0');
 	});
 
 	it('複数の tool 往復と挟まれた text を順序どおり展開する', () => {
@@ -259,21 +247,6 @@ describe('expandAssistantToolHistory: tool 結果の画像の再送(#142)', () =
 				{ type: 'image_url', image_url: { url: '/api/v1/files/img-a/content' } }
 			]
 		});
-	});
-
-	it('synthetic ブロックの画像は送らない(ブロックごとスキップ)', () => {
-		const blocks = [
-			{
-				type: 'tool_calls',
-				synthetic: true,
-				calls: [{ id: 's', function: { name: 'load_skill', arguments: '{}' } }],
-				results: [{ tool_call_id: 's', content: 'x', context_images: ['img'] }]
-			},
-			{ type: 'text', content: '本文' }
-		];
-		expect(expandAssistantToolHistory('本文', blocks)).toEqual([
-			{ role: 'assistant', content: '本文' }
-		]);
 	});
 });
 

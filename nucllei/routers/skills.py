@@ -6,9 +6,9 @@ from nucllei.models.skills import (
     SkillUserResponse,
     SkillModel,
     Skills,
+    HOOK_FIELDS,
     normalize_command,
-    normalize_on_load,
-    on_load_tool_entries,
+    normalize_hooks,
 )
 from nucllei.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, status, Request
@@ -23,9 +23,7 @@ router = APIRouter()
 # - ACL(公開・共有範囲)を触れるのは admin だけ — editor が勝手に public skill を
 #   作れてはならない(当初の「共有レシピ帳」案はこの理由で撤回)。
 # - tool_ids 付き skill は全操作 admin 専有(権力を運ぶのは tool — GHSA-4pcg 境界)。
-#   on_load に load_skill 以外の tool(読み込み時にサーバが実行する)を含むものも同じ扱い。
-#   load_skill の要素(別の skill を一緒に読み込む)だけなら editor も書ける(読み込み先は
-#   発火時に利用者の read ACL で判定するので、権限の抜け道にならない — llens#22)。
+#   before / after(読み込み時にサーバが実行する tool — llens#22)を 1 つでも持つものも同じ扱い。
 
 
 def _is_skill_editor(request: Request, user) -> bool:
@@ -34,11 +32,14 @@ def _is_skill_editor(request: Request, user) -> bool:
     )
 
 
-def _normalize_hook_fields(form_data: SkillForm, skill_id: str):
-    """on_load を検証・正規化する(None = 省略はそのまま — 更新で既存値を保つ)。"""
+def _normalize_hook_fields(form_data: SkillForm):
+    """before / after を検証・正規化する(None = 省略はそのまま — 更新で既存値を保つ)。"""
     try:
-        if form_data.on_load is not None:
-            form_data.on_load = normalize_on_load(form_data.on_load, skill_id)
+        for field in HOOK_FIELDS:
+            if getattr(form_data, field) is not None:
+                setattr(
+                    form_data, field, normalize_hooks(getattr(form_data, field), field)
+                )
     except SkillFieldError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -47,7 +48,7 @@ def _normalize_hook_fields(form_data: SkillForm, skill_id: str):
 
 
 def _require_editor(request: Request, user, *tool_id_sets):
-    """editor ゲート。tool_id_sets(tool_ids・on_load の load_skill 以外の要素)のいずれかが
+    """editor ゲート。tool_id_sets(tool_ids・before・after)のいずれかが
     非空なら admin を要求する。"""
     if any(tool_id_sets) and user.role != "admin":
         raise HTTPException(
@@ -97,9 +98,9 @@ async def get_skill_list(request: Request, user=Depends(get_verified_user)):
 async def create_new_skill(
     request: Request, form_data: SkillForm, user=Depends(get_verified_user)
 ):
-    _normalize_hook_fields(form_data, form_data.id)
+    _normalize_hook_fields(form_data)
     _require_editor(
-        request, user, form_data.tool_ids, on_load_tool_entries(form_data.on_load)
+        request, user, form_data.tool_ids, form_data.before, form_data.after
     )
 
     # editor の新規 skill は必ず私有(owner のみ)。公開・共有は admin の後続操作でだけ広がる。
@@ -175,17 +176,18 @@ async def update_skill_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    _normalize_hook_fields(form_data, skill.id)
-    # tool_ids / on_load の実行される要素(load_skill 以外)は、既存・更新後のどちらかが
-    # 非空なら admin 専有(editor による付与・剥奪・改変をすべて遮断)。on_load の省略は
-    # 既存値を保つ。
+    _normalize_hook_fields(form_data)
+    # tool_ids / before / after は、既存・更新後のどちらかが非空なら admin 専有(editor による
+    # 付与・剥奪・改変をすべて遮断)。before / after の省略は既存値を保つ。
     _require_editor(
         request,
         user,
         skill.tool_ids,
         form_data.tool_ids,
-        on_load_tool_entries(skill.on_load),
-        on_load_tool_entries(form_data.on_load),
+        skill.before,
+        skill.after,
+        form_data.before,
+        form_data.after,
     )
 
     if user.role != "admin":
@@ -225,7 +227,7 @@ async def delete_skill_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    _require_editor(request, user, skill.tool_ids, on_load_tool_entries(skill.on_load))
+    _require_editor(request, user, skill.tool_ids, skill.before, skill.after)
 
     # 削除も自分の skill だけ(他人の skill は閲覧のみ)
     if user.role != "admin" and skill.user_id != user.id:

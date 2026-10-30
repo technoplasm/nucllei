@@ -681,58 +681,6 @@ def test_load_recipe_cuts_long_parts_but_keeps_the_body(sbx, monkeypatch):
     assert "続きは read_file('/workspace/recipes/長い/" in out
 
 
-def test_skill_on_load_recipe_element_returns_one_result(sbx):
-    """skill の on_load の `recipe:` (= load_recipe の tool の要素) は、その位置の 1 つの結果に
-    requires と本文が入る (レシピの後続は積まない)。"""
-    from nucllei.utils.skills import drain_load_skill_followups, make_followup_drain
-
-    _put(sbx["ws"], "前処理", _md(extra="requires:\n  - read: a.md\n"), **{"a.md": "A"})
-    tool = _tool()
-    meta = {}
-
-    async def execute(calls):
-        out = []
-        for call in calls:
-            args = json.loads(call["function"]["arguments"])
-            if call["function"]["name"] == "load_recipe":
-                text = await call_text(
-                    tool.load_recipe(
-                        args["path"], __user__=USER, __metadata__=meta, __messages__=[]
-                    )
-                )
-            else:
-                text = "ok"
-            out.append({"tool_call_id": call["id"], "content": text})
-        return out
-
-    entry = {
-        "followups": [
-            {
-                "skill_id": "emr",
-                "n": 0,
-                "entry": {
-                    "tool": "load_recipe",
-                    "args": {"path": "/workspace/recipes/前処理"},
-                },
-            },
-            {"skill_id": "emr", "n": 1, "entry": {"tool": "probe", "args": {}}},
-        ]
-    }
-    tools = {"load_skill": entry, "load_recipe": {}, "probe": {}}
-
-    async def go():
-        drain = make_followup_drain(tools, meta, execute)
-        return await drain_load_skill_followups(entry, tools, execute, drain=drain)
-
-    calls, results = asyncio.run(go())
-    assert [c["id"] for c in calls] == ["skill:emr:on_load:0", "skill:emr:on_load:1"]
-    _pos(
-        results[0]["content"],
-        "### read /workspace/recipes/前処理/a.md",
-        '<recipe path="/workspace/recipes/前処理"',
-    )
-
-
 # ---------------------------------------------------------------------------
 # save_recipe
 # ---------------------------------------------------------------------------

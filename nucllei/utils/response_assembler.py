@@ -254,25 +254,6 @@ class ContentBlocksAssembler:
         self.content_blocks[-1]["results"] = results
         self.content_blocks.append({"type": "text", "content": ""})
 
-    def append_tool_exchange(self, calls, results):
-        """サーバが足した tool 往復(skill の on_load — llens#22)を、直前の tool
-        結果の後ろに 1 ブロックとして綴じ、次の text ブロックを開く。
-
-        set_tool_results の直後に呼ぶ(開いたばかりの空の text ブロックは畳む)。モデル向け
-        履歴では「content 空の assistant(tool_calls)→ tool 結果」が 1 組増えるだけ。
-        """
-        if (
-            self.content_blocks
-            and self.content_blocks[-1]["type"] == "text"
-            and not self.content_blocks[-1]["content"]
-        ):
-            self.content_blocks.pop()
-        self._attach_tool_renders(calls)
-        self.content_blocks.append(
-            {"type": "tool_calls", "content": calls, "results": results}
-        )
-        self.content_blocks.append({"type": "text", "content": ""})
-
     def _promote_orphan_reasoning(self):
         """reasoning の昇格規律(llens):
 

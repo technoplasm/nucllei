@@ -37,11 +37,12 @@ class Skill(Base):
     # 条件に合う添付が会話にあれば `/command` と同じ経路で発火する
     # (utils/skills.py apply_skill_auto_load)。空 = 自動ロードしない。
     auto_load_content_types = Column(JSON, nullable=True)
-    # 読み込まれたときに書いた順に処理する手順(llens#22)。`[{"tool": <tool 名>, "args": {…}}]`
-    # (args は固定値だけ)。`load_skill` の要素は別の skill を一緒に読み込む(毎リクエスト
-    # 再導出・保存しない)、それ以外の tool はサーバが chat につき 1 回だけ実行する
-    # (utils/skills.py expand_on_load)。load_skill 以外の要素を含む保存は admin のみ。
-    on_load = Column(JSON, nullable=True)
+    # 読み込まれたときにサーバが実行する tool(llens#22、2026-10-30 に on_load から before / after
+    # へ)。どちらも `[{"tool": <tool 名>, "args": {…}}]`(args は固定値だけ)で、書いた順に
+    # 実行し、結果は before → 本文 → after の順に 1 つの load_skill の結果へ入れる
+    # (utils/skills.py run_skill_hooks)。要素が 1 つでもあれば保存は admin のみ。
+    before = Column(JSON, nullable=True)
+    after = Column(JSON, nullable=True)
 
     access_control = Column(JSON, nullable=True)  # Controls data access levels.
     # Defines access control rules for this entry.
@@ -67,11 +68,12 @@ class SkillModel(BaseModel):
     content: str
     tool_ids: list[str] = []
     auto_load_content_types: list[str] = []
-    on_load: list[dict] = []
+    before: list[dict] = []
+    after: list[dict] = []
 
     access_control: Optional[dict] = None
 
-    @field_validator("auto_load_content_types", "on_load", mode="before")
+    @field_validator("auto_load_content_types", "before", "after", mode="before")
     @classmethod
     def _none_as_empty(cls, value):
         # 列追加より前からある行は NULL — モデル上は常にリスト
@@ -99,9 +101,10 @@ class SkillForm(BaseModel):
     content: str
     tool_ids: list[str] = []
     auto_load_content_types: list[str] = []
-    # on_load は省略(None)= 更新で既存値を保つ(作成では [])。形の検証は
+    # before / after は省略(None)= 更新で既存値を保つ(作成では [])。形の検証は
     # router(400 で返すため — pydantic の検証は 422 になる)。
-    on_load: Any = None
+    before: Any = None
+    after: Any = None
     access_control: Optional[dict] = None
 
     @field_validator("auto_load_content_types")
@@ -111,104 +114,50 @@ class SkillForm(BaseModel):
 
 
 class SkillFieldError(ValueError):
-    """on_load の形が不正(router が 400 で返す)。message は利用者向け。"""
+    """before / after の形が不正(router が 400 で返す)。message は利用者向け。"""
 
 
-# on_load で別の skill を一緒に読み込む要素の tool 名(llens#22)。この要素だけは実行せず、
-# 読み込みの連鎖として扱う(utils/skills.py expand_on_load)
-ON_LOAD_SKILL_TOOL = "load_skill"
+# skill の読み込みに使う tool。before / after には書けない(skill が別の skill やレシピを読み込む
+# 場面は無い — 2026-10-30 ken。読み込むかはモデルが決める)
+HOOK_FORBIDDEN_TOOLS = ("load_skill", "load_recipe")
+
+HOOK_FIELDS = ("before", "after")
 
 
-# on_load でレシピを読み込む要素の tool 名(2026-10-30)。実行される tool の要素だが、読むのは
-# 利用者の read 権限の範囲だけなので、load_skill と同じく skill editor も書ける
-ON_LOAD_RECIPE_TOOL = "load_recipe"
-
-
-def is_on_load_skill_entry(entry) -> bool:
-    """on_load の要素が「別の skill を一緒に読み込む」(load_skill)か。"""
-    return isinstance(entry, dict) and entry.get("tool") == ON_LOAD_SKILL_TOOL
-
-
-def on_load_tool_entries(on_load) -> list[dict]:
-    """on_load のうち、権限の判定で数える要素(load_skill・load_recipe 以外)。これが 1 つでも
-    あれば admin のみ(tool_ids と同じ扱い)。load_skill / load_recipe の要素だけなら skill editor
-    も書ける(読み込み先は発火時に利用者の read 権限で判定する)。"""
-    return [
-        e
-        for e in on_load or []
-        if not (
-            isinstance(e, dict)
-            and e.get("tool") in (ON_LOAD_SKILL_TOOL, ON_LOAD_RECIPE_TOOL)
-        )
-    ]
-
-
-def normalize_on_load(value, skill_id: str) -> list[dict]:
-    """on_load を検証して正規化する: `[{"tool": <名前>, "args": {…}}]`。tool は空でない
-    文字列(前後空白は落とす)、args は JSON object(省略は {})。それ以外のキーは不可。
-    `load_skill` の要素は args が `{"skill_id": <id>}` だけで、id は先頭 `/` を落とし、
-    空・自分自身は不可。不正なら `SkillFieldError`。"""
+def normalize_hooks(value, field: str) -> list[dict]:
+    """before / after を検証して正規化する: `[{"tool": <名前>, "args": {…}}]`。tool は空でない
+    文字列(前後空白は落とす)、args は JSON object(省略は {})。それ以外のキー(`{"skill": …}` の
+    ような短い記法を含む)と load_skill / load_recipe は不可。不正なら
+    `SkillFieldError`。"""
     if value is None:
         return []
     if not isinstance(value, list):
         raise SkillFieldError(
-            'on_load は [{"tool": <tool 名>, "args": {…}}] の配列で指定する'
+            f'{field} は [{{"tool": <tool 名>, "args": {{…}}}}] の配列で指定する'
         )
-    from nucllei.utils.recipes import (
-        RecipePathError,
-        normalize_skill_on_load_shorthand,
-        parse_recipe_path,
-    )
-
     normalized = []
     for n, item in enumerate(value):
         if not isinstance(item, dict):
-            raise SkillFieldError(f"on_load[{n}] は object で指定する")
-        # 短い記法(`{"skill": <id>}` `{"recipe": <path>}` `{"read": <path>}` — レシピの
-        # frontmatter と同じ。2026-10-30)は正規形へ。shell / python は付属の無い skill では不可
-        try:
-            item = normalize_skill_on_load_shorthand(item)
-        except ValueError as e:
-            raise SkillFieldError(f"on_load[{n}]: {e}")
+            raise SkillFieldError(f"{field}[{n}] は object で指定する")
         unknown = set(item) - {"tool", "args"}
         if unknown:
             raise SkillFieldError(
-                f"on_load[{n}] に使えないキーがある: {', '.join(sorted(unknown))}"
+                f"{field}[{n}] に使えないキーがある: {', '.join(sorted(unknown))}"
+                ' (書けるのは {"tool": <tool 名>, "args": {…}} だけ)'
             )
         tool = item.get("tool")
         if not isinstance(tool, str) or not tool.strip():
-            raise SkillFieldError(f"on_load[{n}].tool は tool 名の文字列で指定する")
+            raise SkillFieldError(f"{field}[{n}].tool は tool 名の文字列で指定する")
         tool = tool.strip()
+        if tool in HOOK_FORBIDDEN_TOOLS:
+            raise SkillFieldError(
+                f"{field}[{n}] に {tool} は書けない (skill から別の skill やレシピは読み込まない)"
+            )
         args = item.get("args", {})
         if args is None:
             args = {}
         if not isinstance(args, dict):
-            raise SkillFieldError(f"on_load[{n}].args は object で指定する")
-        if tool == ON_LOAD_SKILL_TOOL:
-            if set(args) - {"skill_id"}:
-                raise SkillFieldError(
-                    f"on_load[{n}] の load_skill の args は skill_id だけ"
-                )
-            target = args.get("skill_id")
-            target = normalize_command(target) if isinstance(target, str) else ""
-            if not target:
-                raise SkillFieldError(
-                    f"on_load[{n}] の load_skill に skill_id を指定する"
-                )
-            if target == normalize_command(skill_id):
-                raise SkillFieldError(
-                    f"on_load[{n}] の load_skill に自分自身は指定できない"
-                )
-            args = {"skill_id": target}
-        elif tool == ON_LOAD_RECIPE_TOOL:
-            if set(args) - {"path"} or not isinstance(args.get("path"), str):
-                raise SkillFieldError(
-                    f"on_load[{n}] の load_recipe の args は path (レシピのフォルダ) だけ"
-                )
-            try:
-                args = {"path": parse_recipe_path(args["path"]).folder}
-            except RecipePathError as e:
-                raise SkillFieldError(f"on_load[{n}] の load_recipe: {e}")
+            raise SkillFieldError(f"{field}[{n}].args は object で指定する")
         normalized.append({"tool": tool, "args": args})
     return normalized
 
@@ -239,7 +188,8 @@ class SkillsTable:
         skill = SkillModel(
             **{
                 **form_data.model_dump(),
-                "on_load": form_data.on_load or [],
+                "before": form_data.before or [],
+                "after": form_data.after or [],
                 "id": normalize_command(form_data.id),
                 "user_id": user_id,
                 "created_at": int(time.time()),
@@ -316,8 +266,10 @@ class SkillsTable:
                 skill.tool_ids = form_data.tool_ids
                 skill.auto_load_content_types = form_data.auto_load_content_types
                 # 省略(None)は既存値を保つ — 旧いクライアントの保存で消えないように
-                if form_data.on_load is not None:
-                    skill.on_load = form_data.on_load
+                if form_data.before is not None:
+                    skill.before = form_data.before
+                if form_data.after is not None:
+                    skill.after = form_data.after
                 skill.access_control = form_data.access_control
                 skill.updated_at = int(time.time())
                 db.commit()

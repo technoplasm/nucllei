@@ -13,8 +13,8 @@
 //   共有 fixture(nucllei/test/fixtures/history_wire/context_images.json)で固定している
 // - reasoning はモデルへ再送しない(ターンをまたぐ履歴 — バックエンドの続きターン・carried 計測と同じ。
 //   reasoning_content を載せ直すのは同じターンの tool ループ追撃だけで、それは BE が組む — README_API 4.3)
-// - synthetic な tool_calls(`/command` 発火の合成 exchange、#35)はスキップする
-//   — 実体は inlet が毎リクエスト再注入するため、ここで送ると二重になる
+// - `/command`・自動ロードの発火(#35)も応答に残った通常の load_skill 往復として送る
+//   (サーバはそれを見て発火し直さない)
 
 type ContentBlock = {
 	type: string;
@@ -25,7 +25,6 @@ type ContentBlock = {
 		function?: { name?: string; arguments?: string };
 	}[];
 	results?: { tool_call_id: string; content?: string; context_images?: string[] }[];
-	synthetic?: boolean;
 };
 
 type WireContentPart =
@@ -56,7 +55,7 @@ export const expandAssistantToolHistory = (
 	content: string,
 	blocks: ContentBlock[] | null | undefined
 ): WireMessage[] => {
-	const toolBlocks = (blocks ?? []).filter((b) => b.type === 'tool_calls' && !b.synthetic);
+	const toolBlocks = (blocks ?? []).filter((b) => b.type === 'tool_calls');
 	if (toolBlocks.length === 0) {
 		// tool 往復なし: 従来どおり縮約 1 メッセージ
 		return [{ role: 'assistant', content }];
@@ -69,9 +68,6 @@ export const expandAssistantToolHistory = (
 		if (block.type === 'text' && block.content) {
 			textBuffer.push(block.content);
 		} else if (block.type === 'tool_calls') {
-			if (block.synthetic) {
-				continue;
-			}
 			// 中断で途切れたブロックの後始末(実測 400: SGLang は履歴の
 			// tool_calls.arguments をパースするため、途中で切れた壊れ JSON を
 			// 再送すると "unexpected end of data" で拒否される):
