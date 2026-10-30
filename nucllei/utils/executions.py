@@ -95,6 +95,12 @@ STOPPED_ERROR = (
 # append-only(親 tool result は spawn 時の running 形のみ)と、ターン中の
 # _persist_message_snapshot との RMW 競合の両方を塞ぐ。
 in_exec: ContextVar[bool] = ContextVar("nucllei_in_exec", default=False)
+# いま走っている exec の id (runner の中だけ)。run_subagent が上限の席を取った background の
+# タスクを覚え、上限の ERROR で挙げる id にする (2026-10-30 — 行の status だけで挙げると、上限で弾かれた
+# 自分や兄弟の行も running のまま並ぶ)
+current_exec_id: ContextVar[Optional[str]] = ContextVar(
+    "nucllei_current_exec_id", default=None
+)
 
 # registry: exec_id → task_id。
 #   None            = spawn 中センチネル(INSERT より先に登録 — 誤 orphan 防止)
@@ -587,6 +593,7 @@ async def _run_execution(
     _exec_sinks[exec_id] = sink
     sink_token = tool_output.current_sink.set(sink)
     exec_token = in_exec.set(True)
+    exec_id_token = current_exec_id.set(exec_id)
     turn_tools_token = set_turn_tools(turn_tool_names)
     started_at = time.monotonic()
     outcome: Optional[dict] = None
@@ -688,6 +695,7 @@ async def _run_execution(
         # cancel 経路もここだけ通る: ContextVar reset / sink close のみ(D2)
         reset_turn_tools(turn_tools_token)
         in_exec.reset(exec_token)
+        current_exec_id.reset(exec_id_token)
         tool_output.current_sink.reset(sink_token)
         sink.close()
 

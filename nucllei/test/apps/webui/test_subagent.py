@@ -76,6 +76,9 @@ class TestRunSubagent(AbstractPostgresTest):
         # 失敗テストのカウンタ・実行中集合の残留が後続へ漏れないように毎回リセット
         subagent._active_turns = 0
         subagent._running_agent_sessions.clear()
+        subagent._active_by_parent.clear()
+        subagent._slot_exec_ids.clear()
+        subagent._cap_misses.clear()
 
         Models.insert_new_model(
             ModelForm(
@@ -279,7 +282,7 @@ class TestRunSubagent(AbstractPostgresTest):
         # 同時数はサーバー全体の上限(ほかの利用者の分も数える — _active_turns は
         # プロセス全体の数)。並べたサブエージェントどうしは同時、sandbox の tool は順番
         assert (
-            "同時に走れるのはサーバー全体で 4 本まで(ほかの利用者の分も数える)"
+            "同時に走れるのはサーバー全体で 4 本まで(ほかの利用者の分も、background の分も終わるまで数える)"
             in spec["description"]
         )
         assert "サブエージェントどうしは同時に走り" in spec["description"]
@@ -793,6 +796,7 @@ class TestRunSubagent(AbstractPostgresTest):
             result = _raised(tool["callable"](instruction="x", session_id=session_id))
             assert result.kind == "call", session_id
             assert subagent._active_turns == 0  # エラー経路でもカウンタ解放
+            assert not subagent._active_by_parent  # 親チャットごとの内訳も解放
 
         # instruction 空 / 新規で preset_id 無しも call の ToolError(#145)
         assert _raised(tool["callable"](instruction="  ")).kind == "call"
@@ -864,6 +868,82 @@ class TestRunSubagent(AbstractPostgresTest):
         assert "同時" in result.text
         # 超過エラーはカウンタを消費しない(decrement で負にならない)
         assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
+        # このチャットから起動した分が走っていなければ、1 回だけ呼び直させ、2 回目からは自分で処理させる
+        # (2026-10-30 batch 6)
+        assert "このチャットから起動した分は走っていない" in result.text
+        assert "次の手: 1 回だけ呼び直し" in result.text
+        result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
+        assert "次の手: run_subagent を呼び直さず、自分で処理する。" in result.text
+
+    def test_concurrency_limit_names_this_chats_running_tasks(self, monkeypatch):
+        """このチャットから起動した分で埋まっているなら、席を持っている background のタスク id を挙げて
+        await_task で受け取らせ、今呼び直しても同じ ERROR だと言い切る (2026-10-30 llens staging P11:
+        上限の ERROR の後も run_subagent を 3〜13 回呼び続けた)。挙げるのは席を持っている exec だけ
+        (行の status では挙げない — 弾かれた自分の行も running のまま並ぶ)。"""
+        from nucllei.utils import subagent
+        from nucllei.utils.executions import current_exec_id
+        from nucllei.utils.tool_errors import turn_tools
+
+        self._patch_child_pipeline(monkeypatch)
+        tool = self._build_tool()
+        cap = subagent.SUBAGENT_MAX_CONCURRENCY
+        # 席の取り方: background の runner の中なら exec id を覚える
+        token = current_exec_id.set("bg-1")
+        try:
+            assert subagent._take_turn_slot(self.parent.id) == "bg-1"
+        finally:
+            current_exec_id.reset(token)
+        token = current_exec_id.set("bg-2")
+        try:
+            subagent._take_turn_slot(self.parent.id)
+        finally:
+            current_exec_id.reset(token)
+        assert subagent._take_turn_slot(self.parent.id) is None  # 同期の 1 本
+        monkeypatch.setattr(subagent, "_active_turns", cap)
+        # 上限で弾かれる呼び出し自身が background の runner の中 (exec id は席に載らない)
+        token = current_exec_id.set("bg-rejected")
+        try:
+            with turn_tools(["run_subagent", "await_task"]):
+                result = _raised(
+                    tool["callable"](preset_id="researcher", instruction="x")
+                )
+        finally:
+            current_exec_id.reset(token)
+        assert result.kind == "failure"
+        assert (
+            "このチャットから起動して走っているサブエージェントは 3 本"
+            " (うち background のタスク: bg-1, bg-2)"
+        ) in result.text
+        assert "bg-rejected" not in result.text
+        assert (
+            'await_task(task_ids=["bg-1", "bg-2"]) で受け取ってから残りを起動する'
+            in (result.text)
+        )
+        assert "終わるまで run_subagent を呼び直しても同じ ERROR になる" in result.text
+        # background の分が終わって席を返したら、残りは同じ応答に並べた分
+        subagent._release_turn_slot(None, self.parent.id, "bg-1")
+        subagent._release_turn_slot(None, self.parent.id, "bg-2")
+        assert self.parent.id not in subagent._slot_exec_ids
+        monkeypatch.setattr(subagent, "_active_turns", cap)  # ほかの分で埋まったまま
+        with turn_tools(["run_subagent", "await_task"]):
+            result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
+        assert (
+            "この応答で並べた分の結果がそろってから、起動できなかった分を呼ぶ"
+            in result.text
+        )
+        assert subagent._active_by_parent[self.parent.id] == 1  # ERROR は数えない
+        subagent._release_turn_slot(None, self.parent.id)
+        assert not subagent._active_by_parent
+        subagent._active_turns = 0
+
+    def test_cap_sentence_is_replaceable_for_other_limits(self):
+        """env で上限を変えた配備のための差し替え (モジュール末尾) の対象が docstring にある。"""
+        from nucllei.builtin_tools.subagent import Tools
+
+        assert (
+            "サーバー全体で 4 本まで(ほかの利用者の分も、background の分も終わるまで数える)・超過は即エラー"
+            " — 5 本以上なら 4 本ずつ"
+        ) in Tools.__doc__
 
     def test_long_answer_is_truncated(self, monkeypatch):
         from nucllei.utils import subagent
@@ -945,6 +1025,7 @@ class TestRunSubagent(AbstractPostgresTest):
             assert child_task.done()
             assert task_registry.list_task_ids_by_chat_id(child_id) == []
             assert subagent._active_turns == 0
+            assert not subagent._active_by_parent  # done callback が内訳も解放する
 
         asyncio.run(main())
 

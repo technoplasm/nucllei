@@ -35,6 +35,7 @@ enforce は二層(#140):
 
 import asyncio
 import logging
+from typing import Optional
 
 from fastapi import Request
 
@@ -73,8 +74,37 @@ _active_turns = 0
 # check→add の間に await を挟まない(_active_turns と同じ規律)。
 _running_agent_sessions: set[str] = set()
 
+# 親チャットごとの実行中の数 (_active_turns の内訳) と、そのうち席を持っている background のタスク
+# (exec id)。上限の ERROR で「このチャットの分が走っている」か・どのタスクを待つかを言い分ける
+# (2026-10-30 llens staging P11: 上限の ERROR の後も run_subagent を 3〜13 回呼び続けた)。exec の行の
+# status では挙げない — 上限で弾かれた自分や兄弟の行も running のまま並び、stop した行は席を持った
+# まま stopped になる (敵対レビュー)
+_active_by_parent: dict[str, int] = {}
+_slot_exec_ids: dict[str, set[str]] = {}
+# このチャットの分が走っていないのに上限に当たった回数 (ほかの利用者の分)。2 回目からは呼び直させない
+_cap_misses: dict[str, int] = {}
 
-def _release_turn_slot(session_id: str | None):
+
+def _take_turn_slot(parent_chat_id: str) -> Optional[str]:
+    """席を取る (呼び手が上限を確かめた直後に、await を挟まずに呼ぶ)。background の runner の中なら
+    その exec id を返す (解放のときに渡す)。"""
+    from nucllei.utils.executions import current_exec_id
+
+    global _active_turns
+    _active_turns += 1
+    _active_by_parent[parent_chat_id] = _active_by_parent.get(parent_chat_id, 0) + 1
+    _cap_misses.pop(parent_chat_id, None)
+    exec_id = current_exec_id.get()
+    if exec_id:
+        _slot_exec_ids.setdefault(parent_chat_id, set()).add(exec_id)
+    return exec_id
+
+
+def _release_turn_slot(
+    session_id: str | None,
+    parent_chat_id: str | None = None,
+    exec_id: str | None = None,
+):
     """同時実行カウンタと実行中集合の解放(#109 で一本化)。
 
     子 task が起動した後は、この解放を子 task の done callback で行う —
@@ -87,8 +117,58 @@ def _release_turn_slot(session_id: str | None):
     """
     global _active_turns
     _active_turns -= 1
+    if parent_chat_id is not None:
+        n = _active_by_parent.get(parent_chat_id, 0) - 1
+        if n > 0:
+            _active_by_parent[parent_chat_id] = n
+        else:
+            _active_by_parent.pop(parent_chat_id, None)
+        if exec_id is not None:
+            ids = _slot_exec_ids.get(parent_chat_id)
+            if ids is not None:
+                ids.discard(exec_id)
+                if not ids:
+                    _slot_exec_ids.pop(parent_chat_id, None)
     if session_id is not None:
         _running_agent_sessions.discard(session_id)
+
+
+def _concurrency_cap_error(parent_chat_id: str) -> ToolFailure:
+    """同時数の上限に達したときの ERROR。このチャットから起動した分が走っていれば、それが終わるまで
+    run_subagent を呼んでも同じ ERROR になると言い切る。background で起動して席を持っている分は
+    タスク id を挙げ、await_task (このターンにあれば) で受け取らせる。このチャットの分が無ければ
+    (ほかの利用者・別のチャットの分)、1 回だけ呼び直させ、2 回目からは自分で処理させる。"""
+    from nucllei.utils.tool_errors import tool_in_turn
+
+    cap = SUBAGENT_MAX_CONCURRENCY
+    fact = (
+        f"サブエージェントの同時実行数がサーバー全体の上限 ({cap}、ほかの利用者の分も数える) に"
+        "達している (この分は起動していない)"
+    )
+    mine = _active_by_parent.get(parent_chat_id, 0)
+    if not mine:
+        misses = _cap_misses.get(parent_chat_id, 0) + 1
+        _cap_misses[parent_chat_id] = misses
+        fact += "。このチャットから起動した分は走っていない"
+        if misses > 1:
+            return ToolFailure(fact, "run_subagent を呼び直さず、自分で処理する。")
+        return ToolFailure(fact, "1 回だけ呼び直し、それでも同じなら自分で処理する。")
+    task_ids = sorted(_slot_exec_ids.get(parent_chat_id, ()))
+    fact += f"。このチャットから起動して走っているサブエージェントは {mine} 本" + (
+        f" (うち background のタスク: {', '.join(task_ids)})" if task_ids else ""
+    )
+    again = (
+        "終わるまで run_subagent を呼び直しても同じ ERROR になる。残りは走っている分が終わってから"
+        f"起動する (一度に {cap} 本まで)"
+    )
+    if task_ids and tool_in_turn("await_task"):
+        ids = "[" + ", ".join(f'"{t}"' for t in task_ids) + "]"
+        nxt = f"await_task(task_ids={ids}) で受け取ってから残りを起動する ({again})。"
+    elif task_ids:
+        nxt = f"background の分の結果が届いてから残りを起動する ({again})。"
+    else:
+        nxt = f"この応答で並べた分の結果がそろってから、起動できなかった分を呼ぶ ({again})。"
+    return ToolFailure(fact, nxt)
 
 
 def get_model_subagent_preset_ids(model) -> list[str]:
@@ -547,17 +627,10 @@ async def run_subagent_turn(
         )
 
     # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
+    # _active_turns はプロセス全体の数 (呼び手ごとではない — 全ユーザー・入れ子の子の分も数える)
     if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
-        raise ToolFailure(
-            # _active_turns はプロセス全体の数 (呼び手ごとではない — 全ユーザー・入れ子の
-            # 子の分も数える)
-            "サブエージェントの同時実行数がサーバー全体の上限"
-            f" ({SUBAGENT_MAX_CONCURRENCY}、ほかの利用者の分も数える) に達している"
-            " (この分は起動していない)",
-            "自分が起動した分が走っているなら、その結果がそろってから残りを呼ぶ。"
-            "そうでなければ 1 回だけ呼び直し、それでも同じなら自分で処理する。",
-        )
-    _active_turns += 1
+        raise _concurrency_cap_error(parent_chat_id)
+    slot_exec_id = _take_turn_slot(parent_chat_id)
     # 実行中登録した agent session id。None = 未登録。
     running_session_id = None
     # 会計(_active_turns / _running_agent_sessions)の解放を子 task の
@@ -712,7 +785,9 @@ async def run_subagent_turn(
             # 走り続ける子の会計を子自身の終端まで保持できる(通常経路は
             # shield 待ちの再開前に callback が走るだけで等価)。
             child_task.add_done_callback(
-                lambda t, sid=running_session_id: _release_turn_slot(sid)
+                lambda t, sid=running_session_id, pid=parent_chat_id, eid=slot_exec_id: _release_turn_slot(
+                    sid, pid, eid
+                )
             )
             handed_off = True
 
@@ -722,4 +797,4 @@ async def run_subagent_turn(
         return await _format_turn_result(child_chat_id, assistant_message_id, stopped)
     finally:
         if not handed_off:
-            _release_turn_slot(running_session_id)
+            _release_turn_slot(running_session_id, parent_chat_id, slot_exec_id)

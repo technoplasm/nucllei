@@ -2570,10 +2570,17 @@ concurrency `SUBAGENT_MAX_CONCURRENCY` (default 4 — spawns over the limit fail
 immediately with an error that says the server-wide limit (N, 「ほかの利用者の
 分も数える」) was reached and that this call was not started — the counter is
 process-wide (every user and nested children; per worker process when
-`UVICORN_WORKERS > 1`), not per caller, so the next step is
-「自分が起動した分が走っているなら、その結果がそろってから残りを呼ぶ。そうでなければ 1 回だけ呼び直し、それでも同じなら自分で処理する。」
-(2026-10-19 — it said 「時間を置いて呼び直す」); background included). The
-docstring says the same (「同時に走れるのはサーバー全体で 4 本まで (ほかの利用者の分も数える)」)
+`UVICORN_WORKERS > 1`), not per caller. Since 2026-10-30 (staging P11: after
+the error the model called run_subagent 3–13 more times) the error tells the
+cases apart from per-parent-chat accounting (`_active_by_parent`, plus the
+exec ids of background runs holding a slot — `current_exec_id`): this chat's
+runs are going → 「このチャットから起動して走っているサブエージェントは N 本 (うち background のタスク: <ids>)」
+with 「次の手: await_task(task_ids=[…]) で受け取ってから残りを起動する (終わるまで run_subagent を呼び直しても同じ ERROR になる。…)」
+(without background tasks: 「この応答で並べた分の結果がそろってから、起動できなかった分を呼ぶ (…)」);
+none of this chat's → 「このチャットから起動した分は走っていない」 with
+「1 回だけ呼び直し、それでも同じなら自分で処理する。」 the first time and
+「run_subagent を呼び直さず、自分で処理する。」 after that; background included). The
+docstring says the same (「同時に走れるのはサーバー全体で 4 本まで (ほかの利用者の分も、background の分も終わるまで数える)」)
 and that subagents placed in one response run **concurrently**, while sandbox
 tools placed in one response run **one at a time** (§5.5 `serial`). A call
 with no parent chat or a missing parent chat fails with 「次の手: 自分で処理する。」.
