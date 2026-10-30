@@ -2616,8 +2616,10 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   (default 90 s, clamped to 10–300) covers all ids (max 20 per call);
   already-terminal tasks return immediately (idempotent — results stay
   re-collectable while the row is retained: indefinitely by default, see
-  `ASYNC_EXEC_RETENTION_DAYS`; the tool description states the configured
-  period). Per entry: done →
+  `ASYNC_EXEC_RETENTION_DAYS`; since 2026-10-30 the description no longer
+  states the period — a purged row comes back as `{ok: false, …, error:
+  「このタスクの結果は保持期間を過ぎて消えている。次の手: 結果が要るなら同じ処理をもう一度実行する。」}`
+  instead of an empty success). Per entry: done →
   `{ok, task_id, tool_name, status, result, duration?, usage?, truncated?}`
   (with the original tool's settled result display — text included — when
   exactly one done task was requested, and a one-time replay of `context_images`/`display`
@@ -2626,7 +2628,11 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   (`error_kind` from the row's `meta.error_kind` — absent for stopped /
   orphaned);
   still running at the deadline → the running form (partial collection — the
-  server delivers the rest later).
+  server delivers the rest later), and the result then carries `note`
+  (2026-10-30, moved from the description): 「status が "running" のタスクはまだ実行中 (終わったタスクの結果はこの返りにある)。次の手: running の分を待つために呼び直さず、終わった分の結果と、まだ実行中のものがあることをユーザーに伝えて応答を終える (running の分の結果は完了時に自動で届く)。」.
+  `check_task` returning a running task carries `note`
+  「実行中のタスクの結果は完了時に自動で届く。次の手: 待つために check_task を呼び直さない (今すぐ結果が要るなら await_task で受け取る)。」
+  (the "no need to call to collect" sentence moved out of its description).
 - `stop_task(task_ids)` — force-stop; returns each task's actual state
   afterwards. Idempotent on already-terminal tasks. Side effects may already
   have completed. An entry that had already finished carries `note`
@@ -2635,10 +2641,10 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   delivered by this report, so no notice will bring the result later);
   `orphaned` → the row's fixed `error` (below). The description no longer
   says 「撃って」: 「終了済みのタスクを指定しても今の状態を返すだけで、何も変えない (その結果は await_task で受け取る)」.
-  `await_task`'s description says what to do with `running`:
-  「まだ実行中だとユーザーに伝えて応答を終える (結果は完了時に届くので、待つために呼び直さない)」
-  (was 「…報告してターンを終えること」), and `check_task`'s `include_done`
-  explains `orphaned` (「実行中にサーバーが再起動して途中で失われたもの (結果は無い)」).
+  What to do with `running` was in `await_task`'s description until
+  2026-10-30 and is now the result's `note` (above); `orphaned` is explained
+  by the row's own `error` (`ORPHANED_ERROR`), no longer by `check_task`'s
+  `include_done`.
 
 All three collectors are builtin pseudo-tools, mounted automatically whenever
 an eligible tool is on the turn or the chat has execution rows (independent of

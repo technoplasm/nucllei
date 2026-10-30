@@ -377,10 +377,12 @@ class TestAsyncExec(AbstractPostgresTest):
         tools = self._exec_tools()
         await_desc = tools["await_task"]["spec"]["description"]
         assert "ターンを終えること" not in await_desc
-        assert (
-            "running が返ったら、まだ実行中だとユーザーに伝えて応答を終える"
-            "(結果は完了時に届くので、待つために呼び直さない)。"
-        ) in await_desc
+        # 2026-10-30 (llens「tool の説明を削る」batch 3): running のときにどうするかは説明でなく、running を
+        # 返した結果の note が言う (test_await_running_note)。結果が自動で届くことは await_task だけが言う
+        assert '時間切れのタスクは status: "running"' in await_desc
+        assert "結果は完了時に自動で届く" in await_desc
+        check_desc = tools["check_task"]["spec"]["description"]
+        assert "自動で届く" not in check_desc
         stop_desc = tools["stop_task"]["spec"]["description"]
         assert "撃" not in stop_desc
         assert (
@@ -390,9 +392,8 @@ class TestAsyncExec(AbstractPostgresTest):
         include_done = tools["check_task"]["spec"]["parameters"]["properties"][
             "include_done"
         ]["description"]
-        assert (
-            "orphaned は実行中にサーバーが再起動して途中で失われたもの" in include_done
-        )
+        # orphaned の意味は行の error (ORPHANED_ERROR) が言う (2026-10-30 batch 3)
+        assert "orphaned" in include_done and "再起動" not in include_done
 
     def test_spawn_note_without_await_task_in_the_turn(self):
         async def probe():
@@ -997,7 +998,8 @@ class TestAsyncExec(AbstractPostgresTest):
 
         out = asyncio.run(check())
         assert out["total"] == 2
-        assert "note" not in out
+        # running を返したときは check_task を待つために呼び続けないよう note が言う (2026-10-30 batch 3)
+        assert out["note"] == self.exec_tools._CHECK_RUNNING_NOTE
         assert [t["task_id"] for t in out["tasks"]] == ["old-running", "new-running"]
         entry = out["tasks"][0]
         assert entry["tool_name"] == "probe"
@@ -1165,6 +1167,9 @@ class TestAsyncExec(AbstractPostgresTest):
             assert isinstance(entry["started_at"], int)
             assert entry["elapsed_s"] >= 0
             assert "result" not in entry
+            # running を返したときだけ、どうするかを note が言う (2026-10-30 — 説明から移した)
+            assert out["note"] == self.exec_tools._AWAIT_RUNNING_NOTE
+            assert "待つために呼び直さず" in out["note"]
             # 待ちを外しただけ — exec は生きている(D6)
             assert task_id in self.executions._exec_tasks
             assert (
@@ -1186,8 +1191,22 @@ class TestAsyncExec(AbstractPostgresTest):
         assert entry["ok"] is True
         assert entry["status"] == "done"
         assert entry["result"] == "終わった"
+        assert "note" not in out  # running が無ければ note は付けない
         # terminal 形で返した行は配達済み(サーバ駆動配達の重複防止)
         assert self._delivered_at(task_id) is not None
+
+    def test_await_task_says_when_the_result_was_purged(self):
+        """保持期間 (ASYNC_EXEC_RETENTION_DAYS) を過ぎて結果を消した行は、空の成功 (result: None) に
+        見せずに消えたと言う (2026-10-30 batch 3 — 説明から保持期間を外した代わり)。"""
+        self._insert("purged")
+        assert self.Executions.finish_execution("purged", status="done", result="秘")
+        assert self.Executions.purge_stale_results(int(time.time()) + 1) == 1
+        await_task = self._exec_tools()["await_task"]["callable"]
+        out = asyncio.run(await_task(task_ids=["purged"]))
+        (entry,) = out["tasks"]
+        assert entry["ok"] is False and "result" not in entry
+        assert entry["error"] == self.exec_tools._PURGED_ERROR
+        assert "note" not in out
 
     def test_await_task_partial_recovery_across_multiple_ids(self, monkeypatch):
         """複数待ち(追補 2): 1 回の有界窓で全 id をカバーし、時間切れは

@@ -48,7 +48,6 @@ import logging
 import time
 
 from nucllei.env import (
-    ASYNC_EXEC_RETENTION_DAYS,
     ASYNC_EXEC_TIMEOUT_S,
     SRC_LOG_LEVELS,
 )
@@ -64,14 +63,6 @@ from nucllei.utils.executions import (
     stop_execution,
 )
 
-# await_task の説明に載せる保持期間(env に従う — 0 / 未設定は無期限。
-# exec 行の purge は ASYNC_EXEC_RETENTION_DAYS 日で走る)
-_RETENTION_PHRASE = (
-    f"結果は {ASYNC_EXEC_RETENTION_DAYS} 日保持"
-    if ASYNC_EXEC_RETENTION_DAYS > 0
-    else "結果は無期限に保持"
-)
-
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
@@ -79,6 +70,23 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 AWAIT_TASK_DEFAULT_TIMEOUT = 90
 AWAIT_TASK_MIN_TIMEOUT = 10
 AWAIT_TASK_MAX_TIMEOUT = 300
+
+# await_task が時間切れ (running) を返したときの note (2026-10-30 — 説明から移した。2026-10-19 llens
+# 監査の言い換え「…報告してターンを終えること」→「応答を終える」はそのまま)
+_AWAIT_RUNNING_NOTE = (
+    'status が "running" のタスクはまだ実行中 (終わったタスクの結果はこの返りにある)。'
+    "次の手: running の分を待つために呼び直さず、終わった分の結果と、まだ実行中のものがあることを"
+    "ユーザーに伝えて応答を終える (running の分の結果は完了時に自動で届く)。"
+)
+# check_task が実行中のタスクを返したときの note (2026-10-30 — 「回収のために呼ぶ必要はない」を説明から
+# 移した。check_task を待つために呼び続けないように、running を返したときだけ言う)
+_CHECK_RUNNING_NOTE = (
+    "実行中のタスクの結果は完了時に自動で届く。次の手: 待つために check_task を呼び直さない"
+    " (今すぐ結果が要るなら await_task で受け取る)。"
+)
+# 保持期間 (ASYNC_EXEC_RETENTION_DAYS) を過ぎて結果を消した行 (purged_at)。消した行は result が
+# NULL なので、空の成功に見せない (2026-10-30 — 説明から保持期間を外した代わり。敵対レビュー)
+_PURGED_ERROR = "このタスクの結果は保持期間を過ぎて消えている。次の手: 結果が要るなら同じ処理をもう一度実行する。"
 
 # 1 回の呼び出しで扱える task_ids の上限(契約 M0 — wire 膨張の上限)。
 # 超過分は per-entry error(全体は失敗させない)。
@@ -353,14 +361,13 @@ def build_exec_tools(user, metadata) -> dict:
                 entry["error_kind"] = error_kind
         return entry
 
+    # 2026-10-30 (llens「tool の説明を削る」batch 3): 結果が自動で届くこと・今すぐなら await_task は
+    # await_task の説明が 1 回だけ言う (3 つの回収 tool はいつも一緒に載る)。orphaned の意味は行の
+    # error (ORPHANED_ERROR) が、task_id の出どころは不正な id の per-entry error が言う
     check_spec = {
         "name": "check_task",
         "description": (
             "バックグラウンドタスクの状態を確認する(待たない・結果本文は返さない)。"
-            "引数なしで実行中のタスクを列挙、include_done: true で終了済みも含めて"
-            "列挙、task_ids 指定でその id の現在状態を返す。完了時は結果が自動で"
-            "届く(通知ターン)ため、回収のために呼ぶ必要はない — 今すぐ結果が"
-            "必要なら await_task。"
         ),
         "parameters": {
             "type": "object",
@@ -369,16 +376,14 @@ def build_exec_tools(user, metadata) -> dict:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "状態を確認するタスク id(background: true の返りに含まれる)。"
-                        "省略時はこのチャットの実行中タスクを列挙する。"
+                        "状態を見るタスク id。省略するとこのチャットの実行中タスクを列挙する。"
                     ),
                 },
                 "include_done": {
                     "type": "boolean",
                     "description": (
                         "true で終了済み(done/failed/stopped/orphaned)も新しい順に"
-                        f"列挙する(最大 {CHECK_TASK_LIST_LIMIT} 件)。orphaned は実行中に"
-                        "サーバーが再起動して途中で失われたもの(結果は無い)。"
+                        f"列挙する(最大 {CHECK_TASK_LIST_LIMIT} 件)。"
                     ),
                 },
             },
@@ -401,7 +406,10 @@ def build_exec_tools(user, metadata) -> dict:
                     _invalid_entry(tid) if row is None else _status_entry(row)
                 )
             entries.extend(_over_limit_entry(tid) for tid in over)
-            return {"tasks": entries, "total": len(entries)}
+            out = {"tasks": entries, "total": len(entries)}
+            if any(e.get("status") == "running" for e in entries):
+                out["note"] = _CHECK_RUNNING_NOTE
+            return out
 
         rows = await asyncio.to_thread(
             Executions.get_executions_by_chat_id, parent_chat_id
@@ -419,19 +427,19 @@ def build_exec_tools(user, metadata) -> dict:
         out = {"tasks": [_status_entry(row) for row in rows], "total": total}
         if not out["tasks"]:
             out["note"] = "タスクは無い" if include_done else "実行中のタスクは無い"
+        elif any(e.get("status") == "running" for e in out["tasks"]):
+            out["note"] = _CHECK_RUNNING_NOTE
         return out
 
+    # 2026-10-30 (llens「tool の説明を削る」batch 3): 保持期間と再回収できること・1 回の待ちで全 id を
+    # 覆うことは外した。時間切れ (running) のときにどうするかは、running を返した結果の note が言う
+    # (_AWAIT_RUNNING_NOTE — その場面でだけ要る)
     await_spec = {
         "name": "await_task",
         "description": (
-            "バックグラウンドタスク(task_ids)の完了を有界で待ち、結果を回収する。"
-            "終了済みのタスクは待たず即返す(冪等 — "
-            f"{_RETENTION_PHRASE}、その間は何度でも再回収できる)。timeout 秒(既定 "
-            f"{AWAIT_TASK_DEFAULT_TIMEOUT})の 1 回の待ちで全 id をカバーし、"
-            '時間切れのタスクは status: "running" で返る(終わった分だけの部分回収)。'
-            "完了時は結果が自動で届く(通知ターン)ため、今すぐ結果が必要なとき"
-            "だけ使う。running が返ったら、まだ実行中だとユーザーに伝えて応答を終える"
-            "(結果は完了時に届くので、待つために呼び直さない)。"
+            "バックグラウンドタスクの完了を timeout 秒まで待って結果を受け取る"
+            '(終了済みは待たずに返す・時間切れのタスクは status: "running")。'
+            "タスクの結果は完了時に自動で届く(通知ターン)ので、今すぐ結果が要るときだけ使う。"
         ),
         "parameters": {
             "type": "object",
@@ -439,10 +447,7 @@ def build_exec_tools(user, metadata) -> dict:
                 "task_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": (
-                        "回収するタスク id(background: true の返りに含まれる)。"
-                        f"最大 {TASK_IDS_MAX} 件。"
-                    ),
+                    "description": f"受け取るタスク id(最大 {TASK_IDS_MAX} 件)。",
                 },
                 "timeout": {
                     "type": "integer",
@@ -521,6 +526,17 @@ def build_exec_tools(user, metadata) -> dict:
                 entries.append(_running_entry(row))
                 continue
             delivered_ids.append(row.id)
+            if row.purged_at:
+                entries.append(
+                    {
+                        "ok": False,
+                        "task_id": row.id,
+                        "tool_name": row.tool_name,
+                        "status": row.status,
+                        "error": _PURGED_ERROR,
+                    }
+                )
+                continue
             if row.status != "done":
                 # failed / stopped / orphaned。再 await は冪等(同じ形が返るだけ)
                 failed_entry = {
@@ -563,6 +579,7 @@ def build_exec_tools(user, metadata) -> dict:
                 entry["error_kind"] = meta[ERROR_KIND_META_KEY]
             entries.append(entry)
         entries.extend(_over_limit_entry(tid) for tid in over)
+        running = any(e.get("status") == "running" for e in entries)
 
         # context_images / display は per-task・初回のみ自 sink へ replay
         # (mark_replayed の勝者だけ — VLM 再注入・表示の重複防止。配達 notice 側の
@@ -598,7 +615,10 @@ def build_exec_tools(user, metadata) -> dict:
         if delivered_ids:
             await asyncio.to_thread(Executions.mark_delivered, delivered_ids)
 
-        return {"tasks": entries}
+        out = {"tasks": entries}
+        if running:
+            out["note"] = _AWAIT_RUNNING_NOTE
+        return out
 
     stop_spec = {
         "name": "stop_task",

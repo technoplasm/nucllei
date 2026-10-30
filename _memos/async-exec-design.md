@@ -559,7 +559,9 @@ subagent の所要時間調査(1 応答に子 2 本 / background + await_task �
 - **ORPHANED_ERROR** に status の意味を足した(「実行中にサーバーが再起動し、このタスクは途中で失われた
   (status の orphaned はこの意味。結果は無い)」)。check_task の include_done の説明にも orphaned の意味。
 - **await_task** の「running が返ったら…報告してターンを終えること」→「まだ実行中だとユーザーに伝えて応答を
-  終える (結果は完了時に届くので、待つために呼び直さない)」。
+  終える (結果は完了時に届くので、待つために呼び直さない)」。2026-10-30 (llens「tool の説明を削る」batch 3) に
+  説明から running を返した結果の `note` へ移した (終わった分の結果も伝える形に)。check_task も running を返すときに
+  「待つために呼び直さない」の note。保持期間は説明から外し、purge 済みの行は空の成功でなく error で返す。
 - **切詰めの印(T5)** の次の手は tool の spec の引数で出し分け(offset / query / どちらも無ければ「出力を絞るか、
   ファイルに書いて read_file で読む」— read_file はターンにあるときだけ)。`truncate_tool_result(text, spec)`。
 - **multi-worker** の拒否文は内部語をやめ「このサーバーの構成では background 実行を使えない」。ユーザーごとの
