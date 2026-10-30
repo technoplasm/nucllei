@@ -383,6 +383,11 @@ class TestAsyncExec(AbstractPostgresTest):
         assert "結果は完了時に自動で届く" in await_desc
         check_desc = tools["check_task"]["spec"]["description"]
         assert "自動で届く" not in check_desc
+        # task_id の出どころ (background: true の返り) は 3 つとも引数に書かない — 不正な id の
+        # per-entry error が言う (2026-10-30 batch 3 / 4)
+        for name in ("check_task", "await_task", "stop_task"):
+            ids = tools[name]["spec"]["parameters"]["properties"]["task_ids"]
+            assert "background" not in ids["description"], name
         stop_desc = tools["stop_task"]["spec"]["description"]
         assert "撃" not in stop_desc
         assert (

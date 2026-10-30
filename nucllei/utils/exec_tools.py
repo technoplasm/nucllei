@@ -623,7 +623,7 @@ def build_exec_tools(user, metadata) -> dict:
     stop_spec = {
         "name": "stop_task",
         "description": (
-            "バックグラウンドタスク(task_ids)を強制終了する。停止後の実状態を"
+            "バックグラウンドタスクを強制終了する。停止後の実状態を"
             "返す。終了済みのタスクを指定しても今の状態を返すだけで、何も変えない"
             "(その結果は await_task で受け取る)。停止しても副作用は完了している"
             "可能性がある。"
@@ -634,10 +634,9 @@ def build_exec_tools(user, metadata) -> dict:
                 "task_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": (
-                        "停止するタスク id(background: true の返りに含まれる)。"
-                        f"最大 {TASK_IDS_MAX} 件。"
-                    ),
+                    # 2026-10-30 batch 4: check_task / await_task と揃える (出どころは不正な id の
+                    # per-entry error が言う)
+                    "description": f"停止するタスク id(最大 {TASK_IDS_MAX} 件)。",
                 },
             },
             "required": ["task_ids"],
