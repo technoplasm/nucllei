@@ -647,11 +647,14 @@ def _unusable_path(abs_path: str) -> ToolError:
     )
 
 
-def _no_such_file(abs_path: str) -> ToolError:
-    """sandbox `/files/*` の 404 (無い・ファイルでない)。read_file の stat の「無い」も同じ文。"""
+def _no_such_file(abs_path: str, create: str = "") -> ToolError:
+    """sandbox `/files/*` の 404 (無い・ファイルでない)。read_file の stat の「無い」も同じ文。
+    `create` は作る手の案内 (edit_file は作らない — 作るなら write_file)。期限で消える置き場
+    (imports/ 等) では添えない — 作り直さず send_to_workspace で戻すのが先 (`_cache_hint`)。"""
+    cache = _cache_hint(abs_path)
     return ToolOutcome(
         f"{abs_path} というファイルは無い (ディレクトリは不可)",
-        "list_workspace で確かめる。" + _cache_hint(abs_path),
+        "list_workspace で確かめる。" + ("" if cache else create) + cache,
     )
 
 
@@ -839,6 +842,7 @@ _EDIT_CONTEXT_LINES = 2
 _EDIT_EXCERPT_MAX_LINES = 10
 _EDIT_BINARY_NEXT = "edit_file はテキストファイルだけを直す。バイナリの中身を変えるなら run_python で扱う。"
 _EDIT_TOO_LARGE_NEXT = "run_python でファイルを開いて置き換える。"
+_EDIT_CREATE_NEXT = "新しく作るなら write_file で書く。"
 
 
 def _match_starts(text: str, needle: str) -> list[int]:
@@ -1884,17 +1888,17 @@ class Tools:
         __user__: Optional[dict] = None,
     ) -> str:
         """
-        sandbox のテキストファイルの一部だけを書き換える。ファイルの中で old_text とちょうど 1 か所だけ
-        一致する部分を new_text に置き換えて書き戻す。一致が 0 か所・2 か所以上のときは何も書かずに断る。
-        一致は空白・改行・インデントまで含めて文字どおりに見る — read_file で現物を見て、そこから写す。
-        文字コード (UTF-8・BOM 付き UTF-8・cp932) は元のまま保つ。既存ファイルの一部だけを直すなら、
-        write_file で全文を書き直さずこちらを使う。末尾に足すときは、最後の行を old_text に含め、
-        new_text にその行と足す行を書く。新しいファイルは作らない (作るのは write_file)。テキスト専用。
+        sandbox の既存のテキストファイルの一部を書き換える: old_text とちょうど 1 か所だけ一致する部分を
+        new_text に置き換える。末尾に足すなら、最後の行を old_text に、その行と足す行を new_text に書く。
 
-        :param path: 直すファイル。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` も直せる (管理者はすべてのグループの置き場と `/ext/public/…` も直せる)。
-        :param old_text: 置き換える部分。ファイルの中の文字列そのまま (空白・改行も含めて、ファイルの中で 1 か所だけに一致すること)
+        :param path: 直すファイル。sandbox の絶対パス (`/workspace/…`・`/ext/groups/<グループ名>/…`)
+        :param old_text: 置き換える部分。空白・改行・インデントまでファイルの中の文字どおりで、ファイルの中で 1 か所だけに一致すること
         :param new_text: 置き換え後の文字列 (空なら old_text の部分を消す)
         """
+        # 説明から外した細目 (2026-10-30 llens「削って ERROR へ」) は、その場面の戻り値が言う:
+        # 一致 0 / 2 か所以上・old_text 空・無い (作るなら write_file)・バイナリ・
+        # 大きさ・cp932 で表せない文字は下の ERROR、文字コードを保つことは read_file の先頭行と結果の
+        # 「文字コード: …」、書ける範囲は toolkit 共通注記と _write_target の ERROR
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         abs_path, target, ext = self._write_target(path, __user__)
@@ -1926,7 +1930,7 @@ class Tools:
             raise _files_error(e, abs_path)
         kind = st.get("type")
         if not st.get("exists") or kind == "other":
-            raise _no_such_file(abs_path)
+            raise _no_such_file(abs_path, _EDIT_CREATE_NEXT)
         if kind == "dir":
             raise ToolCallError(
                 f"{abs_path} はディレクトリ", "ファイル名まで指定する。"
@@ -1971,7 +1975,12 @@ class Tools:
             raise ToolCallError(
                 f"{abs_path} に old_text と一致する箇所が無い"
                 + (" (このファイルの改行は CRLF)" if crlf else ""),
-                "read_file で現物を見て、空白・改行まで含めて old_text を写し直す。",
+                (
+                    "old_text と new_text の改行を \\r\\n で書くか、1 行に収まる old_text にする。"
+                    if crlf
+                    else "read_file で現物を見て、空白・改行まで含めて old_text を写し直す"
+                    " (結果の抜粋の行番号と | は含めない)。"
+                ),
             )
         if len(starts) > 1:
             lines = sorted({text.count("\n", 0, i) + 1 for i in starts})

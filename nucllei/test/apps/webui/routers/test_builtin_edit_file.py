@@ -125,7 +125,8 @@ def test_no_match_is_refused_without_writing():
     out = _edit(tool, "/workspace/a.txt", "gamma", "x")
     assert out == (
         "ERROR: /workspace/a.txt に old_text と一致する箇所が無い。"
-        "次の手: read_file で現物を見て、空白・改行まで含めて old_text を写し直す。"
+        "次の手: read_file で現物を見て、空白・改行まで含めて old_text を写し直す"
+        " (結果の抜粋の行番号と | は含めない)。"
     )
     assert "/files/write" not in _ops(tool)
     # 空白の違いも寄せない
@@ -137,8 +138,9 @@ def test_no_match_is_refused_without_writing():
 def test_crlf_mismatch_is_named_but_not_fixed():
     tool = _tool(b"a\r\nb\r\n")
     out = _edit(tool, "/workspace/a.txt", "a\nb", "x")
-    assert out.startswith(
+    assert out == (
         "ERROR: /workspace/a.txt に old_text と一致する箇所が無い (このファイルの改行は CRLF)。"
+        "次の手: old_text と new_text の改行を \\r\\n で書くか、1 行に収まる old_text にする。"
     )
     assert tool.data == b"a\r\nb\r\n"
     # 改行を含まない old_text には添えない
@@ -254,6 +256,14 @@ def test_stat_outcomes():
     assert out.startswith(
         "ERROR: /workspace/imports/a.md というファイルは無い (ディレクトリは不可)。"
     )
+    # 作らないことは説明から外し、無いときの次の手が言う (2026-10-30 llens)。期限で消える置き場
+    # (imports/) では作り直しを勧めない — send_to_workspace で戻すのが先
+    assert "write_file" not in out and "send_to_workspace(file_id) で戻せる" in out
+    out = _edit(_tool(stat={"exists": False}), "/workspace/notes/a.md", "x", "y")
+    assert out == (
+        "ERROR: /workspace/notes/a.md というファイルは無い (ディレクトリは不可)。"
+        "次の手: list_workspace で確かめる。新しく作るなら write_file で書く。"
+    )
     out = _edit(
         _tool(stat={"exists": True, "type": "dir", "size": 0}),
         "/workspace/work",
@@ -321,9 +331,20 @@ def test_spec():
     spec = specs["edit_file"]
     assert list(spec["parameters"]["properties"]) == ["path", "old_text", "new_text"]
     assert spec["parameters"]["required"] == ["path", "old_text", "new_text"]
-    assert "sandbox の絶対パス (`/workspace/…`)。" in (
+    assert "sandbox の絶対パス (`/workspace/…`" in (
         spec["parameters"]["properties"]["path"]["description"]
     )
+    # 説明は何をするかと引数だけ (2026-10-30 llens「削って ERROR へ」) — 作らない・文字コード・
+    # テキスト専用はその場面の ERROR / 結果が言う。末尾に足す書き方は ERROR にならない (最後の行が
+    # 消えて通る) ので説明に残す
+    desc = spec["description"]
+    assert "ちょうど 1 か所だけ一致する" in desc
+    assert (
+        "末尾に足すなら、最後の行を old_text に、その行と足す行を new_text に書く。"
+        in desc
+    )
+    for gone in ("write_file", "cp932", "read_file", "テキスト専用"):
+        assert gone not in desc, gone
     # write_file / read_file から「一部だけ直すなら edit_file」へ向ける
     assert "一部だけを直すなら edit_file" in specs["write_file"]["description"]
     assert "一部だけを直すなら edit_file" in specs["read_file"]["description"]

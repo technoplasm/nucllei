@@ -2198,12 +2198,18 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     cp932 stays cp932; a `new_text` character cp932 cannot represent is refused
     rather than switching the file to UTF-8). Matching is a literal match on
     the decoded text — no whitespace / CRLF normalisation, no nearest match.
-    0 matches → 「… に old_text と一致する箇所が無い」 (plus
-    「(このファイルの改行は CRLF)」 when the file has CRLF and `old_text` uses
-    bare `\n`), next step 「read_file で現物を見て、空白・改行まで含めて old_text を写し直す。」;
+    0 matches → 「… に old_text と一致する箇所が無い」, next step
+    「read_file で現物を見て、空白・改行まで含めて old_text を写し直す (結果の抜粋の行番号と | は含めない)。」;
+    when the file has CRLF and `old_text` uses bare `\n` the fact gets
+    「(このファイルの改行は CRLF)」 and the next step is
+    「old_text と new_text の改行を \r\n で書くか、1 行に収まる old_text にする。」;
     2 or more (overlapping matches count) → 「… が N か所ある (a, b, … 行目)」
     (up to 5 line numbers), next step 「前後の行を old_text に含めて、一致が 1 か所になるようにする。」.
-    An empty `old_text` is refused (no append mode): 「末尾に足すなら、最後の行を old_text に含め、new_text にその行 + 足す行を書く。」.
+    An empty `old_text` is refused (no append mode): 「末尾に足すなら、最後の行を old_text に含め、new_text にその行 + 足す行を書く。」
+    (the description also says how to append — getting it half right, `new_text`
+    without the last line, is not an error and drops that line). A missing file
+    is 「… というファイルは無い」 with 「list_workspace で確かめる。新しく作るなら write_file で書く。」
+    (outside `imports/`, where the expiry hint comes instead).
     Image / Office / other binary extensions are refused before asking the
     sandbox, undecodable content after reading, both with `read_file`'s fact
     sentence and the next step 「edit_file はテキストファイルだけを直す。バイナリの中身を変えるなら run_python で扱う。」.
@@ -2215,6 +2221,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     write is not detected (the sandbox has no conditional write).
     `write_file`'s and `read_file`'s docstrings point at `edit_file` for
     partial edits, and `read_file`'s cp932 label says `edit_file` keeps cp932.
+    `edit_file`'s own description (2026-10-30, trimmed at llens' request) says
+    only what it does, how to append and the arguments; the rest (no match,
+    creating, binary, size, encoding, writable places) is said by the error or
+    result of that case.
     `remove_file(path)` (2026-10-27, decided by ken, requested by llens)
     **moves** a file or a folder (with its contents) to the trash of the place
     it is in — it never deletes: `/workspace/…` → `/workspace/trash/<name>`,
