@@ -1546,24 +1546,18 @@ class Tools:
         __metadata__: Optional[dict] = None,
     ) -> str:
         """
-        チャットの添付ファイルや URL で参照できるリソースを sandbox の
-        /workspace/imports/ にコピーする。
-        **sandbox 内 (run_python / run_shell) で中身を扱う時だけ**呼ぶこと。
-        他のツールは file_id から直接読むので、その前段としては不要
-        (このコピーはファイルを「読めるようにする」汎用手段ではない)。
+        チャットの添付ファイルや URL のリソースを sandbox の /workspace/imports/ にコピーする。
+        **sandbox 内 (run_python / run_shell) で中身を扱う時だけ**呼ぶ (読むだけなら呼ばない — 他の tool
+        には file_id・URL をそのまま渡す)。URL は run_shell で curl せずこれで取り込む。sandbox のパス (`/workspace/…`
+        `/ext/…`) は既に sandbox から見えているので取り込まない。
 
-        引数は名前のとおりに解釈する (他の tool と共通)。受け取った形のまま渡すこと
-        (読み替えない・ホストを補わない)。
-        sandbox のパス (`/workspace/…` `/ext/…`) は既に sandbox から見えているので取り込み不要。
-        同一サーバの URL `/ext/…` は sandbox のパス `/ext/…` と同じ文字列で同じファイル
-        (url に渡すと、sandbox から見えている物はコピーせずそのパスを返し、サーバが中継する
-        資料は imports/ にコピーする)。
-        sandbox はネットワーク不可なので、URL を run_shell で curl する代わりにこれで取り込む。
-
-        :param filename: 対象ファイル名 (部分一致)。file_id 未指定時に添付一覧から探す。省略時は全件。
-        :param file_id: 取り込むファイル。添付・生成物の id (添付一覧に出ていなくても、分かっていれば取り込める)。
-        :param url: 取り込むリソース。スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。file_id / filename と排他。
+        :param filename: file_id も url も無いとき、添付をファイル名の部分一致で絞る (省くと全件)
+        :param file_id: 添付・生成物の file_id (添付一覧に出ていなくてもよい)
+        :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。受け取った形のまま (組み立てない・書き換えない・ホストを補わない)
         """
+        # 説明から外した細目 (2026-10-30 llens「tool の説明を削る」batch 2) はその場面の戻り値が言う:
+        # url の `/ext/…` が sandbox から見えていればコピーせずそのパスを返す (結果)、file_id / filename
+        # と同時は ERROR、imports/ の期限と「残すなら別の場所へ」は結果 (`_imports_expiry_note`)
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
 
@@ -1604,7 +1598,12 @@ class Tools:
         # 対象はあったが 1 件も取り込めなかった → failure (一部でも取り込めたら通常の結果)
         if not report:
             mark_error_kind("outcome" if filename else "call")
-            return "取り込み対象の添付ファイルが無かった。"
+            if filename:
+                return (
+                    f"取り込み対象の添付ファイルが無かった (filename {filename!r} に名前が一致する添付が無い)。"
+                    "添付・生成物の id が分かっていれば file_id で指定する。"
+                )
+            return "取り込み対象の添付ファイルが無かった (この会話に添付が無い)。"
         if not imported:
             mark_error_kind("failure")
         out = "取り込み結果:\n" + "\n".join(report) + _imports_expiry_note(expires)

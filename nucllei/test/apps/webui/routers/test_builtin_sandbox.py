@@ -1075,9 +1075,13 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         tool = _sandbox({"/files/write": {"ok": True}})
         assert _flagged(
             tool.send_to_workspace(filename="zzz", __user__=user, __files__=files)
-        ) == ("取り込み対象の添付ファイルが無かった。", "outcome")
+        ) == (
+            "取り込み対象の添付ファイルが無かった (filename 'zzz' に名前が一致する添付が無い)。"
+            "添付・生成物の id が分かっていれば file_id で指定する。",
+            "outcome",
+        )
         assert _flagged(tool.send_to_workspace(__user__=user, __files__=[])) == (
-            "取り込み対象の添付ファイルが無かった。",
+            "取り込み対象の添付ファイルが無かった (この会話に添付が無い)。",
             "call",
         )
         text, kind = _flagged(
@@ -2320,7 +2324,8 @@ def test_docstrings_drop_example_paths_and_internal_words():
     assert "unzip" not in specs["run_shell"]["description"]
     send = specs["send_to_workspace"]["description"].replace("\n", "")
     assert "jail" not in send
-    assert "サーバが中継する資料は imports/ にコピーする" in send
+    # `/ext/…` の扱いの細目 (見えていればコピーしない) は結果が言う (2026-10-30)
+    assert "既に sandbox から見えているので取り込まない" in send
     for spec in specs.values():
         text = json_dumps(spec)
         for word in ("jail", "Files", "配備", "mount"):
@@ -2349,8 +2354,8 @@ def test_reference_params_are_described_in_fixed_words():
         "スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・"
         "`/api/v1/files/{id}/content`。"
     )
-    workspace_form = "sandbox の絶対パス (`/workspace/…`)。"
-    file_id_form = "添付・生成物の id"
+    workspace_form = "sandbox の絶対パス (`/workspace/…`"
+    file_id_form = "添付・生成物の"
 
     sandbox = Tools()
     assert url_form in described(sandbox, "send_to_workspace", "url")
