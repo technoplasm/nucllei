@@ -271,8 +271,7 @@ export type ModelPreview = {
 
 export const previewModel = async (
 	model: object,
-	// 値が undefined のキーは JSON に載らない (チャットの送信と同じ)
-	variables: Record<string, string | undefined> = {}
+	variables: Record<string, string> = {}
 ): Promise<ModelPreview> => {
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/models/preview`, {
 		method: 'POST',

@@ -201,6 +201,7 @@ export const previewSkill = async (body: {
 	before?: unknown;
 	after?: unknown;
 	model_id?: string | null;
+	variables?: Record<string, string>;
 }): Promise<SkillPreview> => {
 	const res = await apiFetch(`${WEBUI_API_BASE_URL}/skills/preview`, {
 		method: 'POST',

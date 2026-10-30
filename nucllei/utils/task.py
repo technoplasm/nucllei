@@ -5,6 +5,7 @@ import time
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 
 from nucllei.utils.misc import get_last_user_message, get_messages_content
@@ -31,9 +32,45 @@ def get_task_model_id(
     return task_model_id
 
 
+# ブラウザでしか分からない変数 (2026-10-30 llens 依頼「UI のチャットで {{CURRENT_WEEKDAY}} が英語になる」)。
+# チャットの metadata.variables (ブラウザの getPromptVariables) から当てるのはこの 2 つだけで、ほかの
+# 変数 (日付・時刻・曜日・利用者) はサーバの値が正 — ブラウザが送ってきても使わない (以前はブラウザの値が
+# 先に当たり、曜日が英語・時刻の形もブラウザ次第だった)。日時はサーバが作るが、TZ はブラウザの
+# {{CURRENT_TIMEZONE}} を使う (request_timezone — 利用者の地域の日付・曜日になるように)
+BROWSER_PROMPT_VARIABLES = ("{{CURRENT_TIMEZONE}}", "{{USER_LANGUAGE}}")
+
+# このリクエストの TZ (ブラウザが送った {{CURRENT_TIMEZONE}} の IANA 名)。チャットの入口
+# (process_chat_payload・preset の system prompt を当てる apply_model_system_prompt_to_body) が置き、
+# prompt_template の日時がこれで作られる。無い (API・続きターン等)・不正ならサーバのプロセスの TZ
+# (配備のコンテナの TZ 環境変数 — llens は Asia/Tokyo)
+_request_timezone: ContextVar[Optional[ZoneInfo]] = ContextVar(
+    "nucllei_request_timezone", default=None
+)
+
+
+def set_request_timezone(variables) -> None:
+    """ブラウザが送った変数 (metadata.variables) の {{CURRENT_TIMEZONE}} を、このリクエストの TZ にする。"""
+    name = (
+        (variables or {}).get("{{CURRENT_TIMEZONE}}")
+        if isinstance(variables, dict)
+        else None
+    )
+    tz = None
+    if isinstance(name, str) and name:
+        try:
+            tz = ZoneInfo(name)
+        except Exception:
+            log.warning(f"{{{{CURRENT_TIMEZONE}}}} が IANA の TZ 名でない: {name!r}")
+    _request_timezone.set(tz)
+
+
 def prompt_variables_template(template: str, variables: dict[str, str]) -> str:
-    for variable, value in variables.items():
-        template = template.replace(variable, value)
+    """ブラウザが送った変数を当てる。当てるのはブラウザでしか分からないもの
+    (BROWSER_PROMPT_VARIABLES) だけで、ほかはサーバの prompt_template が正。"""
+    for variable in BROWSER_PROMPT_VARIABLES:
+        value = variables.get(variable)
+        if isinstance(value, str):
+            template = template.replace(variable, value)
     return template
 
 
@@ -258,12 +295,16 @@ def prompt_template(
     {{USER_RECIPES}} は見えるレシピの一覧 (見出し + 行頭の印付きの行。0 件はその 1 文。能力「レシピ」
     OFF・sandbox 無し・model 無しなら空) で、非同期の入口が先に取ったものを入れる。
     """
-    # Get the current date
-    current_date = datetime.now()
+    # 今の日時。TZ はこのリクエストの利用者の TZ (ブラウザの {{CURRENT_TIMEZONE}})、無ければサーバの TZ
+    current_date = datetime.now(_request_timezone.get())
 
     # Format the date to YYYY-MM-DD
     formatted_date = current_date.strftime("%Y-%m-%d")
-    formatted_time = current_date.strftime("%I:%M:%S %p")
+    # サーバが作る値は ja の表記に固定 (ken 2026-10-30「サーバーの locale は ja で」— ブラウザの言語・
+    # プロセスのロケールに依らない。strftime の %Y %m %d %H %M %S はロケールに依らない)。時刻は 24 時間制
+    # (2026-10-30 まで UI のチャットはブラウザの HH:MM:SS が当たっていた — その形とも同じ)。日付は ISO の
+    # まま (2026年10月30日 にはしない — レシピの updated・tool の引数が ISO)
+    formatted_time = current_date.strftime("%H:%M:%S")
     # 曜日は日本語で固定(2026-10-19 llens 監査 — strftime("%A") はプロセスのロケール次第で
     # 英語になっていた。モデル向けの文は日本語 — _memos/model-frames.md)
     formatted_weekday = _WEEKDAYS_JA[current_date.weekday()]

@@ -6,6 +6,7 @@
 
 	import { models } from '$lib/stores';
 	import { previewSkill, type SkillPreview } from '$lib/apis/skills';
+	import { getPromptVariables } from '$lib/utils';
 	import { estimateTokens } from '$lib/utils/prompt-preview';
 	import ExpandedText from '$lib/components/workspace/common/ExpandedText.svelte';
 	import PreviewLegend from '$lib/components/workspace/common/PreviewLegend.svelte';
@@ -56,7 +57,9 @@
 				content: content(),
 				before: parseHooks(before(), $i18n.t('Run before')),
 				after: parseHooks(after(), $i18n.t('Run after')),
-				model_id: modelId || null
+				model_id: modelId || null,
+				// 日時の TZ (チャットの送信と同じ)
+				variables: getPromptVariables()
 			});
 		} catch (e) {
 			preview = null;

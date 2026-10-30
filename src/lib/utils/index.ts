@@ -692,93 +692,15 @@ export const blobToFile = (blob: Blob, fileName: string) => {
 	return file;
 };
 
-export const getPromptVariables = (user_name?: string, user_location?: string) => {
+// チャットの送信で metadata.variables に載せる、ブラウザでしか分からない変数 (BE の
+// task.BROWSER_PROMPT_VARIABLES)。日付・時刻・曜日・利用者の変数はサーバの値が正なので送らない
+// (2026-10-30 — 以前はここで英語の曜日などを送り、サーバの値を上書きしていた)。日時はサーバが
+// {{CURRENT_TIMEZONE}} の TZ で作る
+export const getPromptVariables = () => {
 	return {
-		'{{USER_NAME}}': user_name,
-		'{{USER_LOCATION}}': user_location || 'Unknown',
-		'{{CURRENT_DATETIME}}': getCurrentDateTime(),
-		'{{CURRENT_DATE}}': getFormattedDate(),
-		'{{CURRENT_TIME}}': getFormattedTime(),
-		'{{CURRENT_WEEKDAY}}': getWeekday(),
-		'{{CURRENT_TIMEZONE}}': getUserTimezone(),
+		'{{CURRENT_TIMEZONE}}': Intl.DateTimeFormat().resolvedOptions().timeZone,
 		'{{USER_LANGUAGE}}': localStorage.getItem('locale') || 'en-US'
 	};
-};
-
-/**
- * @param {string} template - The template string containing placeholders.
- * @returns {string} The template string with the placeholders replaced by the prompt.
- */
-export const promptTemplate = (
-	template: string,
-	user_name?: string,
-	user_location?: string,
-	base_model_id?: string
-): string => {
-	// Get the current date
-	const currentDate = new Date();
-
-	// Format the date to YYYY-MM-DD
-	const formattedDate =
-		currentDate.getFullYear() +
-		'-' +
-		String(currentDate.getMonth() + 1).padStart(2, '0') +
-		'-' +
-		String(currentDate.getDate()).padStart(2, '0');
-
-	// Format the time to HH:MM:SS AM/PM
-	const currentTime = currentDate.toLocaleTimeString('en-US', {
-		hour: 'numeric',
-		minute: 'numeric',
-		second: 'numeric',
-		hour12: true
-	});
-
-	// Get the current weekday
-	const currentWeekday = getWeekday();
-
-	// Get the user's timezone
-	const currentTimezone = getUserTimezone();
-
-	// Get the user's language
-	const userLanguage = localStorage.getItem('locale') || 'en-US';
-
-	// Replace {{CURRENT_DATETIME}} in the template with the formatted datetime
-	template = template.replace('{{CURRENT_DATETIME}}', `${formattedDate} ${currentTime}`);
-
-	// Replace {{CURRENT_DATE}} in the template with the formatted date
-	template = template.replace('{{CURRENT_DATE}}', formattedDate);
-
-	// Replace {{CURRENT_TIME}} in the template with the formatted time
-	template = template.replace('{{CURRENT_TIME}}', currentTime);
-
-	// Replace {{CURRENT_WEEKDAY}} in the template with the current weekday
-	template = template.replace('{{CURRENT_WEEKDAY}}', currentWeekday);
-
-	// Replace {{CURRENT_TIMEZONE}} in the template with the user's timezone
-	template = template.replace('{{CURRENT_TIMEZONE}}', currentTimezone);
-
-	// Replace {{USER_LANGUAGE}} in the template with the user's language
-	template = template.replace('{{USER_LANGUAGE}}', userLanguage);
-
-	if (user_name) {
-		// Replace {{USER_NAME}} in the template with the user's name
-		template = template.replace('{{USER_NAME}}', user_name);
-	}
-
-	if (user_location) {
-		// Replace {{USER_LOCATION}} in the template with the current location
-		template = template.replace('{{USER_LOCATION}}', user_location);
-	} else {
-		// Replace {{USER_LOCATION}} in the template with 'Unknown' if no location is provided
-		template = template.replace('{{USER_LOCATION}}', 'LOCATION_UNKNOWN');
-	}
-
-	// 実際に推論する base model の id(BE nucllei/utils/task.py の prompt_template /
-	// resolve_base_model_id と同じ定義)
-	template = template.replace('{{BASE_MODEL_ID}}', base_model_id || 'Unknown');
-
-	return template;
 };
 
 export const getTimeRange = (timestamp: number) => {
@@ -825,38 +747,6 @@ export const bestMatchingLanguage = (
 		.find(Boolean);
 
 	return match || defaultLocale;
-};
-
-// Get the date in the format YYYY-MM-DD
-export const getFormattedDate = () => {
-	const date = new Date();
-	const year = date.getFullYear();
-	const month = String(date.getMonth() + 1).padStart(2, '0');
-	const day = String(date.getDate()).padStart(2, '0');
-	return `${year}-${month}-${day}`;
-};
-
-// Get the time in the format HH:MM:SS
-export const getFormattedTime = () => {
-	const date = new Date();
-	return date.toTimeString().split(' ')[0];
-};
-
-// Get the current date and time in the format YYYY-MM-DD HH:MM:SS
-export const getCurrentDateTime = () => {
-	return `${getFormattedDate()} ${getFormattedTime()}`;
-};
-
-// Get the user's timezone
-export const getUserTimezone = () => {
-	return Intl.DateTimeFormat().resolvedOptions().timeZone;
-};
-
-// Get the weekday
-export const getWeekday = () => {
-	const date = new Date();
-	const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-	return weekdays[date.getDay()];
 };
 
 export const createMessagesList = (

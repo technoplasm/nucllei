@@ -20,7 +20,6 @@ vi.mock('$lib/stores', async () => {
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('$lib/utils', () => ({
 	createMessagesList: vi.fn(() => []),
-	promptTemplate: (s: string) => s,
 	getPromptVariables: () => ({})
 }));
 vi.mock('$lib/utils/chat-messages', () => ({

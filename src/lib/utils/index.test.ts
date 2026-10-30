@@ -2,13 +2,15 @@
 // - createMessagesList: parentId が循環した履歴で無限再帰して FE が落ちた
 // - TTS の文分割: 和文は「。」の後に空白が無いため 1 文にもならず、全文を 1 リクエストで送っていた
 // - replaceTokens: 本文の [n] を <source_id> に置換する引用チップを撤去(2026-10-05)— [n] は素の文字列のまま
+// - getPromptVariables: 日付・曜日などを送ってサーバの値 (日本語の曜日) を上書きしていた(2026-10-30)
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
 	createMessagesList,
 	extractSentencesForAudio,
 	getMessageContentParts,
+	getPromptVariables,
 	replaceTokens
 } from './index';
 import type { ChatHistory, ChatMessage } from '$lib/types/chat';
@@ -136,5 +138,21 @@ describe('replaceTokens', () => {
 
 	it('{{char}} / {{user}} は従来どおり置換する', () => {
 		expect(replaceTokens('{{char}} → {{user}}', 'M', 'U')).toBe('M → U');
+	});
+});
+
+describe('getPromptVariables', () => {
+	it('ブラウザでしか分からない変数だけを送る (日時・曜日・利用者はサーバが正)', () => {
+		vi.stubGlobal('localStorage', { getItem: () => 'ja-JP' });
+		try {
+			const variables = getPromptVariables();
+			expect(Object.keys(variables).sort()).toEqual(['{{CURRENT_TIMEZONE}}', '{{USER_LANGUAGE}}']);
+			expect(variables['{{USER_LANGUAGE}}']).toBe('ja-JP');
+			expect(variables['{{CURRENT_TIMEZONE}}']).toBe(
+				Intl.DateTimeFormat().resolvedOptions().timeZone
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

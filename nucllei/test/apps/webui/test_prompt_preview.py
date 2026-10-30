@@ -57,8 +57,31 @@ def _insert_skill(skill_id="pvskill", description="集計の手順"):
     )
 
 
-def _chat_tools(model: dict, monkeypatch):
-    """実際のリクエスト (process_chat_payload) がモデルに渡す tools。"""
+# ブラウザ (getPromptVariables の旧形) が送っていた英語の曜日など — サーバの値を上書きしてはいけない
+BROWSER_VARIABLES = {
+    "{{CURRENT_DATE}}": "1999-01-01",
+    "{{CURRENT_TIME}}": "11:59:59 PM",
+    "{{CURRENT_DATETIME}}": "1999-01-01 11:59:59 PM",
+    "{{CURRENT_WEEKDAY}}": "Friday",
+    "{{USER_NAME}}": "Mallory",
+    "{{USER_LOCATION}}": "Nowhere",
+    "{{CURRENT_TIMEZONE}}": "Pacific/Kiritimati",
+    "{{USER_LANGUAGE}}": "ja-JP",
+}
+WEEKDAYS_JA = ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日")
+
+
+def _now_in(tz_name):
+    """(日付, 曜日) — 呼ぶ前後で日付が変わっても通るよう、呼び出しの前後 2 回分を返す。"""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo(tz_name) if tz_name else None)
+    return now.strftime("%Y-%m-%d"), WEEKDAYS_JA[now.weekday()]
+
+
+def _chat_tools(model: dict, monkeypatch, messages=None, variables=None):
+    """実際のリクエスト (process_chat_payload) がモデルに渡す tools (messages を渡せばその結果も)。"""
     from starlette.requests import Request
 
     from nucllei.main import app
@@ -81,18 +104,26 @@ def _chat_tools(model: dict, monkeypatch):
     form_data = {
         "model": model["id"],
         "stream": True,
-        "messages": [{"role": "user", "content": "こんにちは"}],
+        "messages": messages or [{"role": "user", "content": "こんにちは"}],
     }
     metadata = {
         "user_id": TAKEN,
         "chat_id": "c1",
         "message_id": "m1",
         "model": model,
+        "variables": variables,
     }
-    form_data, _, _ = asyncio.run(
-        middleware.process_chat_payload(request, form_data, user, metadata, model, None)
-    )
-    return [t["function"] for t in form_data.get("tools") or []]
+
+    async def run():
+        out, _, _ = await middleware.process_chat_payload(
+            request, form_data, user, metadata, model, None
+        )
+        return out
+
+    out = asyncio.run(run())
+    if messages is not None:
+        return out
+    return [t["function"] for t in out.get("tools") or []]
 
 
 class TestModelPreview(AbstractPostgresTest):
@@ -228,6 +259,50 @@ class TestModelPreview(AbstractPostgresTest):
             ]
             assert preview == real
             assert [t["name"] for t in preview][:2] == ["load_skill", "load_recipe"]
+
+    def test_system_matches_the_real_request_and_server_values_win(self, monkeypatch):
+        """system prompt はプレビューも実際のリクエスト (routers の apply_model_system_prompt_to_body) も、
+        日付・曜日・利用者はサーバの値。ブラウザが英語の曜日などを送っても使わない (2026-10-30 llens:
+        UI のチャットで {{CURRENT_WEEKDAY}} が Friday になっていた)。日時は {{CURRENT_TIMEZONE}} の TZ。"""
+        from nucllei.models.models import ModelForm
+        from nucllei.models.users import UserModel
+        from nucllei.utils.payload import apply_model_system_prompt_to_body
+        from nucllei.utils.prompt_preview import _preview_model
+
+        _fake_recipes(monkeypatch)
+        system = "今日は {{CURRENT_DATE}} ({{CURRENT_WEEKDAY}})。{{USER_NAME}}・{{USER_LOCATION}}・{{CURRENT_TIMEZONE}}・{{USER_LANGUAGE}}"
+        form = _model_form(system)
+        tz = BROWSER_VARIABLES["{{CURRENT_TIMEZONE}}"]
+        before = _now_in(tz)
+        response = self._preview({"model": form, "variables": BROWSER_VARIABLES})
+        assert response.status_code == 200
+        preview = response.json()["system"]["text"]
+
+        user = UserModel(
+            id=TAKEN,
+            name="Taro",
+            email="t@example.invalid",
+            role="admin",
+            profile_image_url="/u.png",
+            last_active_at=0,
+            updated_at=0,
+            created_at=0,
+        )
+        _, model_info = _preview_model(ModelForm(**form), user)
+        real = apply_model_system_prompt_to_body(
+            {"system": system},
+            {"messages": []},
+            {"variables": BROWSER_VARIABLES},
+            user,
+            model_info,
+        )["messages"][0]["content"]
+        after = _now_in(tz)
+        assert preview == real
+        expected = {
+            f"今日は {d} ({w})。Taro・Unknown・Pacific/Kiritimati・ja-JP"
+            for d, w in (before, after)
+        }
+        assert preview in expected
 
     def test_non_admin_cannot_preview(self):
         with mock_webui_user_strict(id="9", role="user"):
@@ -372,3 +447,65 @@ def test_segment_expansion_falls_back_when_pieces_do_not_join():
 
     result = segment_expansion("", expand)
     assert result == {"text": "", "segments": [], "exact": True}
+
+
+class TestChatSystemPrompt(AbstractPostgresTest):
+    """チャットの system prompt (先頭の system メッセージ) の変数はサーバが展開する — ブラウザの自前展開
+    (英語の曜日・12 時間制) をやめた (2026-10-30)。"""
+
+    BASE_PATH = "/api/v1/chats"
+
+    def test_chat_system_is_expanded_by_the_server(self, monkeypatch):
+        _fake_recipes(monkeypatch)
+        model = {"id": "pv", "name": "pv", "owned_by": "openai", "info": {"meta": {}}}
+        tz = BROWSER_VARIABLES["{{CURRENT_TIMEZONE}}"]
+        before = _now_in(tz)
+        out = _chat_tools(
+            model,
+            monkeypatch,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "{{CURRENT_DATE}} {{CURRENT_WEEKDAY}} {{USER_NAME}} {{USER_LANGUAGE}}",
+                },
+                {"role": "user", "content": "{{CURRENT_WEEKDAY}}"},
+            ],
+            variables=BROWSER_VARIABLES,
+        )
+        after = _now_in(tz)
+        # チャットの system はサーバの日本語の曜日・本人の名前。ブラウザでしか分からない
+        # {{USER_LANGUAGE}} はブラウザの値 (以前ブラウザが自前展開していたのと同じに効く)
+        assert out["messages"][0]["content"] in {
+            f"{d} {w} Taro ja-JP" for d, w in (before, after)
+        }
+        # 利用者の本文は展開しない (今までどおり)
+        assert out["messages"][1]["content"] == "{{CURRENT_WEEKDAY}}"
+
+
+def test_request_timezone():
+    from datetime import datetime
+
+    from nucllei.utils import task
+
+    task.set_request_timezone({"{{CURRENT_TIMEZONE}}": "Pacific/Pago_Pago"})
+    date, weekday = _now_in("Pacific/Pago_Pago")
+    out = task.prompt_template("{{CURRENT_DATE}} {{CURRENT_WEEKDAY}} {{CURRENT_TIME}}")
+    assert out.startswith(f"{date} {weekday} ")
+    # 時刻は 24 時間制 (HH:MM:SS)
+    assert len(out.rsplit(" ", 1)[1]) == 8 and "M" not in out.rsplit(" ", 1)[1]
+
+    # 不正な名前・無い → サーバの TZ
+    for variables in ({"{{CURRENT_TIMEZONE}}": "Not/AZone"}, None, {}):
+        task.set_request_timezone(variables)
+        assert task.prompt_template("{{CURRENT_DATE}}") == datetime.now().strftime(
+            "%Y-%m-%d"
+        )
+
+    # ブラウザが送った変数で当てるのは {{CURRENT_TIMEZONE}} {{USER_LANGUAGE}} だけ
+    assert (
+        task.prompt_variables_template(
+            "{{CURRENT_WEEKDAY}} {{USER_NAME}} {{CURRENT_TIMEZONE}} {{USER_LANGUAGE}}",
+            BROWSER_VARIABLES,
+        )
+        == "{{CURRENT_WEEKDAY}} {{USER_NAME}} Pacific/Kiritimati ja-JP"
+    )

@@ -11,9 +11,9 @@ import { get } from 'svelte/store';
 import { toast } from 'svelte-sonner';
 import { v4 as uuidv4 } from 'uuid';
 
-import { chatId, config, models, settings, user } from '$lib/stores';
+import { chatId, config, models, settings } from '$lib/stores';
 import type { Model } from '$lib/stores';
-import { createMessagesList, promptTemplate, getPromptVariables } from '$lib/utils';
+import { createMessagesList, getPromptVariables } from '$lib/utils';
 import { buildWireMessages, parseStopSequences } from '$lib/utils/chat-messages';
 import { stripLocalTurn } from '$lib/utils/history-graft';
 import { mergeRequestFiles } from '$lib/utils/chat-files';
@@ -364,16 +364,11 @@ export class ChatSend {
 
 		// wire 形への組み立て(system 注入・画像展開・tool 往復復元)は純関数層
 		// (chat-messages.ts buildWireMessages)— vitest で契約を固定している
+		// チャットの system prompt の変数はサーバが展開する (BE の payload.expand_chat_system_message —
+		// 日時・曜日・利用者はサーバの値が正、2026-10-30)。ここでは素のまま送る
 		const messages = buildWireMessages(
 			createMessagesList(_history, responseMessageId),
-			session.params?.system
-				? promptTemplate(
-						session.params?.system ?? '',
-						get(user)?.name,
-						undefined,
-						model.info?.base_model_id || model.id
-					)
-				: null
+			session.params?.system || null
 		);
 
 		const abortController = new AbortController();
@@ -397,9 +392,7 @@ export class ChatSend {
 				// llens(#54): tool はモデル割り当て一本 — tool_ids はサーバー側解決に移行し送らない
 				// llens(#70): features(image_generation)はネイティブ画像生成の BE 撤去に伴い送らない
 
-				variables: {
-					...getPromptVariables(get(user)?.name, undefined)
-				},
+				variables: getPromptVariables(),
 				model_item: get(models).find((m) => m.id === model.id),
 
 				chat_id: get(chatId),

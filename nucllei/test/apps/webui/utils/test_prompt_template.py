@@ -50,7 +50,8 @@ def test_existing_variables_unchanged():
     )
     date, time, datetime_, weekday, name, location = out.split("|")
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", date)
-    assert re.fullmatch(r"\d{2}:\d{2}:\d{2} [AP]M", time)
+    # 24 時間制 (2026-10-30 — UI のチャットで当たっていたブラウザの形に揃えた。ja の表記)
+    assert re.fullmatch(r"\d{2}:\d{2}:\d{2}", time)
     assert datetime_.startswith(date)
     # 曜日は日本語で固定(ロケールに依らない — 2026-10-19 llens 監査)
     assert weekday in (

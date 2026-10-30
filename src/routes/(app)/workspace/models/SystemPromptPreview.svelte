@@ -5,7 +5,6 @@
 	// 同じ関数を通る。実行はしない)。利用者ごと・日時ごとに変わる所は色で分ける (prefix cache)。
 	import { getContext, onMount } from 'svelte';
 
-	import { user } from '$lib/stores';
 	import { previewModel, type ModelPreview } from '$lib/apis/models';
 	import { getPromptVariables } from '$lib/utils';
 	import { estimateTokens, splitToolDescription, toolVaries } from '$lib/utils/prompt-preview';
@@ -32,7 +31,7 @@
 		error = '';
 		try {
 			// チャットの送信 (send.ts) と同じブラウザ側の変数を渡す
-			preview = await previewModel(model(), getPromptVariables($user?.name, undefined));
+			preview = await previewModel(model(), getPromptVariables());
 		} catch (e) {
 			preview = null;
 			error = `${e}`;

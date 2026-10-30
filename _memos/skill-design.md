@@ -447,6 +447,16 @@ before / after も毎回動く。
   get_tools の spec_overrides で差し替わった tool = `overridden`)。断片をつないで全体の展開と一致しない
   ときは印を付けない(`exact: false`)。
 - 実物どおりなので見えたこと: チャットはブラウザの `getPromptVariables` の値(metadata.variables)を先に
-  当てるので、UI のチャットでは `{{CURRENT_WEEKDAY}}` が英語(`Friday`)になる — サーバ側の日本語固定
-  (2026-10-19)はブラウザから来ない経路(API・skill の本文)にしか効いていない。プレビューもチャットと
-  同じ値を送るので英語で出る。
+  当てていたので、UI のチャットでは `{{CURRENT_WEEKDAY}}` が英語(`Friday`)になっていた — サーバ側の
+  日本語固定(2026-10-19)はブラウザから来ない経路(API・skill の本文)にしか効いていなかった。
+  → 同日直した: 日時・曜日・利用者はサーバが正、ブラウザから当てるのは `{{CURRENT_TIMEZONE}}`
+  `{{USER_LANGUAGE}}` だけ(task.BROWSER_PROMPT_VARIABLES)。日時は**ブラウザの TZ でサーバが作る**
+  (request_timezone の ContextVar — process_chat_payload・apply_model_system_prompt_to_body が置く)。
+  TZ をサーバのプロセスの TZ だけにすると、TZ を設定していない配備(image の既定は UTC)で 0〜9 時(JST)に
+  日付・曜日が前日になる — ブラウザの TZ ならその心配が無く、ブラウザの値を使っていた今までの UI の
+  チャットと同じ日付になる。ブラウザの TZ が無い経路(API・続きターン execution_resume)はプロセスの TZ
+  (llens は compose で Asia/Tokyo)。時刻はブラウザに合わせて 24 時間制に。チャットの system prompt
+  (先頭の system メッセージ)の自前展開も FE から外し、サーバが展開する(expand_chat_system_message)。
+  ken「サーバーの locale は ja で」: サーバ由来の値は ja 表記に固定(曜日は日本語、時刻は 24 時間制)。
+  日付は ISO の `YYYY-MM-DD` のまま(ja の慣用の `2026年10月30日` にはしない — レシピの updated・tool の
+  引数が ISO)。locale を切り替える env / 設定は作らない。

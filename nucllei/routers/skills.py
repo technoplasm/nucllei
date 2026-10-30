@@ -146,6 +146,8 @@ class SkillPreviewForm(BaseModel):
     after: Any = None
     # {{BASE_MODEL_ID}}・{{SKILLS}}・{{USER_RECIPES}} の元にする preset (省略で無し)
     model_id: Optional[str] = None
+    # チャットの metadata.variables と同じ (ブラウザの getPromptVariables — 日時の TZ に使う)
+    variables: dict[str, str] = {}
 
 
 @router.post("/preview")
@@ -183,7 +185,9 @@ async def preview_skill(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=ERROR_MESSAGES.NOT_FOUND,
             )
-    return await build_preview(user, form_data.content, before, after, model)
+    return await build_preview(
+        user, form_data.content, before, after, model, form_data.variables
+    )
 
 
 ############################

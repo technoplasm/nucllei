@@ -1103,8 +1103,9 @@ misreads `reasoning_content` on assistant messages.
 
 `POST /api/v1/models/preview` (admin-only, like preset edits; 2026-10-30, ken:
 "show how it actually expands, as a tab") — body `{model: <ModelForm, unsaved>,
-variables?: {"{{USER_LANGUAGE}}": …}}` (`variables` = what the chat sends as
-`metadata.variables` — the browser's `getPromptVariables`). Returns what the model
+variables?: {"{{CURRENT_TIMEZONE}}": …, "{{USER_LANGUAGE}}": …}}` (`variables` = what
+the chat sends as `metadata.variables` — the browser's `getPromptVariables`; only
+those two are used, §6.1). Returns what the model
 would receive on the **first turn of a new chat**, expanded **as the caller**
 (there is no way to expand it as another user — their personal recipe names would
 show): `tools` (in order: `[{name, tool_id, description, parameters, chars,
@@ -1116,7 +1117,8 @@ a real request — `get_tools` (`meta.toolIds`) →
 `payload.apply_model_system_prompt_to_body` for the system prompt — so the
 declarations match the real request. `scope` is `fixed` (the same for every user
 of the preset), `user` (per user: `{{USER_*}}`, `{{SKILLS}}`, `{{USER_RECIPES}}`,
-`{{CURRENT_TIMEZONE}}`, `{{USER_LANGUAGE}}`), `time` (`{{CURRENT_DATE}}` …) or
+`{{CURRENT_TIMEZONE}}`, `{{USER_LANGUAGE}}`), `time` (`{{CURRENT_DATE}}` …; made in
+the browser's `{{CURRENT_TIMEZONE}}`, see §6.1) or
 `preset` (`{{BASE_MODEL_ID}}`) — the table is `utils/task.PROMPT_VARIABLE_SCOPES`.
 `exact: false` means the pieces did not join back into the whole expansion (a
 variable's value joined the text around it into another variable), so it comes as
@@ -2788,6 +2790,27 @@ POST /api/v1/skills/create
   system prompt (`params.system`). Inside a subagent's turn `{{BASE_MODEL_ID}}`
   refers to the child preset's base, while the `{{USER_*}}` variables stay those
   of the user who started the parent chat. There is no call-time parameter mechanism.
+  **Which side is the source** (2026-10-30, llens: "in the UI chat `{{CURRENT_WEEKDAY}}`
+  came out as `Friday`" — the browser's values used to be applied first and won):
+
+  | Variable | Source | Note |
+  |---|---|---|
+  | `{{CURRENT_DATE}}` `{{CURRENT_TIME}}` `{{CURRENT_DATETIME}}` `{{CURRENT_WEEKDAY}}` | server | made by the server in the **user's time zone** — the browser's `{{CURRENT_TIMEZONE}}` (an IANA name) for the request; without one (API, continuation turns) or with an invalid one, the server process's TZ (the container's `TZ` env — llens sets `Asia/Tokyo`; the image default is UTC). `{{CURRENT_TIME}}` is 24-hour `HH:MM:SS`, `{{CURRENT_WEEKDAY}}` Japanese |
+  | `{{USER_NAME}}` `{{USER_LOCATION}}` `{{USER_ROLE}}` `{{USER_GROUPS}}` | server | the signed-in user |
+  | `{{BASE_MODEL_ID}}` `{{SKILLS}}` `{{USER_RECIPES}}` | server | need the preset |
+  | `{{CURRENT_TIMEZONE}}` `{{USER_LANGUAGE}}` | browser | only the browser knows them: the chat sends them as `variables` (`getPromptVariables`); they are expanded in the preset's system prompt and the chat's system prompt, and stay literal where no browser is involved (API, skills) |
+
+  **Server-made values are fixed to `ja`** (2026-10-30, ken: "the server's locale is
+  ja"), whatever the browser's language (`{{USER_LANGUAGE}}`) or the server process's
+  locale: weekday `月曜日` … `日曜日`, time 24-hour `HH:MM:SS`, date `YYYY-MM-DD` (kept
+  ISO rather than `2026年10月30日` — recipes' `updated` and tool arguments use the ISO
+  form). There is no setting to switch it.
+
+  The chat sends only the two browser variables; any other key in `variables` is
+  ignored (`task.BROWSER_PROMPT_VARIABLES`). The chat's own system prompt (the leading
+  `system` message — per-chat settings) is expanded **by the server** too
+  (`payload.expand_chat_system_message` in `process_chat_payload`); the browser no
+  longer expands it.
 - `tool_ids` — workspace tool ids to load on activation (**admin-only** to set,
   since it grants tool access through skill visibility).
 - `auto_load_content_types` — content-type **prefixes** (e.g. `["audio/"]`,
@@ -2816,7 +2839,8 @@ POST /api/v1/skills/create
 - `access_control` — `null` public / `{}` private / `{"read":{group_ids,user_ids}}`.
 
 `POST /api/v1/skills/preview` (skill editors; 2026-10-30) — body `{content,
-before?, after?, model_id?}` (unsaved values). Returns `{before: [{n, tool, args}],
+before?, after?, model_id?, variables?}` (unsaved values; `variables` as in the model
+preview — gives the time zone for the dates). Returns `{before: [{n, tool, args}],
 content: {text, segments, exact, chars}, after: […]}`: the content expanded **as the
 caller** with the same function as loading (`skills.expand_skill_content`), and
 `before` / `after` validated as on save (400) and listed in order — **not run**.

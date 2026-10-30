@@ -164,8 +164,10 @@ async def preview_tools(request, user, model: dict, preset_system: str) -> list[
 async def preview_preset(request, user, form, variables: Optional[dict] = None) -> dict:
     """preset の編集画面のプレビュー: tools → system prompt (編集中の値で、本人として)。"""
     from nucllei.utils.payload import apply_model_system_prompt_to_body
-    from nucllei.utils.task import ensure_user_recipes
+    from nucllei.utils.task import ensure_user_recipes, set_request_timezone
 
+    # 日時はブラウザの TZ でサーバが作る (チャットと同じ — task.BROWSER_PROMPT_VARIABLES)
+    set_request_timezone(variables)
     model, model_info = _preview_model(form, user)
     params = form.params.model_dump() if form.params else {}
     system = params.get("system") or ""
@@ -190,13 +192,17 @@ async def preview_preset(request, user, form, variables: Optional[dict] = None) 
     }
 
 
-async def preview_skill(user, content: str, before, after, model=None) -> dict:
+async def preview_skill(
+    user, content: str, before, after, model=None, variables: Optional[dict] = None
+) -> dict:
     """skill の編集画面のプレビュー: before → 本文 (編集中の値を本人として展開) → after。
     before / after は実行しない (何を実行するかの一覧だけ)。model は {{BASE_MODEL_ID}}・{{SKILLS}}・
     {{USER_RECIPES}} の元になる preset (無ければそれらは Unknown / 空)。"""
     from nucllei.utils.skills import expand_skill_content
-    from nucllei.utils.task import ensure_user_recipes
+    from nucllei.utils.task import ensure_user_recipes, set_request_timezone
 
+    # 日時はブラウザの TZ で (チャットで読み込まれるときと同じ)
+    set_request_timezone(variables)
     if model:
         await ensure_user_recipes(user, model, content)
     body = segment_expansion(

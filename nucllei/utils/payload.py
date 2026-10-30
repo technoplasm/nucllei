@@ -1,6 +1,8 @@
 from nucllei.utils.task import (
     prompt_template,
     prompt_variables_template,
+    resolve_base_model_id,
+    set_request_timezone,
     user_prompt_params,
 )
 from nucllei.utils.misc import (
@@ -25,9 +27,11 @@ def apply_model_system_prompt_to_body(
     if not system:
         return form_data
 
-    # Metadata (WebUI Usage)
+    # Metadata (WebUI Usage): ブラウザでしか分からない変数 ({{CURRENT_TIMEZONE}} {{USER_LANGUAGE}})
+    # だけ当て、日時はブラウザの TZ でサーバが作る (task.BROWSER_PROMPT_VARIABLES)
     if metadata:
-        variables = metadata.get("variables", {})
+        variables = metadata.get("variables") or {}
+        set_request_timezone(variables)
         if variables:
             system = prompt_variables_template(system, variables)
 
@@ -44,6 +48,32 @@ def apply_model_system_prompt_to_body(
         system, form_data.get("messages", [])
     )
     return form_data
+
+
+def expand_chat_system_message(
+    messages: list, user=None, model=None, variables: Optional[dict] = None
+) -> list:
+    """チャットの system prompt (先頭の system メッセージ — 利用者がチャットに付けたもの) の変数を
+    サーバで展開する (2026-10-30 — それまではブラウザが自前で展開していて、曜日が英語・時刻の形も
+    ブラウザ次第だった。続きターン (execution_resume) は前からサーバで展開している)。
+    preset の system prompt はこの後 routers が前に足す (apply_model_system_prompt_to_body)。
+    variables はブラウザが送った変数 (preset の system prompt と同じく、ブラウザでしか分からない
+    {{CURRENT_TIMEZONE}} {{USER_LANGUAGE}} だけ当たる)。非破壊 (新しい list を返す)。文字列でない
+    content は触らない。"""
+    if not messages or messages[0].get("role") != "system":
+        return messages
+    content = messages[0].get("content")
+    if not isinstance(content, str) or "{{" not in content:
+        return messages
+    if variables:
+        content = prompt_variables_template(content, variables)
+    expanded = prompt_template(
+        content,
+        **user_prompt_params(user),
+        base_model_id=resolve_base_model_id(model),
+        model=model,
+    )
+    return [{**messages[0], "content": expanded}, *messages[1:]]
 
 
 # inplace function: form_data is modified

@@ -44,11 +44,14 @@ from nucllei.retrieval.utils import dedupe_files_by_id, get_sources_from_files
 
 
 from nucllei.utils.chat import generate_chat_completion
+from nucllei.utils.payload import expand_chat_system_message
 from nucllei.utils.task import (
     SKILLS_TOKEN,
     USER_RECIPES_TOKEN,
+    ensure_user_recipes,
     get_task_model_id,
     preset_system_prompt,
+    set_request_timezone,
 )
 from nucllei.utils.misc import (
     get_message_list,
@@ -607,6 +610,17 @@ async def process_chat_payload(
 ):
     form_data = apply_params_to_form_data(form_data, model)
     log.debug(f"form_data: {form_data}")
+
+    # 日時の変数はこのリクエストの利用者の TZ で作る (ブラウザが送った {{CURRENT_TIMEZONE}}。
+    # 値そのものはサーバが正 — task.BROWSER_PROMPT_VARIABLES)。チャットの system prompt (先頭の
+    # system メッセージ) の変数もここでサーバが展開する ({{USER_RECIPES}} は先に取る)
+    set_request_timezone(metadata.get("variables"))
+    messages = form_data.get("messages") or []
+    if messages and messages[0].get("role") == "system":
+        await ensure_user_recipes(user, model, messages[0].get("content"))
+        form_data["messages"] = expand_chat_system_message(
+            messages, user, model, metadata.get("variables")
+        )
 
     # サーバーサイド `/command` 発火(issue #35)。フィルタや RAG より前に、
     # 合成の load_skill tool exchange(call + 展開済み content の result)を
