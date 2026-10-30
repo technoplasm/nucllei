@@ -182,16 +182,14 @@ async def user_recipes_text(user) -> str:
     for folder, md, entries in found:
         reasons = assess_recipe(folder, md)
         if reasons:
-            lines.append(f"- {folder} — {broken_line(reasons)}")
+            lines.append(index_line(folder, "", broken_line(reasons)))
             continue
         fm, _ = read_frontmatter(md["text"])
-        line = index_line(folder, fm.get("description"))
         warns = reference_warnings(
             folder, md["text"], entries, path_types, member_groups=groups
         )
-        if warns:
-            line += " " + warning_line(warns.reasons())
-        lines.append(line)
+        mark = warning_line(warns.reasons()) if warns else ""
+        lines.append(index_line(folder, fm.get("description"), mark))
     took = time.perf_counter() - started
     log.debug(f"[recipes] index for {uid}: {len(lines)} recipes in {took:.3f}s")
     return "\n".join(lines)

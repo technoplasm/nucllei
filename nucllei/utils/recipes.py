@@ -564,9 +564,14 @@ def set_updated(text: str, d: dt.date) -> str:
 
 def plain(v) -> str:
     """利用者が書いた frontmatter の値を一覧の 1 行に出す形にする。改行を潰し、tool の文が
-    モデルへの指示に使う語 (`返答への指示:` `次の手:` `中止:`) は区切りを変える。"""
+    モデルへの指示・印に使う語 (`返答への指示:` `次の手:` `中止:` `ERROR:` `警告:` `壊れている:`) は区切りを
+    変える。角括弧 `[` `]` は全角にする (一覧の印 `[壊れている: …]` / `[警告: …]` と同じ形を作らせない —
+    印は行頭にしか付かないが、見た目でも紛れないように)。"""
     t = " ".join(str(v).split()) if v else ""
-    return re.sub(r"(返答への指示|次の手|中止|ERROR)\s*[:：]", r"\1 -", t)
+    t = t.replace("[", "［").replace("]", "］")
+    return re.sub(
+        r"(返答への指示|次の手|中止|ERROR|警告|壊れている)\s*[:：]", r"\1 -", t
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1075,27 +1080,35 @@ def reference_warnings(
     return out
 
 
-def broken_line(reasons: list[str]) -> str:
-    """一覧の印の中身 (`(壊れている: …)`)。理由は 2 つまで。"""
+def _shown(reasons: list[str]) -> str:
+    # 理由は 2 つまで。印の角括弧を中で閉じさせない (パス・キーは利用者が書いた値)
     shown = "、".join(reasons[:2]) + (
         f" ほか {len(reasons) - 2} 件" if len(reasons) > 2 else ""
     )
-    return f"(壊れている: {shown}。{BROKEN_NEXT})"
+    return " ".join(shown.split()).replace("[", "［").replace("]", "］")
+
+
+def broken_line(reasons: list[str]) -> str:
+    """一覧の印 (`[壊れている: …]`)。行頭 (`- ` の直後) に置く — description は `—` の後にしか
+    出ないので、description に同じ形を書いても印にはならない (2026-10-30 llens のレビュー)。"""
+    return f"[壊れている: {_shown(reasons)}。{BROKEN_NEXT}]"
 
 
 def warning_line(reasons: list[str]) -> str:
-    """一覧の印の中身 (`(警告: …)`)。理由は 2 つまで。壊れているとは言い分ける (読み込める)。"""
-    shown = "、".join(reasons[:2]) + (
-        f" ほか {len(reasons) - 2} 件" if len(reasons) > 2 else ""
-    )
-    return f"(警告: {shown}。読み込めるが、その要素は実行しない)"
+    """一覧の印 (`[警告: …]`)。行頭に置く。壊れているとは言い分ける (読み込める)。"""
+    return f"[警告: {_shown(reasons)}。読み込めるが、その要素は実行しない]"
 
 
-def index_line(folder: str, description: str) -> str:
+def index_line(folder: str, description: str, mark: str = "") -> str:
+    """一覧の 1 行: `- [印] <フォルダ> — <description>`。印 (broken_line / warning_line) は tool が
+    行頭に付け、`—` の後は書いた人の文 (plain で潰す)。壊れているレシピは description を出さない。"""
+    head = f"- {mark} {folder}" if mark else f"- {folder}"
+    if mark.startswith("[壊れている"):
+        return head
     d = plain(description)
     if len(d) > INDEX_DESCRIPTION_CHARS:
         d = d[: INDEX_DESCRIPTION_CHARS - 1] + "…"
-    return f"- {folder} — {d or '(description なし)'}"
+    return f"{head} — {d or '(description なし)'}"
 
 
 # ---------------------------------------------------------------------------
