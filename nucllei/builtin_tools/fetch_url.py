@@ -394,24 +394,19 @@ class Tools:
         __user__: Optional[dict] = None,
         __progress__=None,
     ) -> Text:
-        """Web のページ・文書を 1 枚取得して平文にする (HTML はリンク一覧付き、PDF はテキスト層)。
+        """Web のページ・文書を 1 枚取得して平文にする (HTML はリンク一覧付き、PDF はテキスト層)。大きいページは query で該当行に絞る (続きは同じ query のまま offset)。
 
-        url は受け取った形のまま渡す: 2 枚目からは組み立てず、戻り値のリンク一覧などに出た URL の
-        literal を 1 文字も変えずにコピーする (相対ならホストを補わない)。
-        大きいページは query で該当行に絞る (続きは同じ query のまま offset)。
-
-        戻り値はヘッダ (url / 種別 / 分量) + 本文 + リンク一覧。
-        失敗時は "ERROR: ..." で始まる文 — 何が起きたか (事実) と、「次の手:」以降に自分が次に
-        すること (ユーザーには伝えない)。
-
-        :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値などに出た URL の literal をそのまま)。
-        :param query: (任意) 指定すると、本文行・リンク行のうちこの語を含む行だけを返す。
-        :param offset: 何文字目から返すか (0 起点)。続きは戻り値の next_offset を渡す。
-        :param limit: 返す文字数 (既定 8000)。上限を超える値は上限で頭打ちになる。
-        :param max_mb: (任意) 取得サイズの上限 (MB)。既定を超える資料を読むときだけ (天井あり)。
+        :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。受け取った形のまま — 2 枚目からも組み立てず、戻り値のリンク一覧などに出た literal を 1 文字も変えずに渡す (相対ならホストを補わない)
+        :param query: 指定すると、本文行・リンク行のうちこの語を含む行だけを返す
+        :param offset: 何文字目から返すか (0 起点)。続きは戻り値の next_offset を渡す
+        :param limit: 返す文字数 (既定 8000。上限を超える値は上限で頭打ち)
+        :param max_mb: 取得サイズの上限 (MB)。既定を超える資料を読むときだけ (天井あり)
         """
         # 使い方の細目 (doc との使い分け・query の使い方・run_subagent / max_mb・失敗の種類・
         # リンク一覧の形等) は README_API §5.7.1。ERROR 文の次の一手は実行時の戻り値が持つ。
+        # 2026-10-30 (llens「tool の説明を削る」batch 2): 戻り値の形 (結果が自分で言う) と ERROR /
+        # 「次の手:」の約束 (llens の system prompt が全 tool 共通で持つ) を説明から外した。
+        # 「受け取った形のまま」は url の引数へ
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
 
@@ -674,8 +669,10 @@ class Tools:
             # query で絞った結果を刻んでいるので、続きも同じ query で取る (offset は絞った後の
             # 文字位置 — query を落とすと別の位置になる。2026-10-19 llens 監査 (6))
             again = f'query="{query}", ' if query else ""
+            # url は実際の値で書く (`url=...` はその字のまま渡されうる — 2026-10-30 batch 2 の敵対レビュー)
+            u = f'"{url}"' if url else "..."
             head += (
-                f" (続きあり)\n続きは fetch_url(url=..., {again}offset={end}) で取る"
+                f" (続きあり)\n続きは fetch_url(url={u}, {again}offset={end}) で取る"
                 f"{' (同じ query を渡す)' if query else ''}。next_offset={end}"
             )
         else:

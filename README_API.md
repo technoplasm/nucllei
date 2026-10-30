@@ -2069,7 +2069,8 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     ユーザーが見るものと同じものを見る (重くない)」): a fed page stays in the
     context on later turns, so it is not "light" — look only when the text
     is not enough, as for attached PDFs. A cut result names the next window
-    **with the same `query`** (`続きは fetch_url(url=..., query="…", offset=N) で取る (同じ query を渡す)`
+    **with the same `query`** (`続きは fetch_url(url="<the url>", query="…", offset=N) で取る (同じ query を渡す)`
+    — the real url, not `url=...`, since 2026-10-30
     — the offset counts the filtered text). Oversize (`too_large`): the
     suggested `max_mb` is always a concrete number (never a placeholder) —
     over the real size when known, else twice the cap, within the ceiling —

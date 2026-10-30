@@ -1346,11 +1346,15 @@ def test_continuation_keeps_the_query(monkeypatch, ext_env):
     """query で絞った結果の続きは、同じ query で offset を渡す (offset は絞った後の位置)。"""
     result, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", query="令和", limit=10)
     assert (
-        '続きは fetch_url(url=..., query="令和", offset=10) で取る (同じ query を渡す)。'
-        "next_offset=10" in result
+        f'続きは fetch_url(url="{SITE}/top.aspx", query="令和", offset=10) で取る'
+        " (同じ query を渡す)。next_offset=10" in result
     )
     result, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", limit=10)
-    assert "続きは fetch_url(url=..., offset=10) で取る。next_offset=10" in result
+    # url はその字のまま (`url=...`) でなく実際の値で書く (2026-10-30 batch 2)
+    assert (
+        f'続きは fetch_url(url="{SITE}/top.aspx", offset=10) で取る。next_offset=10'
+        in result
+    )
 
 
 def test_pdf_text_note_looks_only_when_text_is_not_enough(monkeypatch, ext_env):
@@ -1437,5 +1441,11 @@ def test_spec_description_has_no_deployment_word():
     assert "続きは同じ query のまま offset" in spec["description"]
     assert (
         spec["parameters"]["properties"]["limit"]["description"]
-        == "返す文字数 (既定 8000)。上限を超える値は上限で頭打ちになる。"
+        == "返す文字数 (既定 8000。上限を超える値は上限で頭打ち)"
     )
+    # 2026-10-30 (llens「tool の説明を削る」batch 2): 戻り値の形と ERROR の約束は説明から外し、
+    # 受け取った形のままは url の引数へ
+    assert "ERROR" not in spec["description"] and "戻り値は" not in spec["description"]
+    url = spec["parameters"]["properties"]["url"]["description"]
+    assert "受け取った形のまま" in url and "1 文字も変えずに" in url
+    assert "(任意)" not in str(spec)
