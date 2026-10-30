@@ -354,7 +354,8 @@ def get_tools(
                     spec_overrides = {}
 
             # llens(#110 P4): toolkit 共通注記 — `Tools` **クラス docstring** を toolkit の
-            # **先頭 spec の description に 1 回だけ**前置する。関数 docstring がモデル向け
+            # **1 つの spec の description に 1 回だけ**前置する (`toolkit_note_anchor` の関数、
+            # 無ければ先頭 spec)。関数 docstring がモデル向け
             # (spec description)であるのと同じ規約をクラス docstring にも適用する —
             # tool ファイル内の docstring はモデルに見える文面、開発者メモは # コメント
             # (ken 決定 2026-08-16)。全関数に共通する注意(直列化・実行環境の性質等)を
@@ -364,6 +365,13 @@ def get_tools(
                 inspect.cleandoc(toolkit_note).strip()
                 if isinstance(toolkit_note, str) and toolkit_note.strip()
                 else None
+            )
+            # 前置する spec: `Tools.toolkit_note_anchor` (関数名) があればその spec、無い・その関数が
+            # 無ければ先頭 (2026-10-30 — 名前順の先頭は tool を足すたびに変わる)
+            anchor = getattr(module, "toolkit_note_anchor", None)
+            note_spec = next(
+                (sp for sp in tool.specs if sp.get("name") == anchor),
+                tool.specs[0] if tool.specs else None,
             )
 
             for spec in tool.specs:
@@ -402,7 +410,7 @@ def get_tools(
                 if isinstance(patch, dict):
                     _deep_merge_spec(spec, patch)
 
-                if toolkit_note and spec is tool.specs[0]:
+                if toolkit_note and spec is note_spec:
                     spec["description"] = (
                         f"【{tool.name} ツール群 共通】{toolkit_note.strip()}\n\n"
                         f"{spec['description']}"

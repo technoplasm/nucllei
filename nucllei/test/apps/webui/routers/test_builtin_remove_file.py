@@ -188,5 +188,7 @@ def test_spec():
     assert spec["parameters"]["required"] == ["path"]
     assert "ゴミ箱へ移す" in spec["description"]
     assert "rm ではなくこちらを使う" in spec["description"]
-    # toolkit の共通注記 (クラス docstring。先頭 spec に前置される) も rm でなく remove_file を言う
-    assert "remove_file でその置き場のゴミ箱" in " ".join(Tools.__doc__.split())
+    # rm でなく remove_file は remove_file の説明だけが言う (2026-10-30 batch 2 で toolkit の共通注記から
+    # 外した)。記憶・EMR の抽出物の rm の例外は system prompt に委ねる
+    assert "例外は system prompt の決まりに従う" in spec["description"]
+    assert "remove_file" not in Tools.__doc__

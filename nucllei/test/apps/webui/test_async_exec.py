@@ -1823,6 +1823,53 @@ class TestAsyncExec(AbstractPostgresTest):
         assert "一つ目。" in loaded["first"]["spec"]["description"]
         assert "共通の注意である。" not in loaded["second"]["spec"]["description"]
 
+    def test_toolkit_note_goes_to_the_anchor_when_declared(self):
+        """`Tools.toolkit_note_anchor` (関数名) があれば注記はその spec に付く。その関数が無ければ先頭
+        (2026-10-30 — 名前順の先頭は tool を足すたびに変わる)。"""
+        import types
+
+        from nucllei.models.tools import ToolForm, Tools as ToolsTable
+        from nucllei.utils.tools import get_tools
+
+        params = {"type": "object", "properties": {}}
+        for tid, anchor in (("anchored", "second"), ("anchor_gone", "third")):
+            content = (
+                "class Tools:\n"
+                '    """共通の注意である。"""\n'
+                f"    toolkit_note_anchor = {anchor!r}\n"
+                "\n"
+                "    async def first(self) -> str:\n"
+                '        """一つ目。"""\n'
+                '        return "ok"\n'
+                "\n"
+                "    async def second(self) -> str:\n"
+                '        """二つ目。"""\n'
+                '        return "ok"\n'
+            )
+            ToolsTable.insert_new_tool(
+                user_id="1",
+                form_data=ToolForm(id=tid, name=tid, content=content),
+                specs=[
+                    {"name": "first", "parameters": dict(params)},
+                    {"name": "second", "parameters": dict(params)},
+                ],
+            )
+            request = types.SimpleNamespace(
+                app=types.SimpleNamespace(state=types.SimpleNamespace(TOOLS={}))
+            )
+            loaded = get_tools(
+                request,
+                [tid],
+                types.SimpleNamespace(id="1", role="admin"),
+                {"__user__": {"id": "1"}},
+            )
+            noted = [
+                n
+                for n in ("first", "second")
+                if "共通の注意である。" in loaded[n]["spec"]["description"]
+            ]
+            assert noted == (["second"] if anchor == "second" else ["first"]), tid
+
     def test_inject_skill_tools_source_wires_a3(self):
         """A-3 の配線が inject_skill_tools 実体に存在することを固定する
         (closure のため直接呼べない — ソース契約として検証)。"""

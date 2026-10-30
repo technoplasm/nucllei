@@ -410,7 +410,9 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 時刻は見ない)。ctime を見るのは mv が mtime を変えず ctime だけを今にするから(ext4 / tmpfs で確認、
 `sandbox/tests/test_retention.py::test_rename_updates_ctime`)— 古いファイルを含むフォルダを今日移しても即消えない。
 旧「ファイル単位の mtime」は廃止。toolkit 共通注記に「消すときは rm せず trash/ の直下へ mv」、容量切れ(507 /
-No space left)の文面に「/workspace/trash/ を空にすると空く」。モデルへは toolkit 共通注記(`Tools` クラス docstring)で 1 回だけ伝え、
+No space left)の文面に「/workspace/trash/ を空にすると空く」。モデルへは toolkit 共通注記(`Tools` クラス docstring)で 1 回だけ伝え
+(2026-10-30 batch 2 から注記は「imports/ と trash/ は一定期間で消える」の 1 句だけ。rm せず remove_file は remove_file の説明、
+期限の日付と「残すなら別の場所へ写す」は取り込みの結果、注記は run_python に付く — `toolkit_note_anchor`)、
 この配下が「無い」ときのエラー文に `send_to_workspace(file_id)` で戻せる旨を足す(`_cache_hint`)。
 実際の期限は sandbox が `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し(ken 2026-10-07)、
 nucllei が「今日(Asia/Tokyo)+ N 日」を取り込み結果の末尾(`(/workspace/imports/ の写しは YYYY-MM-DD 以降に消える。…)`)と

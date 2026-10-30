@@ -1703,8 +1703,12 @@ class Tools:
 - Methods may be `def` or `async def`; sync methods run in a worker thread, so
   blocking I/O is fine.
 - **Shared notes**: the `Tools` **class docstring** is prepended **once** — to
-  the first function's spec description only — instead of being copied into
-  every function docstring. Use it for caveats that apply to the whole toolkit
+  one spec's description only — instead of being copied into every function
+  docstring. That spec is the function named by the class attribute
+  `toolkit_note_anchor` (a string; the builtin sandbox uses `"run_python"`),
+  else the first spec (by name order — which changes whenever a function is
+  added, so declare the anchor; until 2026-10-30 the sandbox note sat on
+  `edit_file` that way). Use it for caveats that apply to the whole toolkit
   (execution-environment properties, serialization behavior, …). Docstrings in
   a tool file are model-facing text across the board (function docstrings
   already are); keep developer notes in `#` comments.
@@ -2246,7 +2250,9 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     (N = the sandbox's `cache_ttl_days`; the sentence is dropped when it is 0
     or missing) and the restore line
     「戻すなら run_shell で `mv '<trash path>' '<path>'` を実行する。」 (shell-quoted).
-    The toolkit note now says 「ファイルを消すときは rm せず remove_file でその置き場のゴミ箱 (`trash/`) へ移す」.
+    `remove_file`'s description says 「ファイルを消すときは run_shell の rm ではなくこちらを使う (例外は system prompt の決まりに従う)」
+    (the toolkit note said it until 2026-10-30; the note now only says that
+    `imports/` and `trash/` expire).
     The sandbox empties `/ext/groups/*/trash/` and `/ext/public/trash/` with
     the same rule as `/workspace/trash/` (`SANDBOX_CACHE_TTL_DAYS`, per
     top-level entry, max(mtime, ctime)) every hour.

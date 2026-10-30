@@ -16,6 +16,7 @@ import asyncio
 import base64
 import contextlib
 import importlib
+import re
 import types
 
 import httpx
@@ -1285,33 +1286,45 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         for out in outs(ConnectionRefusedError("refused")):
             assert out.startswith("ERROR: sandbox に接続できない")
 
-    def test_toolkit_note_tells_imports_expire(self):
-        """#149: imports/ の期限と戻し方は toolkit 共通注記 (クラス docstring) に 1 回だけ。
-        exports/ は 2026-10-19 に廃止 — 置き場として案内しない。渡すのは fetch_from_workspace。"""
+    def test_toolkit_note_keeps_only_facts_that_steer_calls(self):
+        """toolkit 共通注記 (クラス docstring) は呼び方・置き場の選び方に効く事実だけ (2026-10-30 llens
+        「tool の説明を削る」batch 2): ネットワーク不可・/workspace の共有と見えないこと (渡すのは
+        fetch_from_workspace)・/ext の書ける範囲 (管理者の例外 — 監査 (4) の要件)・直列。imports/ の期限は
+        取り込みの結果と「無い」の ERROR、rm せず remove_file は remove_file の説明、RECIPE.md の断りは
+        ERROR が言う。exports/ は 2026-10-19 に廃止。「配備」「Files」は内部語。"""
+        import nucllei.builtin_tools.sandbox as sb
         from nucllei.builtin_tools.sandbox import Tools
-
-        import re
+        from nucllei.utils.tools import get_tool_specs
 
         note = re.sub(r"\s*\n\s*", "", Tools.__doc__)  # docstring の折り返しを繋ぐ
-        assert "imports/" in note and "30 日" in note
-        assert "exports" not in note and "自動" not in note
-        assert "fetch_from_workspace を呼ぶ" in note
-        # 管理者の例外 (ext_acl: admin は全グループ・/ext/public が rw)
-        assert "管理者はすべてのグループの置き場と" in note
-        assert "`/ext/public/` に書ける" in note
-        assert "send_to_workspace(file_id)" in note
-        # 消すときは rm せず remove_file でその置き場の trash/ へ移す (同じ規則で消える。2026-10-27)
+        assert "ネットワーク不可" in note
+        assert "渡すのは fetch_from_workspace" in note
+        assert "管理者はすべてのグループの置き場と `/ext/public/` に書ける" in note
+        assert "background にしても並列にならない" in note
+        # 消える置き場は 1 句だけ (期間・戻し方は結果と ERROR — run_* の中の FileNotFoundError には
+        # 案内が付かないので、消えること自体は残す。敵対レビュー)
+        assert "imports/ と trash/ は最後に触ってから一定期間で消える" in note
+        assert "30 日" not in note and "send_to_workspace" not in note
+        for gone in ("rm せず", "RECIPE.md", "exports", "配備", "Files"):
+            assert gone not in note, gone
+        # 外した細目の行き先
+        specs = {s["name"]: s for s in get_tool_specs(Tools())}
         assert (
-            "rm せず" in note
-            and "remove_file でその置き場のゴミ箱 (`trash/`) へ移す" in note
+            "run_shell の rm ではなくこちらを使う"
+            in specs["remove_file"]["description"]
         )
-        # 例外 (LLENS の記憶・電子カルテの抽出物は rm 等) は配備の system prompt が決める。
-        # 「配備」「Files」はモデルに見せない内部語 (2026-10-19 llens 監査)
-        assert "例外は system prompt の決まりに従う" in note
-        assert "配備" not in note and "Files" not in note
-        # /ext を fetch_from_workspace で扱うとは言わない (パスがそのまま URL。監査 (4))
-        assert "list_workspace でも同じパスで扱える" in note
-        assert "list_workspace / fetch_from_workspace でも" not in note
+        assert "send_to_workspace(file_id) で戻せる" in sb._CACHE_GONE
+        assert len(note) < 500
+        # rm の例外 (記憶・EMR の抽出物) は remove_file の説明が system prompt に委ねる
+        assert (
+            "例外は system prompt の決まりに従う" in specs["remove_file"]["description"]
+        )
+
+    def test_toolkit_note_is_anchored_to_run_python(self):
+        """注記は名前順の先頭 (edit_file) ではなく run_python に付ける (2026-10-30)。"""
+        from nucllei.builtin_tools.sandbox import Tools
+
+        assert Tools.toolkit_note_anchor == "run_python"
 
     def test_import_tells_cache_expiry(self, tmp_path):
         """#149: sandbox が応答で返す `cache_ttl_days` から「今日 + N 日 以降に消える」を
@@ -1342,7 +1355,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert out == (
             "取り込み結果:\n- exp.txt (6B) → /workspace/imports/exp.txt\n"
             f"(/workspace/imports/ の写しは {day(30)} 以降に消える。"
-            "消えたら send_to_workspace で取り込み直す)"
+            "残すなら /workspace の別の場所へ写す。消えたら send_to_workspace で取り込み直す)"
         )
         # 添付一覧からの一括取り込みも同じ 1 行
         tool = _sandbox({"/files/write": {"ok": True, "cache_ttl_days": 3}})
@@ -1352,7 +1365,8 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             )
         )
         assert out.endswith(
-            f"写しは {day(3)} 以降に消える。消えたら send_to_workspace で取り込み直す)"
+            f"写しは {day(3)} 以降に消える。残すなら /workspace の別の場所へ写す。"
+            "消えたら send_to_workspace で取り込み直す)"
         )
         for res in ({"ok": True}, {"ok": True, "cache_ttl_days": 0}):
             tool = _sandbox({"/files/write": res})
@@ -1532,7 +1546,7 @@ def test_url_import_tells_cache_expiry(monkeypatch):
     day = datetime.now(ZoneInfo("Asia/Tokyo")).date() + timedelta(days=30)
     assert result.endswith(
         f"→ /workspace/imports/10-14.pdf\n(/workspace/imports/ の写しは {day} 以降に消える。"
-        "消えたら send_to_workspace で取り込み直す)"
+        "残すなら /workspace の別の場所へ写す。消えたら send_to_workspace で取り込み直す)"
     )
 
 

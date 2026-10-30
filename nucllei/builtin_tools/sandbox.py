@@ -472,8 +472,8 @@ def _imports_expiry_note(expires: Optional[date]) -> str:
     if not expires:
         return ""
     return (
-        f"\n(/workspace/imports/ の写しは {expires} 以降に消える。"
-        "消えたら send_to_workspace で取り込み直す)"
+        f"\n(/workspace/imports/ の写しは {expires} 以降に消える。残すなら /workspace の別の場所へ"
+        "写す。消えたら send_to_workspace で取り込み直す)"
     )
 
 
@@ -740,7 +740,8 @@ def _recipe_md_refused(abs_path: str) -> ToolError:
         "レシピの tool があれば、新しく作る・丸ごと書き直すなら save_recipe、一部を直すなら"
         " edit_recipe を使う。無ければ、このモデルではレシピが無効なので、使うなら管理者に"
         "モデルの能力「レシピ」を有効にしてもらうようユーザーに伝える"
-        " (同じフォルダの付属は write_file / edit_file で書いてよい)。",
+        " (同じフォルダの付属は write_file / edit_file で書いてよい。RECIPE.md を run_python /"
+        " run_shell で書いて回り込まない)。",
     )
 
 
@@ -1201,38 +1202,41 @@ def _iter_context_files(__files__, __metadata__):
 # Tool 本体
 # -----------------------------------------------------------------------------
 class Tools:
-    """ネットワーク不可。/workspace は run_python / run_python_once / run_shell の
-    3 ツール共有で実行を跨いで永続する。ここに作ったファイルはそのままではユーザーに
-    見えない — 渡すときは fetch_from_workspace を呼ぶ。/workspace/imports/ は添付などの
-    原本の写しで、imports/ の直下に置いたものは 1 つずつ (フォルダは中身ごと)、最後に触って
-    から一定期間 (既定 30 日。取り込みの結果に期限日を添える) で消える — 会話を跨いで残す物は
-    /workspace の別の場所 (自分で作るディレクトリ等) に置く。
-    消えた物は send_to_workspace(file_id) で戻せる。ファイルを消すときは rm せず
-    remove_file でその置き場のゴミ箱 (`trash/`) へ移す (同じ規則で既定 30 日後に消える)。
-    例外は system prompt の決まりに従う。実行は直列 — run_python は同じ会話内で、
-    run_python_once / run_shell は同一ユーザー内で順番待ちになる (background に
-    しても並列にはならない。長い background 実行の裏で同系統を呼ぶと完了まで待たされ、
-    待ちが長すぎると失敗する)。
-    `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける。他グループは見えない)、
-    `/ext/public/` は全員の共有の置き場 (読むだけ)。ただし管理者はすべてのグループの置き場と
-    `/ext/public/` に書ける。どちらも実行を跨いで残り、write_file / edit_file / remove_file /
-    read_file / list_workspace でも同じパスで扱える。
-    レシピ (利用者が残す手順) の本体 `<層>/recipes/<名前>/RECIPE.md` は write_file / edit_file で
-    書かない (同じフォルダの付属は書いてよい)。"""
+    """ネットワーク不可。/workspace は run_python / run_python_once / run_shell と read_file /
+    write_file 等で共有し、会話・実行を跨いで残る (imports/ と trash/ は最後に触ってから一定期間で
+    消える)。ユーザーには見えない — 渡すのは fetch_from_workspace。
+    `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける)、`/ext/public/` は全員の共有の
+    置き場 (読むだけ)。管理者はすべてのグループの置き場と `/ext/public/` に書ける。run_* の中でも
+    同じパスで扱える。
+    実行は直列 — run_python は同じ会話内で、run_python_once / run_shell は同一ユーザー内で順番待ちになり、
+    background にしても並列にならない (長い background 実行の裏で同系統を呼ぶと終わるまで待たされ、
+    待ちが長すぎると失敗する)。"""
 
-    # ↑ クラス docstring は nucllei の toolkit 共通注記 — 先頭 spec (run_python) の
-    # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
+    # ↑ クラス docstring は nucllei の toolkit 共通注記 — `toolkit_note_anchor` (run_python) の
+    # description に 1 回だけ前置され、モデルに見える (2026-10-30 まで: 名前順の先頭 spec に付き、
+    # edit_file を足してからは edit_file の説明に付いていた)。3 実行ツールの docstring に
     # 複製していた共通事項の一本化 (2026-08-16)。開発者メモはこの # コメント側に書く。
+    # 2026-10-30 (llens「tool の説明を削る」batch 2): 毎ターン送るので、まれな場面の細目はその場面の
+    # 戻り値へ — imports/ の期限の日付・残すなら別の場所へは取り込みの結果 (`_imports_expiry_note`)、
+    # 戻し方は「無い」の ERROR (`_cache_hint`)、rm せず remove_file (例外は system prompt) は
+    # remove_file の説明、RECIPE.md を書かないのは `_recipe_md_refused` の ERROR。残したのは呼び方・
+    # 置き場の選び方に効く事実だけ (ネットワーク・/workspace の共有と消える置き場・見えないこと・
+    # /ext の書ける範囲・直列)。消える置き場の 1 句は run_* の中の FileNotFoundError には案内が
+    # 付かないので残した (敵対レビュー)。
     # imports/ trash/ の期限 (#149): 掃除は sandbox サービスの idle workspace 回収
     # (env `SANDBOX_CACHE_TTL_DAYS`、既定 30)。単位は直下のエントリ、時刻は max(mtime, ctime)
     # (mv で ctime が今になる = 移した日から数える)。docstring は静的なので既定で言い、実際の値は
-    # sandbox が `/files/write` 等の応答 `cache_ttl_days` で返す — 取り込みの結果に
+    # sandbox が `/files/write` 等の応答 `cache_ttl_days` で返す (共通注記は期間を言わない) — 取り込みの結果に
     # 「YYYY-MM-DD 以降に消える」を添える (`_cache_expiry`。キーが無い古い sandbox・0 では
     # 添えない)。send_to_workspace / fetch_from_workspace の docstring には複製しない —
     # 「無い」と言われたときの案内は `_cache_hint` がエラー文に足す。
     # exports/ (2026-10-19 まで: 置くと暗黙にチャットへ添付された置き場) は廃止 — ユーザーへ
     # 渡す経路は fetch_from_workspace 一本 (llens 依頼・ken 了承)。表示されたか・本文に何を
     # 書くかは fetch_from_workspace の戻り値が毎回言う。既存の exports/ は期限掃除に任せる。
+
+    # 共通注記を前置する tool (utils/tools.get_tools)。名前順の先頭に任せると、tool を足すたびに
+    # 付く先が変わる — 実行環境の注記なので run_python に固定する
+    toolkit_note_anchor = "run_python"
 
     # #110: 非同期実行(background 昇格)への opt-in。時間のかかる Python 実行を
     # background にできるようにする。run_* は Files にもチャットにも何も足さない
@@ -2040,7 +2044,8 @@ class Tools:
         `/ext/groups/<グループ名>/…` は `/ext/groups/<グループ名>/trash/`、`/ext/public/…` は
         `/ext/public/trash/` (元のフォルダ構成は持たず、同じ名前があれば `-2` `-3` … を付ける)。
         ゴミ箱のものは移してから一定期間 (既定 30 日) で自動で消え、それまでは run_shell の mv で戻せる。
-        ファイルを消すときは run_shell の rm ではなくこちらを使う。ゴミ箱の中のものは扱わない。
+        ファイルを消すときは run_shell の rm ではなくこちらを使う (例外は system prompt の決まりに従う)。
+        ゴミ箱の中のものは扱わない。
 
         :param path: 移すファイルかフォルダ。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` のものも移せる (管理者はすべてのグループの置き場と `/ext/public/…` のものも移せる)。
         """
