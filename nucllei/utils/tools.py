@@ -422,6 +422,10 @@ def get_tools(
                 }
                 if render:
                     tool_dict["render"] = render
+                if isinstance(patch, dict) and patch:
+                    # spec_overrides はターンの利用者・preset に依存しうる — system prompt の
+                    # プレビューが「利用者ごとに変わりうる」の印を付ける
+                    tool_dict["varies"] = {"overridden": True}
 
                 # llens(#110): 非同期実行(background 昇格)への opt-in(設計 D4)。
                 # tool 作者が `Tools` クラス属性 `backgroundable` で宣言する

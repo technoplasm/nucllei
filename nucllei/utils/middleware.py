@@ -454,6 +454,99 @@ def merge_tool_specs(server_specs: list, existing) -> list:
     return merged
 
 
+async def build_capability_tools(
+    model,
+    user,
+    tools_extra_params: dict,
+    preset_system: str,
+    *,
+    messages=None,
+    load_tools=None,
+    run_hooks=None,
+) -> dict:
+    """モデルの能力が差し込む合成の tool (load_skill、レシピの load_recipe / save_recipe / edit_recipe)。
+
+    process_chat_payload と system prompt のプレビュー (utils/prompt_preview) が同じこれを通る
+    (プレビューの tool の宣言が実際とずれないように — 2026-10-30 ken「実際どのように展開されるか」)。
+    戻り値は {名前: エントリ} を差し込む順に。呼び手が tools_dict に重ねる (同名は合成側が勝つ)。
+
+    preset の system prompt に {{SKILLS}} / {{USER_RECIPES}} があれば、一覧は system prompt に入るので
+    load_skill / load_recipe の説明には入れない (tool の宣言を利用者によらず preset ごとに同じにする —
+    chat template は tool を system より前に出すので、prefix cache が利用者をまたげるように。
+    ken 2026-10-30「変わりにくいものを前に、変わりやすいものを後ろに」)。
+    messages: `/command` の合成 exchange・過去ターンの load_skill を見て、読み込み済みの skill は
+    本文を再注入しない(46b5ff9ed)。load_tools / run_hooks は load_skill の呼び出し時のフック
+    (プレビューでは渡さない — 呼ばないので)。
+    """
+    # import はここで(builtin_tools は utils.tools 経由の循環を避けて遅延 import する慣例)
+    from nucllei.builtin_tools.recipe_tools import build_recipe_tools
+
+    entries = {}
+    # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
+    # load_skill として常載する(tool result = 展開済み content)。
+    load_skill_tool = build_load_skill_tool(
+        model,
+        user,
+        load_tools=load_tools,
+        messages=messages,
+        run_hooks=run_hooks,
+        listing_in_prompt=SKILLS_TOKEN in preset_system,
+    )
+    if load_skill_tool is not None:
+        entries["load_skill"] = load_skill_tool
+
+    # 能力「レシピ」(meta.features.recipes、既定 ON — ken 2026-10-30「スキルみたいに」):
+    # load_recipe / save_recipe / edit_recipe を合成して差し込む(builtin_sandbox・toolIds の
+    # 有無に依らない)。一覧は 1 リクエスト 1 回 — OFF・sandbox の無い配備では sandbox に聞かない。
+    entries.update(
+        await build_recipe_tools(
+            model,
+            user,
+            tools_extra_params,
+            listing_in_prompt=USER_RECIPES_TOKEN in preset_system,
+        )
+    )
+    return entries
+
+
+async def mount_recall_tools_if_needed(
+    tools_dict: dict, form_data: dict, user, metadata
+):
+    """llens(#110): 回収 builtin check_task / await_task / stop_task。適格
+    (backgroundable)tool が載るターン、または chat に exec 行が残っている場合に
+    mount する(§7 — 過剰 mount は無害: terminal への再 await は冪等)。mount
+    条件は spawn 系(async_exec_available)と**独立**(契約 M1 — 回収は DB 読みで
+    完結し、multi-worker でも boot スイープが running を倒すので liveness 誤爆は
+    ない。過去に spawn された行が構成変更後も回収不能にならないため)。builtin
+    なので #101 の履歴再導出は不要。agent session(D9)と chat 文脈なしでは
+    載せない(spawn も同条件で拒否される)。プレビューも同じこれを通る。
+    """
+    if not exec_recall_context_ok(metadata):
+        return
+    should_mount_recall = any(
+        entry_is_backgroundable(name, entry) for name, entry in tools_dict.items()
+    )
+    if not should_mount_recall:
+        should_mount_recall = await asyncio.to_thread(
+            Executions.has_awaitable_executions_by_chat_id, metadata["chat_id"]
+        )
+    if should_mount_recall:
+        mount_recall_tools(tools_dict, form_data, user, metadata)
+
+
+def model_tool_specs(tools_dict: dict, allow_background: bool) -> list:
+    """tools_dict → モデルへ渡す tools (OpenAI 形)。#110: 適格 tool の spec には共有 background
+    引数を注入する(spec のコピーに対して — tools_dict 側は汚さず、unknown-drop の基準は元 spec)。
+    プレビューも同じこれを通る。"""
+    return [
+        {
+            "type": "function",
+            "function": spec_for_model(name, tool, allow_background),
+        }
+        for name, tool in tools_dict.items()
+    ]
+
+
 def get_model_tool_ids(model) -> list[str]:
     """llens(#54): tool はモデル割り当て(meta.toolIds)一本 — サーバー側で解決する。"""
     return (model or {}).get("info", {}).get("meta", {}).get("toolIds", []) or []
@@ -787,74 +880,32 @@ async def process_chat_payload(
             mount_recall_tools(tools_dict, form_data, user, metadata)
         return loaded
 
-    # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
-    # load_skill として常載する(tool result = 展開済み content)。
-    # messages: `/command` の合成 exchange・過去ターンの load_skill を見て、読み込み済みの
-    # skill は本文を再注入しない(46b5ff9ed — 同じターンの冗長ロードで本文が 2 回入る)。
     async def run_hooks(skill):
         return await run_skill_hooks(skill, tools_dict, hook_execute)
 
-    # preset の system prompt に {{SKILLS}} / {{USER_RECIPES}} があれば、一覧は system prompt に入るので
-    # load_skill / load_recipe の説明には入れない (tool の宣言を利用者によらず preset ごとに同じにする —
-    # chat template は tool を system より前に出すので、prefix cache が利用者をまたげるように。
-    # ken 2026-10-30「変わりにくいものを前に、変わりやすいものを後ろに」)
+    # 能力の合成 tool (load_skill・レシピ)。プレビューと同じ関数 (build_capability_tools)
     preset_system = await asyncio.to_thread(preset_system_prompt, model)
-    load_skill_tool = build_load_skill_tool(
-        model,
-        user,
-        load_tools=inject_skill_tools,
-        messages=form_data["messages"],
-        run_hooks=run_hooks,
-        listing_in_prompt=SKILLS_TOKEN in preset_system,
-    )
-    if load_skill_tool is not None:
-        if "load_skill" in tools_dict:
-            log.warning(
-                "tool 'load_skill' is shadowed by the skill manifest pseudo-tool"
-            )
-        tools_dict["load_skill"] = load_skill_tool
-
-    # 能力「レシピ」(meta.features.recipes、既定 ON — ken 2026-10-30「スキルみたいに」):
-    # load_recipe / save_recipe / edit_recipe を合成して差し込む(builtin_sandbox・toolIds の
-    # 有無に依らない)。見えるレシピの一覧は load_recipe の説明に入る(1 リクエスト 1 回 —
-    # OFF・sandbox の無い配備では sandbox に聞かない)。同名は load_skill と同じく合成側が勝つ。
-    # import はここで(builtin_tools は utils.tools 経由の循環を避けて遅延 import する慣例)
-    from nucllei.builtin_tools.recipe_tools import build_recipe_tools
-
     for name, entry in (
-        await build_recipe_tools(
+        await build_capability_tools(
             model,
             user,
             tools_extra_params,
-            listing_in_prompt=USER_RECIPES_TOKEN in preset_system,
+            preset_system,
+            messages=form_data["messages"],
+            load_tools=inject_skill_tools,
+            run_hooks=run_hooks,
         )
     ).items():
         if name in tools_dict:
-            log.warning(f"tool '{name}' is shadowed by the recipe capability tool")
+            log.warning(f"tool '{name}' is shadowed by the capability tool")
         tools_dict[name] = entry
 
     # llens(#140): run_subagent は builtin `builtin_subagent`(Tools 行)になり、上の
     # get_tools 経路(meta.toolIds × 行の read ACL × available / spec_overrides フック)で
     # 載る。#107 以来の擬似 tool 直接注入はここから撤去した。
 
-    # llens(#110): 回収 builtin check_task / await_task / stop_task。適格
-    # (backgroundable)tool が載るターン、または chat に exec 行が残っている場合に
-    # mount する(§7 — 過剰 mount は無害: terminal への再 await は冪等)。mount
-    # 条件は spawn 系(async_exec_available)と**独立**(契約 M1 — 回収は DB 読みで
-    # 完結し、multi-worker でも boot スイープが running を倒すので liveness 誤爆は
-    # ない。過去に spawn された行が構成変更後も回収不能にならないため)。builtin
-    # なので #101 の履歴再導出は不要。agent session(D9)と chat 文脈なしでは
-    # 載せない(spawn も同条件で拒否される)。
-    if exec_recall_context_ok(metadata):
-        should_mount_recall = any(
-            entry_is_backgroundable(name, entry) for name, entry in tools_dict.items()
-        )
-        if not should_mount_recall:
-            should_mount_recall = await asyncio.to_thread(
-                Executions.has_awaitable_executions_by_chat_id, metadata["chat_id"]
-            )
-        if should_mount_recall:
-            mount_recall_tools(tools_dict, form_data, user, metadata)
+    # llens(#110): 回収 builtin check_task / await_task / stop_task(条件は関数の docstring)
+    await mount_recall_tools_if_needed(tools_dict, form_data, user, metadata)
 
     allow_background = exec_spawn_context_ok(metadata)
 
@@ -865,14 +916,7 @@ async def process_chat_payload(
         # コピーに対して — tools_dict 側は汚さず、unknown-drop の基準は元 spec)。
         metadata["tools"] = tools_dict
         form_data["tools"] = merge_tool_specs(
-            [
-                {
-                    "type": "function",
-                    "function": spec_for_model(name, tool, allow_background),
-                }
-                for name, tool in tools_dict.items()
-            ],
-            form_data.get("tools"),
+            model_tool_specs(tools_dict, allow_background), form_data.get("tools")
         )
 
     try:

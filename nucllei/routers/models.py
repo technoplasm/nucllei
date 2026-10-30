@@ -10,6 +10,7 @@ from nucllei.models.models import (
 )
 from nucllei.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 
 
 from nucllei.utils.auth import get_admin_user, get_verified_user
@@ -116,6 +117,34 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+
+
+############################
+# PreviewModel
+############################
+
+
+class ModelPreviewForm(BaseModel):
+    # 編集中 (未保存) の preset。id・name は空でもよい (作成画面)
+    model: ModelForm
+    # チャットの metadata.variables と同じ (ブラウザの getPromptVariables)
+    variables: dict[str, str] = {}
+
+
+@router.post("/preview")
+async def preview_model(
+    request: Request,
+    form_data: ModelPreviewForm,
+    user=Depends(get_admin_user),
+):
+    """preset の編集画面のプレビュー (2026-10-30 ken): 編集中の preset で新しいチャットを始めたとき
+    モデルに渡る tools と system prompt を、リクエストした本人として展開して返す (実行はしない)。
+    他の利用者としては展開しない。preset の編集と同じく admin だけ。"""
+    from nucllei.utils.prompt_preview import preview_preset
+
+    return await preview_preset(
+        request, user, form_data.model, form_data.variables or None
+    )
 
 
 ############################

@@ -1143,12 +1143,18 @@ async def build_recipe_tools(
         spec["parameters"]["required"] = [
             k for k in spec["parameters"].get("required", []) if not k.startswith("__")
         ]
+        varies = None
         if name == "load_recipe":
-            spec["description"] = (
-                f"{spec['description']}\n\n{RECIPE_INDEX_IN_PROMPT}"
-                if listing_in_prompt
-                else recipe_index_description(spec["description"], index_text)
-            )
+            if listing_in_prompt:
+                spec["description"] = (
+                    f"{spec['description']}\n\n{RECIPE_INDEX_IN_PROMPT}"
+                )
+            else:
+                # 利用者ごとに変わる部分 (説明の末尾の一覧) — system prompt のプレビューが印を付ける
+                varies = {"description_from": len(spec["description"])}
+                spec["description"] = recipe_index_description(
+                    spec["description"], index_text
+                )
         function = getattr(instance, name)
         entry = {
             "tool_id": RECIPE_TOOL_ID,
@@ -1158,6 +1164,8 @@ async def build_recipe_tools(
             "spec": spec,
             "serial": True,
         }
+        if varies:
+            entry["varies"] = varies
         render = extract_render_from_function(function)
         if render:
             apply_render_to_spec(spec, render)

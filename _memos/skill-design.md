@@ -428,3 +428,25 @@ tool 名の書き戻しと同じ前提)。
 before / after も毎回動く。
 (5) 履歴はクライアント入力なので、偽の load_skill の結果を履歴に入れれば発火・実行を止められる —
 止まるのはその利用者自身の context に入る結果だけで、権限は増えない。
+
+## プレビュー(2026-10-30、llens 経由 ken「実際どのように展開されるかプレビューをタブで付けて」)
+
+- preset の編集画面「プロンプト」タブの System Prompt 欄と、skill の編集画面の本文欄に「編集 / プレビュー」。
+  endpoint は `POST /api/v1/models/preview`(admin)・`POST /api/v1/skills/preview`(skill editor)。
+- **プレビュー専用の展開を書かない**: tools は process_chat_payload と同じ関数を同じ並びで呼ぶ
+  (`get_tools` → `middleware.build_capability_tools` → `mount_recall_tools_if_needed` → `model_tool_specs`。
+  この 3 つはプレビューのために middleware から切り出した)。system prompt は routers が使う
+  `payload.apply_model_system_prompt_to_body`、skill の本文は activate_skill と同じ `expand_skill_content`。
+  回帰テスト `test_prompt_preview.py` がプレビューの spec と実リクエストの spec の一致を見る。
+- 本人としてだけ展開する(他の利用者として見る口は作らない — 個人のレシピ名が見える)。前提は
+  「新しいチャットの最初のターン」(履歴・添付・`/command` の skill の tool・Filter inlet の変更は入らない)。
+  preset の tool・skill・能力は保存済みの値(編集画面はタブ切替で「一般」の未保存の変更を戻すので、
+  プロンプトタブから見えるのは保存済みの値 — 画面の注記どおり)、system prompt は編集中の値。
+- 利用者ごとの印: 変数の scope は `utils/task.PROMPT_VARIABLE_SCOPES`(user / time / preset)、tool は
+  エントリの `varies`(load_skill・load_recipe の一覧 = `description_from`、load_skill の enum = `params`、
+  get_tools の spec_overrides で差し替わった tool = `overridden`)。断片をつないで全体の展開と一致しない
+  ときは印を付けない(`exact: false`)。
+- 実物どおりなので見えたこと: チャットはブラウザの `getPromptVariables` の値(metadata.variables)を先に
+  当てるので、UI のチャットでは `{{CURRENT_WEEKDAY}}` が英語(`Friday`)になる — サーバ側の日本語固定
+  (2026-10-19)はブラウザから来ない経路(API・skill の本文)にしか効いていない。プレビューもチャットと
+  同じ値を送るので英語で出る。

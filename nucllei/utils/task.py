@@ -113,6 +113,26 @@ def user_prompt_params(user) -> dict:
 # では空。
 SKILLS_TOKEN = "{{SKILLS}}"
 USER_RECIPES_TOKEN = "{{USER_RECIPES}}"
+
+# 変数ごとの「何で変わるか」(2026-10-30 ken「実際どのように展開されるかプレビューを」): system prompt の
+# プレビュー (utils/prompt_preview) が、prefix cache の観点でどこが利用者ごと・日時ごとかの印を付ける。
+# prompt_template とブラウザの getPromptVariables (src/lib/utils、チャットの metadata.variables) が
+# 展開する変数を全部載せる。user = 利用者ごと、time = 日時で変わる、preset = preset ごとに固定
+PROMPT_VARIABLE_SCOPES = {
+    "{{CURRENT_DATE}}": "time",
+    "{{CURRENT_TIME}}": "time",
+    "{{CURRENT_DATETIME}}": "time",
+    "{{CURRENT_WEEKDAY}}": "time",
+    "{{CURRENT_TIMEZONE}}": "user",
+    "{{USER_LANGUAGE}}": "user",
+    "{{USER_NAME}}": "user",
+    "{{USER_LOCATION}}": "user",
+    "{{USER_ROLE}}": "user",
+    "{{USER_GROUPS}}": "user",
+    SKILLS_TOKEN: "user",
+    USER_RECIPES_TOKEN: "user",
+    "{{BASE_MODEL_ID}}": "preset",
+}
 # レシピの一覧は sandbox に聞く (非同期) ので、同期の prompt_template は自分では取らない —
 # 能力「レシピ」が ON のリクエストで一度取ったもの (get_user_recipes: process_chat_payload の
 # build_recipe_tools・preset の system prompt を当てる直前の ensure_user_recipes・続きターンの wire の前)

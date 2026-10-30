@@ -1101,6 +1101,34 @@ calls carry the turn's reasoning back to the model — see "Reasoning in the
 history" under 4.3. Turn it off only for an OpenAI-compatible API that rejects or
 misreads `reasoning_content` on assistant messages.
 
+`POST /api/v1/models/preview` (admin-only, like preset edits; 2026-10-30, ken:
+"show how it actually expands, as a tab") — body `{model: <ModelForm, unsaved>,
+variables?: {"{{USER_LANGUAGE}}": …}}` (`variables` = what the chat sends as
+`metadata.variables` — the browser's `getPromptVariables`). Returns what the model
+would receive on the **first turn of a new chat**, expanded **as the caller**
+(there is no way to expand it as another user — their personal recipe names would
+show): `tools` (in order: `[{name, tool_id, description, parameters, chars,
+varies}]`, then `tools_chars`) and `system` (`{text, segments: [{text, scope,
+variable?}], exact, chars}`). Nothing is run. It goes through the same functions as
+a real request — `get_tools` (`meta.toolIds`) →
+`middleware.build_capability_tools` (`load_skill`, the recipe tools) →
+`mount_recall_tools_if_needed` → `model_tool_specs`, and
+`payload.apply_model_system_prompt_to_body` for the system prompt — so the
+declarations match the real request. `scope` is `fixed` (the same for every user
+of the preset), `user` (per user: `{{USER_*}}`, `{{SKILLS}}`, `{{USER_RECIPES}}`,
+`{{CURRENT_TIMEZONE}}`, `{{USER_LANGUAGE}}`), `time` (`{{CURRENT_DATE}}` …) or
+`preset` (`{{BASE_MODEL_ID}}`) — the table is `utils/task.PROMPT_VARIABLE_SCOPES`.
+`exact: false` means the pieces did not join back into the whole expansion (a
+variable's value joined the text around it into another variable), so it comes as
+one fixed piece. A tool's `varies` marks the per-user part of its declaration:
+`description_from` (the description from that offset on — the list in
+`load_skill` / `load_recipe` when the system prompt has no `{{SKILLS}}` /
+`{{USER_RECIPES}}`), `params` (parameters whose `enum` is per user — `load_skill`'s
+`skill_id`) or `overridden` (a toolkit `spec_overrides` hook patched it, e.g.
+`run_subagent`'s preset list). Not reflected: chat history, attachments, `/command`
+skill tools, and what inlet filters change. The model editor's Prompt tab shows it
+as "Preview" next to the system prompt.
+
 `params.custom_params` (editable in the model editor's Advanced tab, "Custom")
 is a free-form key/value escape hatch merged **top-level** into the outbound
 OpenAI-compatible request body — use it for engine extensions outside the
@@ -2786,6 +2814,17 @@ POST /api/v1/skills/create
   `on_load` is gone (replaced before release, 2026-10-30); an `on_load` key in
   the body is ignored as an unknown field.
 - `access_control` — `null` public / `{}` private / `{"read":{group_ids,user_ids}}`.
+
+`POST /api/v1/skills/preview` (skill editors; 2026-10-30) — body `{content,
+before?, after?, model_id?}` (unsaved values). Returns `{before: [{n, tool, args}],
+content: {text, segments, exact, chars}, after: […]}`: the content expanded **as the
+caller** with the same function as loading (`skills.expand_skill_content`), and
+`before` / `after` validated as on save (400) and listed in order — **not run**.
+`model_id` is the preset that gives `{{BASE_MODEL_ID}}` / `{{SKILLS}}` /
+`{{USER_RECIPES}}` (one the caller can use; otherwise 401 like a missing one);
+without it they are `Unknown` / empty. `segments` are as in
+`POST /api/v1/models/preview` (§4.2). The skill editor shows it as "Preview" next
+to the content.
 
 ### 6.2 Permissions (three tiers)
 

@@ -1,4 +1,6 @@
-from typing import Optional
+from typing import Any, Optional
+
+from pydantic import BaseModel
 
 from nucllei.models.skills import (
     SkillFieldError,
@@ -14,6 +16,7 @@ from nucllei.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from nucllei.utils.auth import get_verified_user
 from nucllei.utils.access_control import has_access, has_permission
+from nucllei.utils.models import check_model_access
 
 router = APIRouter()
 
@@ -129,6 +132,58 @@ async def create_new_skill(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=ERROR_MESSAGES.ID_TAKEN,
     )
+
+
+############################
+# PreviewSkill
+############################
+
+
+class SkillPreviewForm(BaseModel):
+    # 編集中 (未保存) の本文と before / after
+    content: str = ""
+    before: Any = None
+    after: Any = None
+    # {{BASE_MODEL_ID}}・{{SKILLS}}・{{USER_RECIPES}} の元にする preset (省略で無し)
+    model_id: Optional[str] = None
+
+
+@router.post("/preview")
+async def preview_skill(
+    request: Request, form_data: SkillPreviewForm, user=Depends(get_verified_user)
+):
+    """skill の編集画面のプレビュー (2026-10-30 ken): 編集中の本文をリクエストした本人として展開し、
+    before / after を書いた順に並べて返す (実行しない)。skill を編集できる人 (editor) だけ。
+    model_id の preset は本人が使えるもの (admin は全部)。"""
+    from nucllei.utils.prompt_preview import preview_skill as build_preview
+
+    if not _is_skill_editor(request, user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+    try:
+        before = normalize_hooks(form_data.before, "before")
+        after = normalize_hooks(form_data.after, "after")
+    except SkillFieldError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(str(e)),
+        )
+    model = None
+    if form_data.model_id:
+        model = request.app.state.MODELS.get(form_data.model_id)
+        try:
+            if model is None:
+                raise Exception("Model not found")
+            if user.role != "admin":
+                check_model_access(user, model)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
+    return await build_preview(user, form_data.content, before, after, model)
 
 
 ############################

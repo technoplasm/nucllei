@@ -59,8 +59,13 @@ def activate_skill(skill, user, model=None) -> str:
     build_load_skill_tool の load_tools フック(どちらも get_tools を
     enforce_access_control=False で呼ぶ — skill の read 可視性が認可の単位)。
     """
+    return expand_skill_content(skill.content, user, model)
+
+
+def expand_skill_content(content: str, user, model=None) -> str:
+    """skill の本文の変数を展開する (activate_skill と skill のプレビュー — utils/prompt_preview が通る)。"""
     return prompt_template(
-        skill.content,
+        content,
         **user_prompt_params(user),
         base_model_id=resolve_base_model_id(model),
         model=model,
@@ -791,11 +796,15 @@ def build_load_skill_tool(
 
     # render.result = skill(#20 のディスクリプタ駆動): フロントは {result, tools} を
     # パースし、result を markdown ハイライト + tools を一覧で描画する。
-    return {
+    entry = {
         "spec": spec,
         "callable": load_skill,
         "render": {"result": {"kind": "skill"}},
     }
+    if not listing_in_prompt:
+        # 利用者ごとに変わる部分 (説明の一覧と skill_id の enum) — system prompt のプレビューが印を付ける
+        entry["varies"] = {"description_from": len(base), "params": ["skill_id"]}
+    return entry
 
 
 def skill_activation_seed_block(skill_activations) -> dict:
