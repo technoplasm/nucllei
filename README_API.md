@@ -1953,7 +1953,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     is an `outcome` 「file_id … は文字が抜き出されていない (抽出に失敗した。content_type=…)」
     — the exception text the Attachment function stored in `data.content` is
     logged, not returned (until 2026-10-19 it was returned as the text). Both
-    "no text" outcomes end with the next step 「画像・PDF なら feed_image(file_id="…") で見る。それ以外で中身が要るなら send_to_workspace(file_id="…") で sandbox に取り込み、形式に合った道具で扱う。」
+    "no text" outcomes end with the next step 「画像・PDF なら feed_image(file_id="…") で見る (直接添付の画像は既に見えているので呼ばない)。それ以外で中身が要るなら send_to_workspace(file_id="…") で sandbox に取り込み、形式に合った道具で扱う。」
     (each clause only when its tool is on the turn; with neither, 「この
     file_id を読み直さない。中身が要る話なら、読めないことをユーザーに伝える。」).
   - `builtin_context_budget` — `get_context_budget()`: the current chat's

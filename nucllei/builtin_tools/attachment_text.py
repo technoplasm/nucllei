@@ -96,7 +96,12 @@ def _no_text_next(file_id: str) -> str:
     条件にする (決めつけない)。どれも無ければ、読めないことを伝える。"""
     steps = []
     if tool_in_turn("feed_image"):
-        steps.append(f'画像・PDF なら feed_image(file_id="{file_id}") で見る。')
+        # 直接添付の画像は既に見えている — 呼ばせない (説明から「テキスト層が無いファイルは読めない —
+        # 見るなら feed_image」を外したので、ここが言う。2026-10-30 batch 3 の敵対レビュー)
+        steps.append(
+            f'画像・PDF なら feed_image(file_id="{file_id}") で見る'
+            " (直接添付の画像は既に見えているので呼ばない)。"
+        )
     if tool_in_turn("send_to_workspace"):
         steps.append(
             f'それ以外で中身が要るなら send_to_workspace(file_id="{file_id}") で sandbox に'
@@ -115,17 +120,17 @@ class Tools:
         max_chars: int = DEFAULT_MAX_CHARS,
         __user__: Optional[dict] = None,
     ) -> dict:
-        """添付・生成物の抽出テキストを file_id から区切って読む (自分のファイルのみ)。
-        本文が既にこの会話に入っている添付 (`<source>` にあるもの) には呼ばない。
-        使うのは、本文が会話に入っていない file_id (大きすぎて読み込まれなかった添付・
-        tool やサブエージェントが作ったもの・instruction で file_id だけ渡されたもの) を読むときだけ。
-        長い文書は offset で続きを取る (next_offset が返る間は続きがある)。
-        テキスト層が無いファイルは読めない — 見るなら feed_image。
+        """添付・生成物の抽出テキストを file_id から区切って読む。使うのは本文がこの会話に入っていない
+        file_id (大きすぎて読み込まれなかった添付・tool やサブエージェントが作ったもの・file_id だけ渡された
+        もの) だけで、本文が既に入っている添付 (`<source>` にあるもの) には呼ばない。
 
-        :param file_id: 読むファイル。添付・生成物の id
-        :param offset: 読み始めの文字位置(省略時 0 = 先頭。続きは前回の next_offset)
-        :param max_chars: 1 回で返す最大文字数(省略時 40000)
+        :param file_id: 読むファイル。添付・生成物の file_id
+        :param offset: 読み始めの文字位置 (省略時 0 = 先頭)。続きは前回の next_offset (返る間は続きがある)
+        :param max_chars: 1 回で返す最大文字数 (省略時 40000、上限 60000)
         """
+        # 2026-10-30 (llens「tool の説明を削る」batch 3): 「自分のファイルのみ」は file_id_error、
+        # 「テキスト層が無いファイルは読めない — 見るなら feed_image」は抽出テキストが無いときの ERROR
+        # (`_no_text_next` — このターンにある tool で言う) が言う
         # 戻り値は {ok, file_id, filename, content_type, source, total_chars, offset, text,
         # next_offset?}。docstring には「いつ呼ぶか」だけを書く (2026-10-19 llens 監査 (2) で
         # 絞った。next_offset の意味だけは本文に残す)。spec ビルダは `:return:` をモデルに見せない

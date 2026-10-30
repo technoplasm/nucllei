@@ -821,7 +821,8 @@ class TestAttachmentText(AbstractPostgresTest):
             with pytest.raises(ToolError) as e:
                 Tools().read_attachment("aud-1", __user__={"id": "owner"})
         assert e.value.text.split("次の手: ", 1)[1] == (
-            '画像・PDF なら feed_image(file_id="aud-1") で見る。それ以外で中身が要るなら'
+            '画像・PDF なら feed_image(file_id="aud-1") で見る (直接添付の画像は既に見えているので呼ばない)。'
+            "それ以外で中身が要るなら"
             ' send_to_workspace(file_id="aud-1") で sandbox に取り込み、形式に合った道具で扱う。'
         )
 
@@ -855,7 +856,8 @@ class TestAttachmentText(AbstractPostgresTest):
             with pytest.raises(ToolError) as e:
                 Tools().read_attachment("bad-1", __user__={"id": "owner"})
         assert e.value.text.split("次の手: ", 1)[1] == (
-            '画像・PDF なら feed_image(file_id="bad-1") で見る。それ以外で中身が要るなら'
+            '画像・PDF なら feed_image(file_id="bad-1") で見る (直接添付の画像は既に見えているので呼ばない)。'
+            "それ以外で中身が要るなら"
             ' send_to_workspace(file_id="bad-1") で sandbox に取り込み、形式に合った道具で扱う。'
         )
 
@@ -865,15 +867,15 @@ class TestAttachmentText(AbstractPostgresTest):
         from nucllei.utils.tools import get_tool_specs
 
         (spec,) = get_tool_specs(Tools())
+        # 2026-10-30 (llens「tool の説明を削る」batch 3): 続きの取り方は offset の引数へ、自分のファイルのみ・
+        # テキスト層が無いものは ERROR (file_id_error / _no_text_next) へ
         assert spec["description"] == (
-            "添付・生成物の抽出テキストを file_id から区切って読む (自分のファイルのみ)。\n"
-            "本文が既にこの会話に入っている添付 (`<source>` にあるもの) には呼ばない。\n"
-            "使うのは、本文が会話に入っていない file_id (大きすぎて読み込まれなかった添付・\n"
-            "tool やサブエージェントが作ったもの・instruction で file_id だけ渡されたもの)"
-            " を読むときだけ。\n"
-            "長い文書は offset で続きを取る (next_offset が返る間は続きがある)。\n"
-            "テキスト層が無いファイルは読めない — 見るなら feed_image。"
+            "添付・生成物の抽出テキストを file_id から区切って読む。使うのは本文がこの会話に入っていない\n"
+            "file_id (大きすぎて読み込まれなかった添付・tool やサブエージェントが作ったもの・file_id だけ渡された\n"
+            "もの) だけで、本文が既に入っている添付 (`<source>` にあるもの) には呼ばない。"
         )
+        offset = spec["parameters"]["properties"]["offset"]["description"]
+        assert "next_offset (返る間は続きがある)" in offset
 
     def test_sync_registers_builtin_row(self):
         from nucllei.builtin_tools import sync_builtin_tools
