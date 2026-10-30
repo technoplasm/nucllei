@@ -11,6 +11,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
+	import SkillPreview from './SkillPreview.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -36,7 +37,7 @@
 
 	// llens(#43 Phase2b): id リネームは「旧 id 削除 → 新 id 作成」で差し替える(PK 不変)。
 	// 編集開始時の id を控え、変更があれば確認ダイアログを出す。
-	let originalId = '';
+	let originalId = $state('');
 	let showRenameConfirm = $state(false);
 
 	// tool_ids は admin のみ編集可(バックエンドが 401 を返すゲートと整合)。
@@ -56,6 +57,9 @@
 	const isAdmin = $derived($user?.role === 'admin');
 
 	let accessControl = $state<any>({});
+
+	// 本文の欄: 編集 | プレビュー(2026-10-30 ken「実際どのように展開されるかプレビューをタブで」)
+	let contentView = $state<'edit' | 'preview'>('edit');
 
 	// llens(#66): 編集できるのは自分の skill だけ(admin は全部)。他人の skill は閲覧のみ。
 	// ACL(公開範囲)を触れるのは admin のみ — editor の保存では server 側でも温存される。
@@ -352,11 +356,49 @@
 			</div>
 		{/if}
 
-		<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('Skill Content')}</div>
+		<div class="flex items-center justify-between gap-2 px-1 mb-1">
+			<div class="text-sm font-semibold">{$i18n.t('Skill Content')}</div>
+			<div
+				class="inline-flex gap-0.5 p-0.5 bg-surface-muted rounded-lg"
+				role="group"
+				aria-label={$i18n.t('Skill Content')}
+			>
+				{#each [{ view: 'edit', icon: 'i-lucide-pencil', label: $i18n.t('Edit') }, { view: 'preview', icon: 'i-lucide-eye', label: $i18n.t('Preview') }] as segment (segment.view)}
+					{@const active = contentView === segment.view}
+					<button
+						class="flex items-center gap-1.5 px-3 py-0.5 text-xs font-medium rounded-md transition {active
+							? 'bg-surface-raised text-content shadow-sm'
+							: 'text-content-muted hover:text-content'}"
+						type="button"
+						aria-pressed={active}
+						onclick={() => (contentView = segment.view as 'edit' | 'preview')}
+					>
+						<span class="{segment.icon} size-3.5 block"></span>
+						{segment.label}
+					</button>
+				{/each}
+			</div>
+		</div>
 	</div>
 
-	<!-- 縦が狭い画面ではエディタを潰さず(min-h-96)ページスクロールに逃がす(親 #workspace-container が overflow-y-auto) -->
-	<div class="flex-1 min-h-96 rounded-lg border border-line overflow-auto">
+	{#if contentView === 'preview'}
+		<div class="flex-1 min-h-96 rounded-lg border border-line overflow-auto px-2 py-2">
+			<SkillPreview
+				skillId={edit ? originalId : id}
+				content={() => _content}
+				before={() => hooks.before}
+				after={() => hooks.after}
+			/>
+		</div>
+	{/if}
+
+	<!-- 縦が狭い画面ではエディタを潰さず(min-h-96)ページスクロールに逃がす(親 #workspace-container が overflow-y-auto)。
+	     プレビュー中は隠すだけ(unmount すると CodeEditor の中身を作り直す) -->
+	<div
+		class="flex-1 min-h-96 rounded-lg border border-line overflow-auto {contentView === 'edit'
+			? ''
+			: 'hidden'}"
+	>
 		<CodeEditor
 			id="skill"
 			lang="markdown"
@@ -382,7 +424,7 @@
 
 	<div class="pb-3 flex justify-start items-center gap-3">
 		<button
-			class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-lg {loading ||
+			class="shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-lg {loading ||
 			!canEdit
 				? ' cursor-not-allowed opacity-50'
 				: ''} flex items-center"

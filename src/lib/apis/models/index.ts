@@ -235,3 +235,56 @@ export const deleteAllModels = async () => {
 
 	return res;
 };
+
+// 編集中 (未保存) の preset で新しいチャットを始めたときにモデルへ渡る tools と system prompt を、
+// 自分として展開して返す (POST /models/preview — admin のみ。実行はしない)
+export type PreviewSegment = {
+	text: string;
+	// fixed = preset ごとに固定 / user = 利用者ごと / time = 日時で変わる / preset = preset の値
+	scope: 'fixed' | 'user' | 'time' | 'preset';
+	variable?: string;
+};
+
+export type PreviewText = {
+	text: string;
+	segments: PreviewSegment[];
+	// false = 断片に切れなかった (変数の値が前後とつながって別の変数になった等)。全体を 1 つで返す
+	exact: boolean;
+	chars: number;
+};
+
+export type PreviewTool = {
+	name: string;
+	tool_id?: string | null;
+	description: string;
+	parameters: Record<string, unknown>;
+	chars: number;
+	// 利用者ごとに変わる部分: 説明の description_from 文字目以降・params の enum・spec 全体 (overridden)
+	varies?: { description_from?: number; params?: string[]; overridden?: boolean } | null;
+};
+
+export type ModelPreview = {
+	tools: PreviewTool[];
+	tools_chars: number;
+	system: PreviewText;
+};
+
+export const previewModel = async (
+	model: object,
+	// 値が undefined のキーは JSON に載らない (チャットの送信と同じ)
+	variables: Record<string, string | undefined> = {}
+): Promise<ModelPreview> => {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/models/preview`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ model, variables })
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({}));
+		throw err?.detail ?? `${res.status}`;
+	}
+	return res.json();
+};

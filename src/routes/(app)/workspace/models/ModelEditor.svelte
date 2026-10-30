@@ -19,6 +19,7 @@
 	import SubagentPresetsSelector from './SubagentPresetsSelector.svelte';
 	import FunctionsSelector from './FunctionsSelector.svelte';
 	import Capabilities from './Capabilities.svelte';
+	import SystemPromptPreview from './SystemPromptPreview.svelte';
 	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -38,6 +39,8 @@
 
 	// 基本設定 | プロンプト | 高度なパラメータ(Admin > Users の様式)
 	let selectedTab = $state('general');
+	// プロンプトタブの System Prompt 欄: 編集 | プレビュー(2026-10-30 ken「実際どのように展開されるか」)
+	let systemView = $state<'edit' | 'preview'>('edit');
 
 	let loading = $state(false);
 	let loaded = $state(false);
@@ -127,6 +130,7 @@
 			filterIds,
 			actionIds,
 			featureSkills,
+			featureRecipes,
 			accessControl
 		});
 	};
@@ -143,6 +147,7 @@
 			filterIds = s.filterIds;
 			actionIds = s.actionIds;
 			featureSkills = s.featureSkills;
+			featureRecipes = s.featureRecipes;
 			accessControl = s.accessControl;
 		}
 		selectedTab = tab;
@@ -711,8 +716,36 @@
 									</div>
 								</div>
 
-								<div class="text-sm font-semibold px-1 mb-1">{$i18n.t('System Prompt')}</div>
-								<div class="flex-1 min-h-0 rounded-xs border border-line overflow-auto">
+								<div class="flex items-center justify-between gap-2 px-1 mb-1">
+									<div class="text-sm font-semibold">{$i18n.t('System Prompt')}</div>
+									<div
+										class="inline-flex gap-0.5 p-0.5 bg-surface-muted rounded-lg"
+										role="group"
+										aria-label={$i18n.t('System Prompt')}
+									>
+										{#each [{ view: 'edit', icon: 'i-lucide-pencil', label: $i18n.t('Edit') }, { view: 'preview', icon: 'i-lucide-eye', label: $i18n.t('Preview') }] as segment (segment.view)}
+											{@const active = systemView === segment.view}
+											<button
+												class="flex items-center gap-1.5 px-3 py-0.5 text-xs font-medium rounded-md transition {active
+													? 'bg-surface-raised text-content shadow-sm'
+													: 'text-content-muted hover:text-content'}"
+												type="button"
+												aria-pressed={active}
+												onclick={() => (systemView = segment.view as 'edit' | 'preview')}
+											>
+												<span class="{segment.icon} size-3.5 block"></span>
+												{segment.label}
+											</button>
+										{/each}
+									</div>
+								</div>
+								<!-- エディタは隠すだけ(unmount すると CodeEditor の中身を作り直す) -->
+								<div
+									class="flex-1 min-h-0 rounded-xs border border-line overflow-auto {systemView ===
+									'edit'
+										? ''
+										: 'hidden'}"
+								>
 									<CodeEditor
 										value={info.params.system ?? ''}
 										lang="markdown"
@@ -725,6 +758,18 @@
 										}}
 									/>
 								</div>
+								{#if systemView === 'preview'}
+									<div class="flex-1 min-h-0 overflow-auto px-1">
+										<SystemPromptPreview
+											model={() => ({
+												...$state.snapshot(info),
+												id: id || info.id,
+												name: name || info.name
+											})}
+											hasFilters={filterIds.length > 0}
+										/>
+									</div>
+								{/if}
 							{:else if selectedTab === 'advanced'}
 								<div class="my-2">
 									<AdvancedParams

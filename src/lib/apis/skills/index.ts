@@ -1,5 +1,6 @@
 import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import type { PreviewText } from '$lib/apis/models';
 
 // Skill は Prompt の後継(issue #35)。llens(#43): 可読キーは id 一本(旧 command)。
 // id が /command 発火キー兼 PK でバックエンドが先頭 `/` なしに正規化する。表示名は name(旧 title)。
@@ -184,4 +185,34 @@ export const deleteSkillById = async (id: string) => {
 	}
 
 	return res;
+};
+
+// 編集中 (未保存) の skill の本文を自分として展開し、before / after を書いた順に並べる
+// (POST /skills/preview — skill を編集できる人。before / after は実行しない)。
+// model_id の preset が {{BASE_MODEL_ID}}・{{SKILLS}}・{{USER_RECIPES}} の元になる
+export type SkillPreview = {
+	before: (SkillHook & { n: number })[];
+	content: PreviewText;
+	after: (SkillHook & { n: number })[];
+};
+
+export const previewSkill = async (body: {
+	content: string;
+	before?: unknown;
+	after?: unknown;
+	model_id?: string | null;
+}): Promise<SkillPreview> => {
+	const res = await apiFetch(`${WEBUI_API_BASE_URL}/skills/preview`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(body)
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({}));
+		throw err?.detail ?? `${res.status}`;
+	}
+	return res.json();
 };
