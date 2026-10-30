@@ -363,11 +363,13 @@ def test_large_file_is_read_by_range_not_whole():
     tool.read_bytes = 0
     n = len(tool.calls)
     head, body, _, _ = _page(tool, "/workspace/huge.log", offset=2_000_000 * len(line))
-    assert tool.read_bytes <= 64 * 1024 + 40000 * 4
+    # + 1: offset の直前の 1 バイト (行の途中から読んだかを見る — 2026-10-30 batch 2)
+    assert tool.read_bytes <= 64 * 1024 + 40000 * 4 + 1
     assert body.startswith("あいうえお,12345\n")
     reads = [c[1] for c in tool.calls[n:] if c[0] == "/files/read"]
-    assert [r["offset"] for r in reads] == [0, 2_000_000 * len(line)]
-    assert all(r["length"] <= 40000 * 4 for r in reads)
+    # 2 つ目は offset の直前の 1 バイトから (行の途中から読んだかを見る — 2026-10-30 batch 2)
+    assert [r["offset"] for r in reads] == [0, 2_000_000 * len(line) - 1]
+    assert all(r["length"] <= 40000 * 4 + 1 for r in reads)
 
 
 def test_pages_cut_at_line_breaks_and_chain_without_gaps():
@@ -422,8 +424,8 @@ def test_offset_errors():
     tool = _tool("あいう\n".encode("utf-8"))
     out = _read(tool, "/workspace/a.txt", offset=10)
     assert out == (
-        "ERROR: offset 10 は末尾を越えている (/workspace/a.txt は全 10 バイト)。"
-        "次の手: offset を 0〜9 で渡す。"
+        "ERROR: offset 10 は末尾を越えている (/workspace/a.txt は全 10 バイト。末尾まで読み終えている)。"
+        "次の手: 先頭から読み直すなら offset を省く。"
     )
     # UTF-8 の文字の途中は断る
     out = _read(tool, "/workspace/a.txt", offset=1)
@@ -518,8 +520,25 @@ def test_spec_and_no_static_result_declaration():
     spec = next(s for s in get_tool_specs(Tools()) if s["name"] == "read_file")
     assert list(spec["parameters"]["properties"]) == ["path", "offset", "max_chars"]
     assert spec["parameters"]["required"] == ["path"]
-    assert "sandbox の絶対パス (`/workspace/…`)。" in (
+    assert "sandbox の絶対パス (`/workspace/…`" in (
         spec["parameters"]["properties"]["path"]["description"]
     )
+    # 説明は何をするか・いつ使うかだけ (2026-10-30 llens「tool の説明を削る」batch 2) — 文字コード・
+    # 続き・CSV の見出し・テキストでないものは結果 / ERROR が言う
+    desc = spec["description"]
+    assert "run_shell の cat ではなくこちら" in desc
+    for gone in ("next_offset", "見出し", "PDF", "edit_file", "write_file と対"):
+        assert gone not in desc, gone
     # 戻り型 Rendered は静的な結果宣言を作らない(FE は宣言を値の render より優先する)
     assert "result" not in extract_render_from_function(Tools().read_file)
+
+
+def test_offset_inside_a_line_is_said_in_the_result():
+    """next_offset 以外の offset (行の途中) で読んだら結果の先頭行が言う (説明から外した「それ以外の値は
+    行の途中から」— 2026-10-30 batch 2)。next_offset (行の切れ目の直後) では言わない。"""
+    tool = _tool(b"alpha\nbeta\ngamma\n")
+    out = _read(tool, "/workspace/a.txt", offset=2).text
+    assert "offset 2 は行の途中なので、最初の行は途中から始まる" in out
+    assert "pha\nbeta" in out
+    out = _read(tool, "/workspace/a.txt", offset=6).text
+    assert "行の途中" not in out and "beta\ngamma" in out

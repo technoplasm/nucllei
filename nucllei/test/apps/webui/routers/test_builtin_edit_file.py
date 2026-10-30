@@ -347,4 +347,4 @@ def test_spec():
         assert gone not in desc, gone
     # write_file / read_file から「一部だけ直すなら edit_file」へ向ける
     assert "一部だけを直すなら edit_file" in specs["write_file"]["description"]
-    assert "一部だけを直すなら edit_file" in specs["read_file"]["description"]
+    # read_file からは外した (2026-10-30 batch 2 — 選び違えるのは write_file の側)

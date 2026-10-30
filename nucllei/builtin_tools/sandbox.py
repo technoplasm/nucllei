@@ -2103,18 +2103,17 @@ class Tools:
         __user__: Optional[dict] = None,
     ) -> Rendered:
         """
-        sandbox のテキストファイルを読む (write_file と対)。UTF-8 (BOM 付き可) と cp932 を読み、
-        読んだ文字コードを先頭行に添える。大きなファイルも読める — 1 回に返すのは max_chars 字までで、
-        行の切れ目で切る (1 行が max_chars を超えるときだけ行の途中で切り、そう書く)。末尾に
-        next_offset が出る間は続きがある。.csv / .tsv はレコードの切れ目 (引用符の外の改行) で切り、
-        2 回目以降は先頭に 1 行目 (見出し) を付け直す。画像・PDF・Office 文書などテキストでないものは
-        読まない。ファイルを読むだけなら run_shell の cat ではなくこちらを使う。読んだファイルの
-        一部だけを直すなら edit_file を使う。
+        sandbox のテキストファイル (UTF-8・cp932) を読む。1 回に max_chars 字まで、行の切れ目で区切って
+        返す。ファイルを読むだけなら run_shell の cat ではなくこちらを使う。
 
-        :param path: 読むファイル。sandbox の絶対パス (`/workspace/…`)。見える共有の置き場 `/ext/groups/<グループ名>/…` `/ext/public/…` も読める。
-        :param offset: 読み始めのバイト位置 (省略時 0 = 先頭)。続きを読むときは前回の next_offset をそのまま渡す (それ以外の値は行の途中から読むことになり、文字の途中なら断る)
+        :param path: 読むファイル。sandbox の絶対パス (`/workspace/…`・`/ext/groups/<グループ名>/…`・`/ext/public/…`)
+        :param offset: 読み始めのバイト位置 (省略時 0 = 先頭)。続きは前回の next_offset をそのまま渡す
         :param max_chars: 1 回で返す最大文字数 (省略時 40000、上限 60000)
         """
+        # 説明から外した細目 (2026-10-30 llens「tool の説明を削る」batch 2) は結果・ERROR が言う: 文字コードは
+        # 先頭行、続きは末尾の next_offset、行の途中で切ったこと・CSV / TSV の見出しの付け直しは結果、
+        # テキストでないもの・next_offset 以外の offset で文字の途中は ERROR、一部を直すなら edit_file は
+        # write_file / edit_file の説明
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         try:
@@ -2195,8 +2194,8 @@ class Tools:
         size = st.get("size") if isinstance(st.get("size"), int) else 0
         if offset > size or (offset == size and size > 0):
             raise ToolOutcome(
-                f"offset {offset} は末尾を越えている ({abs_path} は全 {size} バイト)",
-                f"offset を 0〜{max(size - 1, 0)} で渡す。",
+                f"offset {offset} は末尾を越えている ({abs_path} は全 {size} バイト。末尾まで読み終えている)",
+                "先頭から読み直すなら offset を省く。",
             )
 
         async def read_range(start: int, length: int) -> bytes:
@@ -2252,8 +2251,16 @@ class Tools:
                     header = ""
         budget = max_chars - len(header)
 
+        # next_offset は行 (CSV / TSV はレコード) の切れ目の直後 — それ以外の offset で読んだら、直前の
+        # 1 バイトで行の途中から始まったと分かるので結果に言う (説明から外した「それ以外の値は行の
+        # 途中から」— 2026-10-30 batch 2、敵対レビュー)
+        mid_start = False
         if offset == 0:
             chunk = head[start : start + need]
+        elif start > bom:
+            pre = await read_range(start - 1, need + 1)
+            mid_start = pre[:1] != b"\n"
+            chunk = pre[1:]
         else:
             chunk = await read_range(start, need)
         if codec == "utf-8" and chunk and 0x80 <= chunk[0] <= 0xBF:
@@ -2275,6 +2282,11 @@ class Tools:
         if header:
             head_line += (
                 "。先頭に 1 行目 (見出し) を付け直した (この範囲には含まれない)"
+            )
+        if mid_start:
+            head_line += (
+                f"。offset {offset} は行の途中なので、最初の行は途中から始まる"
+                " (続きを読むなら前回の next_offset をそのまま渡す)"
             )
         body = f"{head_line}\n\n{header}{window}"
         if midline:
