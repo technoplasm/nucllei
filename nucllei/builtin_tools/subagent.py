@@ -118,7 +118,7 @@ class Tools:
     ) -> Annotated[Union[dict, str], RenderAs(kind="subagent")]:
         """サブエージェントを起動し、instruction を 1 ターン実行させる。
 
-        :param preset_id: 起動する preset の id。新規セッション時は必須(session_id 継続時は不要)。
+        :param preset_id: 新しく起動するときは必須 — 説明の「利用可能な preset」の id(session_id で続けるときは不要)。
         :param instruction: サブエージェントへの指示。
         :param session_id: 続けたい子の結果の session_id(子は前のやりとりを覚えているので、追いの instruction だけを送る。省略で新規セッション)。
         :return: {ok, session_id, answer, truncated?, note?, usage?, error?}

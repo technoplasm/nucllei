@@ -737,9 +737,24 @@ async def run_subagent_turn(
         else:
             # 新規 spawn
             if not preset_id:
-                raise ToolCallError(
-                    "preset_id が無い", "新しく起動するときは preset_id を指定する。"
-                )
+                # この利用者・この preset で使える子が 1 つだけなら、それで起動する (2026-10-30 staging P05:
+                # 並べた 3 本とも preset_id を省いて ERROR — 選びようの無い引数で呼び直させない)。
+                # 2 つ以上なら、渡せる id を ERROR に挙げる (一覧を探し直させない)
+                # (1 つのときに省いてよいことはモデルには言わない — 「必須」と食い違い、2 つ以上でも省く
+                # 誘因になる)。0 件 (ターンの途中で権限が外れた等) は起動できない
+                if len(accessible) == 1:
+                    preset_id = next(iter(accessible))
+                elif not accessible:
+                    raise ToolFailure(
+                        "サブエージェントに使える preset が無い", "自分で処理する。"
+                    )
+                else:
+                    raise ToolCallError(
+                        "preset_id が無い (新しく起動するときは必須)",
+                        "preset_id に "
+                        + " / ".join(accessible)
+                        + " のどれかを入れて呼び直す。",
+                    )
             preset = accessible.get(preset_id)
             if preset is None:
                 raise ToolCallError(

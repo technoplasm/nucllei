@@ -2578,6 +2578,12 @@ shared note, so deployment prompts need not repeat it.
   `session_id` / `preset_id`, concurrency or depth limit, …) raises a §5.1
   `ToolError` instead. Pass `session_id` instead
   of `preset_id` to send a follow-up instruction to an existing session.
+  A new spawn without `preset_id` uses the only usable preset when there is
+  exactly one (2026-10-30, staging P05 — not stated to the model, since the
+  param says it is required for a new spawn); with two or more it fails with
+  「preset_id が無い (新しく起動するときは必須)。次の手: preset_id に a / b のどれかを入れて呼び直す。」
+  (the same ids as the enum); with none, 「サブエージェントに使える preset が無い。次の手: 自分で処理する。」.
+  `preset_id` stays optional in the schema (a continuation does not need it).
   While it runs, the call's `tool:progress` carries
   `subagent: {session_id, task_id?}` (§4.3 stream events) so a client can follow the
   child turn live before the result exists (the web UI renders the child's

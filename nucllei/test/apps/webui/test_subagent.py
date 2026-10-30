@@ -811,10 +811,44 @@ class TestRunSubagent(AbstractPostgresTest):
             assert subagent._active_turns == 0  # エラー経路でもカウンタ解放
             assert not subagent._slot_waiters
 
-        # instruction 空 / 新規で preset_id 無しも call の ToolError(#145)
+        # instruction 空は call の ToolError(#145)
         assert _raised(tool["callable"](instruction="  ")).kind == "call"
-        result = _raised(tool["callable"](instruction="x"))
-        assert "preset_id" in result.text
+
+    def test_preset_id_defaults_to_the_only_usable_preset(self, monkeypatch):
+        """新規起動で preset_id を省いたとき: 使える preset が 1 つならそれで起動、2 つ以上なら渡せる id を
+        挙げた ERROR (2026-10-30 staging P05: 並べた 3 本とも preset_id を省いて ERROR)。継続 (session_id) では
+        子の preset を使うので要らない。"""
+        from nucllei.models.models import ModelForm
+
+        self._patch_child_pipeline(monkeypatch)
+        tool = self._build_tool()
+        result = asyncio.run(tool["callable"](instruction="1+1 は?"))
+        assert result["ok"] is True
+        child = self.Chats.get_chat_by_id(result["session_id"])
+        assert child.chat["models"] == ["researcher"]
+
+        self.Models.insert_new_model(
+            ModelForm(
+                id="writer",
+                name="Writer",
+                meta={"description": "まとめ担当"},
+                params={},
+                access_control=None,
+            ),
+            "1",
+        )
+        tool = self._build_tool(model=self._parent_model(("researcher", "writer")))
+        failed = _raised(tool["callable"](instruction="x"))
+        assert failed.kind == "call"
+        assert failed.text == (
+            "ERROR: preset_id が無い (新しく起動するときは必須)。"
+            "次の手: preset_id に researcher / writer のどれかを入れて呼び直す。"
+        )
+        # 継続は preset_id 無しで子の preset のまま
+        again = asyncio.run(
+            tool["callable"](instruction="続き", session_id=result["session_id"])
+        )
+        assert again["ok"] is True and again["session_id"] == result["session_id"]
 
     def test_continuation_rejected_after_cascade_delete(self, monkeypatch):
         # cascade 削除済みの子への追いメッセージは拒否(deleted_at IS NULL 検証)
