@@ -281,6 +281,11 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         assert [c["title"] for c in out] == ["旅行の計画"]
         # 一致箇所の抜粋 (発言者 + 前後の文脈) が付く — grep_doc と同じく何がヒットしたか見せる
         assert out[0]["matches"] == [{"role": "user", "excerpt": "京都に行きたい"}]
+        assert "matches_note" not in out[0]
+        # タイトルだけの一致は抜粋が空 — その旨をヒットに添える (2026-10-30 batch 5)
+        out = Tools().grep_history("旅行", __user__={"id": "owner"})
+        assert out[0]["matches"] == []
+        assert out[0]["matches_note"] == "本文の抜粋は無い (タイトルだけの一致)"
 
     def test_grep_history_excludes_the_current_chat(self):
         """検索を頼んだ発言 (「『京都』で検索して」) 自身がヒットしないよう、進行中の
@@ -295,6 +300,13 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
             "京都", __user__={"id": "owner"}, __chat_id__=current.id
         )
         assert [c["title"] for c in out] == ["旅行の計画"]
+        # 進行中のチャットにしか無ければ、外したことを言う (「履歴に無い」と言い切らない — 2026-10-30)
+        out = Tools().grep_history(
+            "チャット履歴", __user__={"id": "owner"}, __chat_id__=current.id
+        )
+        assert out == (
+            "「チャット履歴」に一致するチャットは見つからなかった (いま進行中のチャットは検索しない)。"
+        )
         # __chat_id__ 無し (ツール外からの呼び出し) では従来どおり両方
         out = Tools().grep_history("京都", __user__={"id": "owner"})
         assert len(out) == 2
@@ -312,6 +324,11 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         )
         out = Tools().grep_history("report", __user__={"id": "owner"})
         assert len(out) == 1 and len(out[0]["matches"]) == 3
+        # 上限で切ったことはヒットに添える (説明の「最大 3 件」を外した代わり — 2026-10-30 batch 5)
+        assert (
+            out[0]["matches_note"]
+            == "抜粋は最初の 3 件まで (他にも一致があるかもしれない)"
+        )
         first = out[0]["matches"][0]
         assert first["role"] == "user" and first["excerpt"].startswith("…")
         assert "Report" in first["excerpt"] and first["excerpt"].endswith("…")

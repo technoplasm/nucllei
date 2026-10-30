@@ -1934,6 +1934,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     the calling user's own chats. `grep_history` hits carry `matches` (up to 3
     per chat: `{role, excerpt}` with ±60 chars of context around the match,
     NFKC + casefold matching; empty when only the title matched — 2026-10-03).
+    Since 2026-10-30 a hit whose excerpts hit the cap or are empty carries
+    `matches_note` (「抜粋は最初の 3 件まで (他にも一致があるかもしれない)」 /
+    「本文の抜粋は無い (タイトルだけの一致)」) instead of the description saying
+    so, and "not found" with a current chat adds 「(いま進行中のチャットは検索しない)」.
   - `builtin_chat_files` — `list_chat_files` / `grep_chat_files`: attachments
     issued in the current chat, metadata only. An entry with `deleted: true` is
     a deleted file whose `file_id` no longer opens — the docstrings say so

@@ -154,10 +154,9 @@ class Tools:
         __user__: Optional[dict] = None,
         __chat_id__: Optional[str] = None,
     ) -> list | str:
-        """自分のチャット履歴をテキスト検索し、ヒットした一覧を返す。各ヒットには一致箇所の
-        抜粋 (`matches`: 発言者と前後の文脈、最大 3 件) が付くので、どのチャットが目的の物かは
-        抜粋で判断し、全文が要るときだけ read_history で読む。いま進行中のチャットは対象外
-        (検索を頼んだ発言自身がヒットするのを避ける)。
+        """自分のチャット履歴をテキスト検索する。各ヒットに一致箇所の抜粋 (`matches`) が付くので、
+        どのチャットが目的かは抜粋で判断し、全文が要るときだけ read_history で読む。いま進行中の
+        チャットは対象外。
 
         :param query: 検索文字列(タイトル・本文を対象)
         :param limit: 返す件数の上限(省略時 20)
@@ -182,15 +181,26 @@ class Tools:
             if len(items) >= limit:
                 break
             matches = _excerpts(c, query)
-            items.append(
-                {
-                    "chat_id": c.id,
-                    "title": c.title,
-                    "updated_at": _fmt_time(c.updated_at),
-                    # 本文に一致が無い (タイトルだけの一致) は空 — モデルにはその旨が分かる
-                    "matches": matches,
-                }
-            )
+            item = {
+                "chat_id": c.id,
+                "title": c.title,
+                "updated_at": _fmt_time(c.updated_at),
+                "matches": matches,
+            }
+            # 抜粋の上限・空の意味は、その場合だけヒットに添える (2026-10-30 llens「tool の説明を削る」
+            # batch 5 — 説明の「最大 3 件」を外した代わり。敵対レビュー: 3 件を全出現と数える・空を
+            # 壊れた結果と見る)
+            if len(matches) >= MAX_MATCHES_PER_CHAT:
+                item["matches_note"] = (
+                    f"抜粋は最初の {MAX_MATCHES_PER_CHAT} 件まで (他にも一致があるかもしれない)"
+                )
+            elif not matches:
+                item["matches_note"] = "本文の抜粋は無い (タイトルだけの一致)"
+            items.append(item)
         if not items:
-            return f"「{query}」に一致するチャットは見つからなかった。"
+            return (
+                f"「{query}」に一致するチャットは見つからなかった"
+                + (" (いま進行中のチャットは検索しない)" if __chat_id__ else "")
+                + "。"
+            )
         return items
