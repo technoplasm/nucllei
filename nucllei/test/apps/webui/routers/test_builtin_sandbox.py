@@ -917,7 +917,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         # exports/ も普通の置き場 — 書くだけで添付しない (自動添付は 2026-10-19 に廃止)
         out = _arun(tool.write_file("/workspace/exports/r.html", "<p>", __user__=user))
-        assert out == "/workspace/exports/r.html に書き込んだ (3B)。"
+        assert out == "/workspace/exports/r.html に書き込んだ (UTF-8、3B)。"
 
     def test_workspace_paths_are_absolute_in_and_out(self):
         """3 本とも /workspace/ の絶対パスだけを受け、戻り値も絶対。sandbox の wire
@@ -2315,10 +2315,11 @@ def test_docstrings_drop_example_paths_and_internal_words():
         assert "例:" not in path_desc(name), name
     assert "/workspace/work/" not in path_desc("write_file")
     assert "/workspace/out/" not in path_desc("fetch_from_workspace")
-    # write_file: 管理者はすべてのグループの置き場と /ext/public/ に書ける (クラス docstring と同じ言い方)
-    assert (
-        "(管理者はすべてのグループの置き場と `/ext/public/…` にも書ける)"
-        in path_desc("write_file")
+    # write_file: 管理者はすべてのグループの置き場と /ext/public/ に書ける — 2026-10-30 から toolkit
+    # 共通注記 (クラス docstring) だけが言う (llens「tool の説明を削る」batch 2)
+    assert "`/ext/groups/<グループ名>/…`" in path_desc("write_file")
+    assert "管理者はすべてのグループの置き場と `/ext/public/` に書ける" in re.sub(
+        r"\s*\n\s*", "", Tools.__doc__
     )
     assert "unar (書庫の展開) / zip" in specs["run_shell"]["description"]
     assert "unzip" not in specs["run_shell"]["description"]

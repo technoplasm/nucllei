@@ -1791,16 +1791,16 @@ class Tools:
         __user__: Optional[dict] = None,
     ) -> str:
         """
-        テキストファイルを sandbox の /workspace に直接書く。HTML・Markdown・CSV・
-        テンプレート・設定ファイルなど、本文をそのまま渡したいときに使う。
-        run_python の文字列や run_shell のヒアドキュメントに本文を埋め込むと
-        クォート・エスケープの事故が起きるので、**ファイルを作るだけならこちらを使う**。
-        既存ファイルは上書きする。テキスト専用 (バイナリは扱えない)。
-        既存ファイルの一部だけを直すなら edit_file を使う (全文を書き直さない)。
+        テキストファイルを sandbox に書く (既存ファイルは上書き)。HTML・Markdown・CSV・設定ファイルなど
+        本文をそのまま渡したいときに使い、run_python の文字列や run_shell のヒアドキュメントに埋め込まない
+        (クォート・エスケープの事故が起きる)。既存ファイルの一部だけを直すなら edit_file を使う。
 
-        :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`)。所属グループの置き場 `/ext/groups/<グループ名>/…` にも書ける (管理者はすべてのグループの置き場と `/ext/public/…` にも書ける)。
+        :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`・`/ext/groups/<グループ名>/…`。管理者は `/ext/public/…` も)
         :param content: ファイルの中身 (テキストそのまま)
         """
+        # 説明から外した細目 (2026-10-30 llens「tool の説明を削る」batch 2): 管理者が全グループと
+        # /ext/public に書けることは toolkit 共通注記 (2026-10-19 llens 監査 (4) の要件はそちらで満たす)、
+        # 書けない置き場は _write_target の ERROR、大きすぎるは下の ERROR
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         abs_path, target, ext = self._write_target(path, __user__)
@@ -1814,7 +1814,7 @@ class Tools:
                 "run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。",
             )
         await self._write_bytes(abs_path, target, ext, data, __user__)
-        return f"{abs_path} に書き込んだ ({_human_size(len(data))})。"
+        return f"{abs_path} に書き込んだ (UTF-8、{_human_size(len(data))})。"
 
     def _write_target(
         self, path: str, user: dict, allow_dir: bool = False
