@@ -42,7 +42,15 @@ LOADED_RECIPE_RESULT = (
     "次の手: 上のレシピに従って作業を続ける。"
 )
 RECIPES_LOADED_KEY = "_recipes_loaded"
-RECIPE_PARTS_DONE_KEY = "_recipe_parts_done"
+RECIPE_PARTS_DONE_KEY = (
+    "_recipe_parts_done"  # {key: そのキーを requires に持つレシピのフォルダ}
+)
+RECIPES_RESET_KEY = (
+    "_recipes_reset"  # このリクエストで save / edit したレシピ (履歴の印を外す)
+)
+# requires の 1 要素の状態 (`<recipe-part … status="…">` — tool だけが付けられる印。資料の中の
+# `<recipe` は _defuse で潰すので偽造できない)。「読み込み済み」に数えるのは ok だけ
+PART_OK, PART_LOADED, PART_WARNING, PART_ERROR = "ok", "loaded", "warning", "error"
 # requires の recipe: の入れ子の深さの上限 (循環は「読み込み済み」で止まるので保険)
 RECIPE_MAX_DEPTH = 8
 # フォルダの読み出しの上限 (付属を含む合計)
@@ -67,19 +75,37 @@ def _ref_or_error(path: str):
 
 @dataclass
 class _Marks:
-    """この chat で読み込み済みのレシピ (フォルダ) と requires の要素 (key)。"""
+    """この chat で読み込み済みのレシピ (フォルダ) と requires の要素 (key → その要素を requires に
+    持つレシピのフォルダ = owner)。owner は save / edit で直したレシピの印だけを外すのに使う。"""
 
     folders: set = field(default_factory=set)
-    keys: set = field(default_factory=set)
+    keys: dict = field(default_factory=dict)
     broken: list = field(default_factory=list)  # 最後に壊れていたレシピの理由
+
+    def reset(self, folder: str) -> None:
+        """`folder` のレシピを直した — そのレシピと、それが requires に持つ要素の印を外す (次の
+        load_recipe は新しい版を最初から返す)。別のレシピの印は残す。"""
+        self.folders.discard(folder)
+        for key in [k for k, owner in self.keys.items() if owner == folder]:
+            del self.keys[key]
 
 
 def _attr(v: str) -> str:
-    return v.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+    return (
+        v.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 def _unattr(v: str) -> str:
-    return v.replace("&lt;", "<").replace("&quot;", '"').replace("&amp;", "&")
+    return (
+        v.replace("&gt;", ">")
+        .replace("&lt;", "<")
+        .replace("&quot;", '"')
+        .replace("&amp;", "&")
+    )
 
 
 _FRAME_TAG = re.compile(r"<(/?recipe)", re.IGNORECASE)
@@ -95,12 +121,26 @@ def _defuse(text: str) -> str:
     return _FRAME_TAG.sub(r"&lt;\1", text)
 
 
+_RE_LOADED = re.compile(r'<recipe path="([^"]*)"')
+_RE_PART_OK = re.compile(
+    r'<recipe-part key="([^"]*)" owner="([^"]*)" status="' + PART_OK + '"'
+)
+_RE_RESET = re.compile(r'<recipe-reset path="([^"]*)">')
+# 「読み込み済み」の印を外す (reset) のは、直した tool の結果だけ
+_RESET_TOOLS = ("save_recipe", "edit_recipe")
+
+
 def _history_marks(messages) -> _Marks:
-    """履歴の load_recipe の結果に出ている印から、読み込み済みのレシピと requires の要素を集める。
-    結果の中の `<recipe path="…">` (読み込んだレシピの本文の枠) と `<recipe-part key="…">` (実行した
-    要素) だけを見る — load_recipe 以外の結果 (利用者が貼った文・ファイルの中身) の同じ文字列は見ない。
-    load_recipe の結果の中に入る利用者由来の文字列は `_defuse` 済みなので、そこに書かれた印も数えない。"""
-    ids, texts = set(), []
+    """履歴の印から、読み込み済みのレシピと requires の要素を集める (前から順に)。
+
+    - load_recipe の結果の `<recipe path="…">` (本文を渡したレシピ) と
+      `<recipe-part key="…" owner="…" status="ok">` (実行した要素) を足す。status が ok 以外
+      (loaded / warning / error) は数えない
+    - save_recipe / edit_recipe の結果の `<recipe-reset path="…">` で、それより前のそのレシピの印を
+      外す (直した後の load_recipe は新しい版を返す — 2026-10-30 llens)
+    見るのはその tool の結果だけ — 利用者が貼った文や他の tool の結果の同じ文字列は見ない。結果の中に
+    入る利用者由来の文字列は `_defuse` 済みなので、そこに書かれた印も数えない。"""
+    names, texts = {}, []
     for message in messages or []:
         calls = list(message.get("tool_calls") or [])
         for block in message.get("content_blocks") or []:
@@ -112,21 +152,60 @@ def _history_marks(messages) -> _Marks:
                 for r in block.get("results") or []
             )
         for call in calls:
-            if ((call or {}).get("function") or {}).get("name") == "load_recipe":
-                ids.add(call.get("id"))
+            name = ((call or {}).get("function") or {}).get("name")
+            if name == "load_recipe" or name in _RESET_TOOLS:
+                names[call.get("id")] = name
         if message.get("role") == "tool":
             texts.append((message.get("tool_call_id"), message.get("content")))
     marks = _Marks()
     for call_id, content in texts:
-        if call_id not in ids or not isinstance(content, str):
+        name = names.get(call_id)
+        if name is None or not isinstance(content, str):
             continue
-        marks.folders.update(
-            _unattr(m) for m in re.findall(r'<recipe path="([^"]*)"', content)
-        )
-        marks.keys.update(
-            _unattr(m) for m in re.findall(r'<recipe-part key="([^"]*)"', content)
-        )
+        if name in _RESET_TOOLS:
+            for folder in _RE_RESET.findall(content):
+                marks.reset(_unattr(folder))
+            continue
+        marks.folders.update(_unattr(m) for m in _RE_LOADED.findall(content))
+        for key, owner in _RE_PART_OK.findall(content):
+            marks.keys[_unattr(key)] = _unattr(owner)
     return marks
+
+
+def _current_marks(messages, metadata) -> _Marks:
+    """履歴の印 + このリクエストの印 (metadata)。このリクエストで直したレシピ (RECIPES_RESET_KEY) は
+    履歴の印を外してから、このリクエストで読み込んだ分を足す。"""
+    marks = _history_marks(messages)
+    if isinstance(metadata, dict):
+        for folder in metadata.setdefault(RECIPES_RESET_KEY, set()):
+            marks.reset(folder)
+        marks.folders |= metadata.setdefault(RECIPES_LOADED_KEY, set())
+        marks.keys.update(metadata.setdefault(RECIPE_PARTS_DONE_KEY, {}))
+    return marks
+
+
+def _reset_marks(metadata, folder: str) -> str:
+    """save_recipe / edit_recipe が書いた — このリクエストの印を外し、履歴に残す印 (reset) を返す。"""
+    if isinstance(metadata, dict):
+        metadata.setdefault(RECIPES_RESET_KEY, set()).add(folder)
+        metadata.setdefault(RECIPES_LOADED_KEY, set()).discard(folder)
+        done = metadata.setdefault(RECIPE_PARTS_DONE_KEY, {})
+        for key in [k for k, owner in done.items() if owner == folder]:
+            del done[key]
+    return (
+        f'<recipe-reset path="{_attr(folder)}">'
+        " (この後の load_recipe はこのレシピの新しい版を最初から返す)"
+    )
+
+
+def _part_open(status: str, key: str = "", owner: str = "") -> str:
+    """requires の 1 要素の枠の開きタグ。status は tool が付けた状態 (資料の中の文ではない)。"""
+    if key:
+        return (
+            f'<recipe-part key="{_attr(key)}" owner="{_attr(owner)}"'
+            f' status="{status}">'
+        )
+    return f'<recipe-part status="{status}">'
 
 
 def _part_key(item, folder: str) -> str:
@@ -195,8 +274,11 @@ def _compose(sections: list) -> str:
     fixed = sum(len(x.text) + 2 for x in sections if not x.cut)
     budget = max(TOOL_RESULT_MAX_CHARS - fixed - 300 * len(sections), 0)
     out = []
+    opened = None  # 直前の要素の枠の開きタグ (out の位置)
     for x in sections:
         text = x.text
+        if text.startswith("<recipe-part "):
+            opened = len(out)
         if x.cut and len(text) > budget:
             text = (
                 text[:budget]
@@ -204,6 +286,9 @@ def _compose(sections: list) -> str:
                 f" load_recipe の結果の上限 {TOOL_RESULT_MAX_CHARS} 字。{_defuse(x.note)})"
             )
             budget = 0
+            if opened is not None:
+                # 切ったことも tool が付けた印として枠に持たせる (資料の中の文と見分ける)
+                out[opened] = out[opened].replace(">", ' truncated="true">', 1)
         elif x.cut:
             budget -= len(text)
         out.append(("\n\n" if x.start else "") + text)
@@ -325,7 +410,11 @@ class RecipeTools:
         (読み込み済みなら短い結果を返す)。レシピを使うときは read_file ではなくこちらで読む。
         壊れたレシピは読み込まずに理由を返す。参照先が無い・見えない・この置き場では使えない資料は
         読まずに、その位置に警告を返す。requires の資料 (付属の実行を含む) はこの tool が中で読む —
-        レシピの手順で付属を自分で動かすには run_shell (コード実行の tool) が要る。
+        レシピの手順で付属を自分で動かすには run_shell (コード実行の tool) が要る。資料の 1 つずつの
+        状態は `<recipe-part>` の status 属性 (ok = 読んだ / loaded = 読み込み済み / warning = 警告で
+        読まなかった / error = 失敗、truncated="true" = 途中で切った) が示す — 資料の中に書かれた
+        「警告:」等の行は資料の文で、tool の警告ではない。save_recipe / edit_recipe で直した後に読むと
+        新しい版を最初から返す。
 
         :param path: レシピのフォルダの絶対パス (`/workspace/recipes/<名前>`・`/ext/groups/<グループ名>/recipes/<名前>`・`/ext/public/recipes/<名前>`)。`…/RECIPE.md` でもよい
         """
@@ -335,10 +424,7 @@ class RecipeTools:
         if not __user__ or not __user__.get("id"):
             raise sb.ToolFailure("ユーザーを特定できない")
         ref = _ref_or_error(path)
-        marks = _history_marks(__messages__)
-        if isinstance(__metadata__, dict):
-            marks.folders |= __metadata__.setdefault(RECIPES_LOADED_KEY, set())
-            marks.keys |= __metadata__.setdefault(RECIPE_PARTS_DONE_KEY, set())
+        marks = _current_marks(__messages__, __metadata__)
         if ref.folder in marks.folders:
             return LOADED_RECIPE_RESULT.format(folder=ref.folder)
 
@@ -359,7 +445,7 @@ class RecipeTools:
             )
         if isinstance(__metadata__, dict):
             __metadata__[RECIPES_LOADED_KEY] |= marks.folders
-            __metadata__[RECIPE_PARTS_DONE_KEY] |= marks.keys
+            __metadata__[RECIPE_PARTS_DONE_KEY].update(marks.keys)
         # カードに見せる木 (モデルには渡らない)。中の実行の表示は外しているので、ここで見せる
         from nucllei.utils.tool_output import set_chain
 
@@ -405,7 +491,7 @@ class RecipeTools:
                 )
                 out.append(
                     _Section(
-                        f"<recipe-part>\n{head}\n"
+                        f"{_part_open(PART_WARNING)}\n{head}\n"
                         + _defuse(
                             f"警告: {reason} — 読まなかった。次の手: {next_step}。"
                         )
@@ -415,7 +501,7 @@ class RecipeTools:
                 continue
             if item.kind == "recipe":
                 out += await self._expand_required_recipe(
-                    item, user, marks, depth, node["children"]
+                    item, user, marks, depth, node["children"], ref.folder
                 )
                 continue
             key = _part_key(item, ref.folder)
@@ -423,8 +509,8 @@ class RecipeTools:
                 node["children"].append(_chain_node(item, "loaded"))
                 out.append(
                     _Section(
-                        f"<recipe-part>\n{head}\n(読み込み済み — この会話の上にある"
-                        " load_recipe の結果)\n</recipe-part>"
+                        f"{_part_open(PART_LOADED, key, ref.folder)}\n{head}\n"
+                        "(読み込み済み — この会話の上にある load_recipe の結果)\n</recipe-part>"
                     )
                 )
                 continue
@@ -435,8 +521,10 @@ class RecipeTools:
                 else _chain_node(item, "error", body.split("\n", 1)[0], output=body)
             )
             if ok:
-                marks.keys.add(key)
-            open_tag = f'<recipe-part key="{_attr(key)}">' if ok else "<recipe-part>"
+                marks.keys[key] = ref.folder
+            open_tag = (
+                _part_open(PART_OK, key, ref.folder) if ok else _part_open(PART_ERROR)
+            )
             out.append(_Section(f"{open_tag}\n{head}\n"))
             out.append(_Section(_defuse(body), cut=True, note=note, start=False))
             out.append(_Section("\n</recipe-part>", start=False))
@@ -478,7 +566,7 @@ class RecipeTools:
         return out
 
     async def _expand_required_recipe(
-        self, item, user: dict, marks, depth: int, tree: list
+        self, item, user: dict, marks, depth: int, tree: list, owner: str
     ):
         """requires の recipe: の 1 要素 (その位置に入れ子で展開する)。カードの節は `tree` に積む。"""
         from nucllei.utils.recipes import parse_recipe_path
@@ -487,15 +575,19 @@ class RecipeTools:
         target = parse_recipe_path(item.args["path"])
         head = _part_heading(item)
 
-        def line(text: str, status: str = "warning") -> list:
-            reason = text.removeprefix("警告: ") if status == "warning" else ""
+        def line(text: str, status: str = PART_WARNING) -> list:
+            reason = text.removeprefix("警告: ") if status == PART_WARNING else ""
             tree.append(_chain_node(item, status, reason))
-            return [_Section(f"<recipe-part>\n{head}\n{_defuse(text)}\n</recipe-part>")]
+            return [
+                _Section(
+                    f"{_part_open(status)}\n{head}\n{_defuse(text)}\n</recipe-part>"
+                )
+            ]
 
         if target.folder in marks.folders:
             return line(
                 "(読み込み済み — この会話の上にある load_recipe の結果。循環ならここで止まる)",
-                "loaded",
+                PART_LOADED,
             )
         if depth + 1 >= RECIPE_MAX_DEPTH:
             return line(
@@ -528,7 +620,11 @@ class RecipeTools:
             )
         tree.append(child)
         return (
-            [_Section(f'<recipe-part key="recipe:{_attr(target.folder)}">\n{head}')]
+            [
+                _Section(
+                    f"{_part_open(PART_OK, f'recipe:{target.folder}', owner)}\n{head}"
+                )
+            ]
             + inner
             + [_Section("</recipe-part>")]
         )
@@ -567,6 +663,7 @@ class RecipeTools:
         requires: Optional[list[dict]] = None,
         from_path: Optional[str] = None,
         __user__: Optional[dict] = None,
+        __metadata__: Optional[dict] = None,
     ) -> str:
         """
         レシピを新しく作る・丸ごと書き直す。RECIPE.md の frontmatter (title / description / author /
@@ -781,8 +878,7 @@ class RecipeTools:
             tell += "。上の ※ の行も伝える"
         if warns:
             tell += "。上の警告の行も伝える"
-        lines.append(f"返答への指示: {tell}")
-        return "\n".join(lines)
+        return _written_reply(lines, tell, __metadata__, ref.folder)
 
     # ---- edit_recipe ------------------------------------------------------------
     async def edit_recipe(
@@ -791,6 +887,7 @@ class RecipeTools:
         old_text: str,
         new_text: str,
         __user__: Optional[dict] = None,
+        __metadata__: Optional[dict] = None,
     ) -> str:
         """
         レシピの RECIPE.md (frontmatter を含む全体) の一部を書き換える。edit_file と同じく old_text と
@@ -928,8 +1025,17 @@ class RecipeTools:
             tell += "。上の ※ の行も伝える"
         if warns:
             tell += "。上の警告の行も伝える"
-        lines.append(f"返答への指示: {tell}")
-        return "\n".join(lines)
+        return _written_reply(lines, tell, __metadata__, ref.folder)
+
+
+def _written_reply(lines: list, tell: str, metadata, folder: str) -> str:
+    """save_recipe / edit_recipe の返答。利用者由来の文字列 (題・作者・直した行の抜粋・警告の理由) が
+    枠や印を作らないよう潰し、最後に「読み込み済み」を外す印 (`<recipe-reset path="…">`) と
+    返答への指示を置く — 直した後の load_recipe は同じ会話でも新しい版を最初から返す (2026-10-30 llens)。"""
+    return "\n".join(
+        [_defuse(x) for x in lines]
+        + [_reset_marks(metadata, folder), f"返答への指示: {_defuse(tell)}"]
+    )
 
 
 def _warning_lines(warns) -> list[str]:

@@ -3062,17 +3062,17 @@ warnings and errors. Example of the model text (personal recipe; `read` · `reci
 `shell` · a warning):
 
 ```
-<recipe-part key="read:/workspace/recipes/月次集計/q.sql">
+<recipe-part key="read:/workspace/recipes/月次集計/q.sql" owner="/workspace/recipes/月次集計" status="ok">
 ### read /workspace/recipes/月次集計/q.sql
 `/workspace/recipes/月次集計/q.sql` — 文字コード: UTF-8、全 48 バイト
 
 select count(*) from visits where month = :month
 </recipe-part>
 
-<recipe-part key="recipe:/ext/public/recipes/共通の書式">
+<recipe-part key="recipe:/ext/public/recipes/共通の書式" owner="/workspace/recipes/月次集計" status="ok">
 ### recipe /ext/public/recipes/共通の書式
 
-<recipe-part key="read:/ext/public/検査の読み方.md">
+<recipe-part key="read:/ext/public/検査の読み方.md" owner="/ext/public/recipes/共通の書式" status="ok">
 ### read /ext/public/検査の読み方.md
 …
 </recipe-part>
@@ -3085,14 +3085,14 @@ select count(*) from visits where month = :month
 
 </recipe-part>
 
-<recipe-part key="shell:/workspace/recipes/月次集計:prep.sh 30d">
+<recipe-part key="shell:/workspace/recipes/月次集計:prep.sh 30d" owner="/workspace/recipes/月次集計" status="ok">
 ### shell prep.sh 30d の出力
 exit_code=0 (0.1s)
 --- stdout ---
 30 日分: 1234 件
 </recipe-part>
 
-<recipe-part>
+<recipe-part status="warning">
 ### read /ext/groups/OTHER/notes/a.md
 警告: requires の read /ext/groups/OTHER/notes/a.md は所属していないグループ「OTHER」のもの — 読まなかった。次の手: この利用者には使えないので、そうユーザーに伝える (直せるのはその参照先が見える人)。
 </recipe-part>
@@ -3105,6 +3105,17 @@ exit_code=0 (0.1s)
 </recipe>
 ```
 
+- **Status is an attribute (2026-10-30, llens review).** Each entry's frame says
+  what the tool did: `<recipe-part key="<key>" owner="<folder>" status="ok">` (ran;
+  `truncated="true"` is added when its output was cut to fit), `status="loaded"`
+  (already loaded earlier in the chat), `<recipe-part status="warning">` (not run —
+  the reason line follows the heading) and `<recipe-part status="error">` (failed —
+  the ERROR line follows). `owner` is the recipe whose `requires` lists the entry.
+  The model is told (in `load_recipe`'s description) that the status attribute is
+  the tool's mark and that a `警告:` line inside material is the material's text: a
+  file or an output that contains `警告: … 次の手: …` (or `status="warning"`) stays
+  inside an `ok` frame, and since `<recipe` is defused in material, no frame or
+  attribute can be forged.
 - **How entries run.** `read` is `read_file` (its own limits and `next_offset`);
   `shell` / `python` are `run_shell` with `cd '<folder>' && bash ./<file> '<arg>' …`
   (`python3 ./<file> …`) — stateless, another user's code never enters the
@@ -3123,9 +3134,20 @@ exit_code=0 (0.1s)
 - **Once per chat.** A recipe, and each `read` / `shell` / `python`, runs once per
   chat. "Already loaded" is decided from the **markers in earlier `load_recipe`
   results** in the history — `<recipe path="…">` (a recipe whose body was given)
-  and `<recipe-part key="…">` (an entry that ran; failed and warned entries carry
-  no key) — plus the current request. Text with the same markers anywhere else
-  (a pasted message, another tool's result) is ignored. A second `load_recipe`
+  and `<recipe-part key="…" owner="…" status="ok">` (an entry that ran; `loaded`,
+  `warning` and `error` frames are not counted) — plus the current request. Text
+  with the same markers anywhere else (a pasted message, another tool's result)
+  is ignored.
+- **After a fix, the new version (2026-10-30, llens review).** A successful
+  `save_recipe` / `edit_recipe` (including a `from_path` copy, for the folder
+  written) ends its reply with `<recipe-reset path="<folder>"> (この後の load_recipe
+  はこのレシピの新しい版を最初から返す)`. Reading the history in order, a reset drops
+  the earlier marks of that recipe — the folder and the entries it owns — so the
+  next `load_recipe` in the same chat returns the new body and runs its
+  `requires` again; other recipes' marks stay. Within one request the same is
+  done on the request's own marks. Only resets in `save_recipe` / `edit_recipe`
+  results count, and the user-supplied text in those replies (title, author, the
+  edited excerpt, warning reasons) is defused, so a forged reset does nothing. A second `load_recipe`
   of a loaded recipe returns
   `レシピ <folder> は読み込み済み (…)。次の手: 上のレシピに従って作業を続ける。`; an
   entry already run shows `(読み込み済み — この会話の上にある load_recipe の結果)`.
