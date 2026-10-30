@@ -31,6 +31,12 @@
    `TOOL_EXEC_TIMEOUT_S` より優先)。run_subagent は `SUBAGENT_TURN_TIMEOUT_S`(既定 1800s)。
 8. **depth 上限**: `SUBAGENT_MAX_DEPTH`(既定 2、user chat = depth 0)。上限超は tool を合成しない + 実行時再チェック。
 9. **同時数上限**: `SUBAGENT_MAX_CONCURRENCY`(既定 4)。プロセス内カウンタ、超過は**待たずに即エラー**。
+   → **2026-10-30 改定: 超過は席が空くまで到着順に待つ** (llens staging P11 — 即エラーだと、文言を変えても
+   モデルが呼び直し続けた。1 run に 4〜13 回)。FIFO の待ち行列 `_slot_waiters` (返す席は数を減らさず先頭へ
+   handoff)、待ちの上限 `SUBAGENT_QUEUE_TIMEOUT_S` (既定 600 秒、per-tool timeout に足す)、background は
+   タスクの中で待つ、cancel・stop_task・切断は待ち手を外し、渡しと cancel が同時なら席を次へ。入れ子
+   (親 depth ≥ 1) は待たずに即エラー — 親は席を持ったまま子を待つので、子が待つと席が「子を待つ親」で
+   埋まって時間切れまで詰まる。
 10. **stop 連鎖**: `asyncio.shield(child_task)` + `Task.cancelling()` で親 cancel と子側発 cancel を判別。
     親 stop / turn timeout → 子を stop して伝播。子の外部 stop → 部分回答を tool result で返し**親は続行**。
 11. **usage は親子で合算しない**(既存機構で自動成立)。親へは tool result に子 usage の要点を載せる。

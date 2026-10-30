@@ -76,9 +76,7 @@ class TestRunSubagent(AbstractPostgresTest):
         # 失敗テストのカウンタ・実行中集合の残留が後続へ漏れないように毎回リセット
         subagent._active_turns = 0
         subagent._running_agent_sessions.clear()
-        subagent._active_by_parent.clear()
-        subagent._slot_exec_ids.clear()
-        subagent._cap_misses.clear()
+        subagent._slot_waiters.clear()
 
         Models.insert_new_model(
             ModelForm(
@@ -282,7 +280,7 @@ class TestRunSubagent(AbstractPostgresTest):
         # 同時数はサーバー全体の上限(ほかの利用者の分も数える — _active_turns は
         # プロセス全体の数)。並べたサブエージェントどうしは同時、sandbox の tool は順番
         assert (
-            "同時に走れるのはサーバー全体で 4 本まで(ほかの利用者の分も、background の分も終わるまで数える)"
+            "同時に走るのはサーバー全体で 4 本まで(ほかの利用者の分も数える)"
             in spec["description"]
         )
         assert "サブエージェントどうしは同時に走り" in spec["description"]
@@ -291,7 +289,10 @@ class TestRunSubagent(AbstractPostgresTest):
         assert "sandbox で実行する tool" not in spec["description"]
         assert spec["description"].count("session_id") == 1
         # per-tool timeout(クラス属性 timeouts)と表示ディスクリプタ(戻り型の Annotated)
-        assert tool["timeout"] == SUBAGENT_TURN_TIMEOUT_S
+        # 席を待つ分を足す (2026-10-30)
+        from nucllei.env import SUBAGENT_QUEUE_TIMEOUT_S
+
+        assert tool["timeout"] == SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_TIMEOUT_S
         assert tool["render"] == {"result": {"kind": "subagent"}}
 
     def test_spec_overrides_do_not_leak_into_stored_spec(self):
@@ -799,7 +800,7 @@ class TestRunSubagent(AbstractPostgresTest):
             result = _raised(tool["callable"](instruction="x", session_id=session_id))
             assert result.kind == "call", session_id
             assert subagent._active_turns == 0  # エラー経路でもカウンタ解放
-            assert not subagent._active_by_parent  # 親チャットごとの内訳も解放
+            assert not subagent._slot_waiters
 
         # instruction 空 / 新規で preset_id 無しも call の ToolError(#145)
         assert _raised(tool["callable"](instruction="  ")).kind == "call"
@@ -857,96 +858,287 @@ class TestRunSubagent(AbstractPostgresTest):
         assert result.kind == "failure"
         assert "自分で処理する" in result.text
 
-    def test_concurrency_limit_returns_error(self, monkeypatch):
+    # ---- 席の待ち行列 (2026-10-30 llens staging P11: 上限で即エラーにするとモデルが呼び直し続けた) ----
+
+    def test_over_cap_call_waits_for_a_slot_then_runs(self, monkeypatch):
+        """上限を超えた呼び出しはエラーにせず、席が空くまで待ってから走る。待ったことは結果の note に。"""
+        from nucllei.utils import subagent
+
+        gate = self._patch_gated_child_pipeline(monkeypatch)
+        monkeypatch.setattr(subagent, "SUBAGENT_MAX_CONCURRENCY", 1)
+        monkeypatch.setattr(subagent, "WAIT_NOTE_MIN_S", 0)
+        tool = self._build_tool()
+
+        async def main():
+            first = asyncio.create_task(
+                tool["callable"](preset_id="researcher", instruction="1 本目")
+            )
+            for _ in range(200):
+                if subagent._active_turns == 1:
+                    break
+                await asyncio.sleep(0.01)
+            second = asyncio.create_task(
+                tool["callable"](preset_id="researcher", instruction="2 本目")
+            )
+            for _ in range(200):
+                if subagent._slot_waiters:
+                    break
+                await asyncio.sleep(0.01)
+            assert (
+                len(subagent._slot_waiters) == 1
+            )  # 2 本目は待っている (エラーにならない)
+            # 待っている間は子 chat を作らない
+            children = await asyncio.to_thread(
+                self.Chats.get_child_chats_by_parent_id, self.parent.id, "1"
+            )
+            assert len(children) == 1
+            gate.set()
+            a, b = await asyncio.gather(first, second)
+            await self._wait_turn_slot_release()
+            return a, b
+
+        a, b = asyncio.run(main())
+        assert a["ok"] is True and "note" not in a
+        assert b["ok"] is True and b["note"].startswith("枠が空くまで ")
+        assert b["note"].endswith(" 秒待った。")
+        assert subagent._active_turns == 0 and not subagent._slot_waiters
+
+    def test_slots_are_handed_over_in_arrival_order(self):
+        """席は返すときに数を減らさず先頭の待ち手へ渡す — 到着順 (ユーザーをまたいで FIFO)。"""
+        from nucllei.utils import subagent
+
+        async def main():
+            subagent._active_turns = subagent.SUBAGENT_MAX_CONCURRENCY
+            order = []
+
+            async def wait(name):
+                await subagent._acquire_slot(nested=False)
+                order.append(name)
+
+            tasks = [asyncio.create_task(wait(n)) for n in ("a", "b", "c")]
+            await asyncio.sleep(0)
+            assert len(subagent._slot_waiters) == 3
+            for _ in range(3):
+                subagent._release_slot()
+                await asyncio.sleep(0)
+            await asyncio.gather(*tasks)
+            # 渡した席は数え続ける (3 本とも席を持っている)
+            assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
+            return order
+
+        assert asyncio.run(main()) == ["a", "b", "c"]
+        subagent._active_turns = 0
+
+    def test_wait_times_out_with_a_short_error_and_no_child(self, monkeypatch):
         from nucllei.utils import subagent
 
         self._patch_child_pipeline(monkeypatch)
         tool = self._build_tool()
-
+        monkeypatch.setattr(subagent, "SUBAGENT_QUEUE_TIMEOUT_S", 0.05)
         monkeypatch.setattr(
             subagent, "_active_turns", subagent.SUBAGENT_MAX_CONCURRENCY
         )
         result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
         assert result.kind == "failure"
-        assert "同時" in result.text
-        # 超過エラーはカウンタを消費しない(decrement で負にならない)
+        assert "空かず、起動しなかった" in result.text
+        assert result.text.endswith("次の手: 自分で処理する。")
+        assert not subagent._slot_waiters
         assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
-        # このチャットから起動した分が走っていなければ、1 回だけ呼び直させ、2 回目からは自分で処理させる
-        # (2026-10-30 batch 6)
-        assert "このチャットから起動した分は走っていない" in result.text
-        assert "次の手: 1 回だけ呼び直し" in result.text
-        result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
-        assert "次の手: run_subagent を呼び直さず、自分で処理する。" in result.text
+        assert (
+            self.Chats.get_child_chats_by_parent_id(self.parent.id, "1") == []
+        )  # 子 chat を作っていない
 
-    def test_concurrency_limit_names_this_chats_running_tasks(self, monkeypatch):
-        """このチャットから起動した分で埋まっているなら、席を持っている background のタスク id を挙げて
-        await_task で受け取らせ、今呼び直しても同じ ERROR だと言い切る (2026-10-30 llens staging P11:
-        上限の ERROR の後も run_subagent を 3〜13 回呼び続けた)。挙げるのは席を持っている exec だけ
-        (行の status では挙げない — 弾かれた自分の行も running のまま並ぶ)。"""
+    def test_cancel_while_waiting_removes_the_waiter(self, monkeypatch):
+        """待っている間の stop (親の cancel・stop_task・切断) は待ち手を外し、席を漏らさない。"""
         from nucllei.utils import subagent
-        from nucllei.utils.executions import current_exec_id
-        from nucllei.utils.tool_errors import turn_tools
 
         self._patch_child_pipeline(monkeypatch)
         tool = self._build_tool()
         cap = subagent.SUBAGENT_MAX_CONCURRENCY
-        # 席の取り方: background の runner の中なら exec id を覚える
-        token = current_exec_id.set("bg-1")
-        try:
-            assert subagent._take_turn_slot(self.parent.id) == "bg-1"
-        finally:
-            current_exec_id.reset(token)
-        token = current_exec_id.set("bg-2")
-        try:
-            subagent._take_turn_slot(self.parent.id)
-        finally:
-            current_exec_id.reset(token)
-        assert subagent._take_turn_slot(self.parent.id) is None  # 同期の 1 本
-        monkeypatch.setattr(subagent, "_active_turns", cap)
-        # 上限で弾かれる呼び出し自身が background の runner の中 (exec id は席に載らない)
-        token = current_exec_id.set("bg-rejected")
-        try:
-            with turn_tools(["run_subagent", "await_task"]):
-                result = _raised(
-                    tool["callable"](preset_id="researcher", instruction="x")
-                )
-        finally:
-            current_exec_id.reset(token)
-        assert result.kind == "failure"
-        assert (
-            "このチャットから起動して走っているサブエージェントは 3 本"
-            " (うち background のタスク: bg-1, bg-2)"
-        ) in result.text
-        assert "bg-rejected" not in result.text
-        assert (
-            'await_task(task_ids=["bg-1", "bg-2"]) で受け取ってから残りを起動する'
-            in (result.text)
-        )
-        assert "終わるまで run_subagent を呼び直しても同じ ERROR になる" in result.text
-        # background の分が終わって席を返したら、残りは同じ応答に並べた分
-        subagent._release_turn_slot(None, self.parent.id, "bg-1")
-        subagent._release_turn_slot(None, self.parent.id, "bg-2")
-        assert self.parent.id not in subagent._slot_exec_ids
-        monkeypatch.setattr(subagent, "_active_turns", cap)  # ほかの分で埋まったまま
-        with turn_tools(["run_subagent", "await_task"]):
-            result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
-        assert (
-            "この応答で並べた分の結果がそろってから、起動できなかった分を呼ぶ"
-            in result.text
-        )
-        assert subagent._active_by_parent[self.parent.id] == 1  # ERROR は数えない
-        subagent._release_turn_slot(None, self.parent.id)
-        assert not subagent._active_by_parent
+
+        async def main():
+            subagent._active_turns = cap
+            task = asyncio.create_task(
+                tool["callable"](preset_id="researcher", instruction="x")
+            )
+            for _ in range(200):
+                if subagent._slot_waiters:
+                    break
+                await asyncio.sleep(0.01)
+            assert len(subagent._slot_waiters) == 1
+            task.cancel()
+            try:
+                await task
+                raise RuntimeError("cancel が伝播していない")
+            except asyncio.CancelledError:
+                pass
+            assert not subagent._slot_waiters
+            subagent._release_slot()  # 待ち手がいないので数が減る
+            assert subagent._active_turns == cap - 1
+
+        asyncio.run(main())
+        subagent._active_turns = 0
+        assert self.Chats.get_child_chats_by_parent_id(self.parent.id, "1") == []
+
+    def test_slot_granted_to_a_cancelled_waiter_passes_to_the_next(self):
+        """席を渡した直後に待ち手が cancel された (渡しと cancel が同時) — その席は次の待ち手へ。"""
+        from nucllei.utils import subagent
+
+        async def main():
+            subagent._active_turns = subagent.SUBAGENT_MAX_CONCURRENCY
+            a = asyncio.create_task(subagent._acquire_slot(nested=False))
+            b = asyncio.create_task(subagent._acquire_slot(nested=False))
+            await asyncio.sleep(0)
+            subagent._release_slot()  # a の future に席を渡す (a はまだ再開していない)
+            a.cancel()
+            try:
+                await a
+            except asyncio.CancelledError:
+                pass
+            waited = await asyncio.wait_for(b, 1)
+            assert waited >= 0
+            assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
+            assert not subagent._slot_waiters
+
+        asyncio.run(main())
         subagent._active_turns = 0
 
-    def test_cap_sentence_is_replaceable_for_other_limits(self):
-        """env で上限を変えた配備のための差し替え (モジュール末尾) の対象が docstring にある。"""
-        from nucllei.builtin_tools.subagent import Tools
+    def test_nested_call_does_not_wait(self, monkeypatch):
+        """サブエージェントの中からの呼び出しは待たない — 親は席を持ったまま子を待つので、席がすべて
+        「子を待つ親」で埋まると詰まる。待たずに短い ERROR。"""
+        from nucllei.internal.db import get_db
+        from nucllei.models.chats import Chat
+        from nucllei.utils import subagent
 
+        self._patch_child_pipeline(monkeypatch)
+        tool = self._build_tool()
+        with get_db() as db:
+            db.query(Chat).filter_by(id=self.parent.id).update({"depth": 1})
+            db.commit()
+        monkeypatch.setattr(
+            subagent, "_active_turns", subagent.SUBAGENT_MAX_CONCURRENCY
+        )
+        result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
+        assert result.kind == "failure"
+        assert "サブエージェントの中からは待てない" in result.text
+        assert not subagent._slot_waiters
+        assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
+
+    def test_slot_is_released_when_the_call_fails_after_taking_it(self, monkeypatch):
+        from nucllei.utils import subagent
+
+        self._patch_child_pipeline(monkeypatch)
+        monkeypatch.setattr(subagent, "_resolve_child_model", lambda r, p: None)
+        tool = self._build_tool()
+        result = _raised(tool["callable"](preset_id="researcher", instruction="x"))
+        assert result.kind == "failure" and "今は使えない" in result.text
+        assert subagent._active_turns == 0 and not subagent._running_agent_sessions
+
+    def test_background_call_returns_at_once_and_waits_in_the_task(self, monkeypatch):
+        """background の呼び出しはタスク id をすぐ返し、席はタスクの中で待つ。待っている間の stop_task は
+        待ち手を外し、席を漏らさない (行は stopped)。"""
+        from nucllei.models.executions import Executions
+        from nucllei.utils import executions, subagent
+
+        executions._exec_tasks.clear()
+        executions._active_execs_by_user.clear()
+        executions._exec_sinks.clear()
+        self._patch_child_pipeline(monkeypatch)
+        tool = self._build_tool()
+        cap = subagent.SUBAGENT_MAX_CONCURRENCY
+
+        async def main():
+            subagent._active_turns = cap
+            spawned = await executions.spawn_execution(
+                user_id="1",
+                chat_id=self.parent.id,
+                message_id="pm-a",
+                tool_call_id="functions.run_subagent:0",
+                tool_name="run_subagent",
+                entry=tool,
+                params={"preset_id": "researcher", "instruction": "x"},
+            )
+            assert spawned["status"] == "running"  # 待たずに返る
+            exec_id = spawned["task_id"]
+            for _ in range(200):
+                if subagent._slot_waiters:
+                    break
+                await asyncio.sleep(0.01)
+            assert len(subagent._slot_waiters) == 1  # タスクの中で待っている
+            await executions.stop_execution(exec_id)
+            for _ in range(200):
+                if not subagent._slot_waiters and exec_id not in executions._exec_tasks:
+                    break
+                await asyncio.sleep(0.01)
+            assert not subagent._slot_waiters
+            assert subagent._active_turns == cap  # 席は取っていないので数は変わらない
+            return exec_id
+
+        exec_id = asyncio.run(main())
+        subagent._active_turns = 0
+        assert Executions.get_execution_by_id(exec_id).status == "stopped"
+        assert self.Chats.get_child_chats_by_parent_id(self.parent.id, "1") == []
+
+    def test_parent_deleted_while_waiting_creates_no_child(self, monkeypatch):
+        """待っている間に親チャットが消された (cascade) — 席を取った後に読み直し、子を作らずに席を返す。"""
+        from nucllei.internal.db import get_db
+        from nucllei.models.chats import Chat
+        from nucllei.utils import subagent
+
+        self._patch_child_pipeline(monkeypatch)
+        tool = self._build_tool()
+        cap = subagent.SUBAGENT_MAX_CONCURRENCY
+
+        async def main():
+            subagent._active_turns = cap
+            task = asyncio.create_task(
+                tool["callable"](preset_id="researcher", instruction="x")
+            )
+            for _ in range(200):
+                if subagent._slot_waiters:
+                    break
+                await asyncio.sleep(0.01)
+            with get_db() as db:
+                db.query(Chat).filter_by(id=self.parent.id).update({"deleted_at": 1})
+                db.commit()
+            subagent._release_slot()  # 待ち手へ席を渡す
+            return await call_error(task)
+
+        result = asyncio.run(main())
+        assert result.kind == "failure" and "親チャットが見つからない" in result.text
+        assert subagent._active_turns == cap - 1  # 渡された席は返った
+        subagent._active_turns = 0
+        assert self.Chats.get_child_chats_by_parent_id(self.parent.id, "1") == []
+
+    def test_wait_ends_when_the_slot_comes_at_the_deadline(self):
+        """席が時間切れと同じ頃に渡されても、渡されていれば取ったまま進む (誤って時間切れにしない)。"""
+        from nucllei.utils import subagent
+
+        async def main():
+            subagent._active_turns = subagent.SUBAGENT_MAX_CONCURRENCY
+            task = asyncio.create_task(subagent._acquire_slot(nested=False))
+            await asyncio.sleep(0)
+            subagent._release_slot()
+            waited = await task
+            assert waited >= 0
+            assert subagent._active_turns == subagent.SUBAGENT_MAX_CONCURRENCY
+
+        asyncio.run(main())
+        subagent._active_turns = 0
+
+    def test_wait_is_added_to_the_tool_timeout_and_described(self):
+        from nucllei.builtin_tools.subagent import Tools
+        from nucllei.env import SUBAGENT_QUEUE_TIMEOUT_S, SUBAGENT_TURN_TIMEOUT_S
+
+        assert Tools.timeouts["run_subagent"] == (
+            SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_TIMEOUT_S
+        )
         assert (
-            "サーバー全体で 4 本まで(ほかの利用者の分も、background の分も終わるまで数える)・超過は即エラー"
-            " — 5 本以上なら 4 本ずつ"
-        ) in Tools.__doc__
+            "超えた分はエラーにならず、枠が空くまで待ってから順に走る — 5 本以上も一度に並べてよい"
+            in Tools.__doc__
+        )
+        assert "即エラー" not in Tools.__doc__
+        assert "(background を付けて起動できるのは 1 人 4 本まで)" in Tools.__doc__
 
     def test_long_answer_is_truncated(self, monkeypatch):
         from nucllei.utils import subagent
@@ -1028,7 +1220,7 @@ class TestRunSubagent(AbstractPostgresTest):
             assert child_task.done()
             assert task_registry.list_task_ids_by_chat_id(child_id) == []
             assert subagent._active_turns == 0
-            assert not subagent._active_by_parent  # done callback が内訳も解放する
+            assert not subagent._slot_waiters
 
         asyncio.run(main())
 

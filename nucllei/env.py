@@ -272,13 +272,26 @@ try:
 except ValueError:
     SUBAGENT_MAX_DEPTH = 2
 
-# llens(#107): プロセス内の subagent 同時実行数上限。超過時は待たずにエラーを
-# tool result で返す(モデルに再試行を委ねる)。
+# llens(#107): プロセス内の subagent 同時実行数上限。超過した呼び出しは席が空くまで到着順に待つ
+# (2026-10-30 — それまでは待たずにエラーを返し、モデルが呼び直し続けた)。
 SUBAGENT_MAX_CONCURRENCY = os.environ.get("SUBAGENT_MAX_CONCURRENCY", "4")
 try:
-    SUBAGENT_MAX_CONCURRENCY = int(SUBAGENT_MAX_CONCURRENCY)
+    # 1 未満は 1 (0 だと席を返す呼び出しが無く、待つ呼び出しが全部時間切れまで待つ)
+    SUBAGENT_MAX_CONCURRENCY = max(1, int(SUBAGENT_MAX_CONCURRENCY))
 except ValueError:
     SUBAGENT_MAX_CONCURRENCY = 4
+
+# 席が空くのを待つ上限 (秒、-1 等の非正値で無制限)。超えたら起動せずにエラー。run_subagent の
+# per-tool timeout (同期・background とも) はこの分を SUBAGENT_TURN_TIMEOUT_S に足す — 待ちで子ターンの
+# 持ち時間を削らない (無制限にすると足せないので、待った分だけ SUBAGENT_TURN_TIMEOUT_S が削られる)。
+# サブエージェントの中からの呼び出し (入れ子) は待たない (詰まり防止)。
+SUBAGENT_QUEUE_TIMEOUT_S = os.environ.get("SUBAGENT_QUEUE_TIMEOUT_S", "600")
+try:
+    SUBAGENT_QUEUE_TIMEOUT_S = float(SUBAGENT_QUEUE_TIMEOUT_S)
+    if SUBAGENT_QUEUE_TIMEOUT_S.is_integer():
+        SUBAGENT_QUEUE_TIMEOUT_S = int(SUBAGENT_QUEUE_TIMEOUT_S)
+except ValueError:
+    SUBAGENT_QUEUE_TIMEOUT_S = 600
 
 # llens(#110): 非同期 tool 実行(execution)1 本のタイムアウト(秒、-1 で無効)。
 # per-tool の timeout 宣言が最優先で、無ければこれ。sync 既定

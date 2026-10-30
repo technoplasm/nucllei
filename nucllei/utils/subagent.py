@@ -27,7 +27,8 @@ enforce は二層(#140):
 - どこへ飛べるか: preset allowlist(親 preset の meta.subagentPresetIds)∩ アクセス可
   (所有者 or read ACL)。spec_overrides の enum 構築と実行時の両方で同一述語を評価する。
 加えて depth 上限(SUBAGENT_MAX_DEPTH。user chat = depth 0)と
-プロセス内同時実行数(SUBAGENT_MAX_CONCURRENCY。超過は待たずにエラー)。
+プロセス内同時実行数(SUBAGENT_MAX_CONCURRENCY。超過は席が空くまで到着順に待つ — 2026-10-30。
+入れ子は待たない。`_acquire_slot`)。
 
 3 段パイプラインの import は実行時に遅延させる(middleware が本モジュールを
 間接 import するため — 循環回避)。
@@ -35,7 +36,7 @@ enforce は二層(#140):
 
 import asyncio
 import logging
-from typing import Optional
+from collections import deque
 
 from fastapi import Request
 
@@ -54,6 +55,7 @@ from nucllei.env import (
     SRC_LOG_LEVELS,
     SUBAGENT_MAX_CONCURRENCY,
     SUBAGENT_MAX_DEPTH,
+    SUBAGENT_QUEUE_TIMEOUT_S,
 )
 
 log = logging.getLogger(__name__)
@@ -61,11 +63,23 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 # 親へ返す answer の切り詰め長(超過時は truncated: true を付ける)
 ANSWER_MAX_CHARS = 8000
+# 席を待った時間をこれ以上なら結果に 1 句添える (秒)
+WAIT_NOTE_MIN_S = 1
+# 待っている間、進み具合 (何番目・何秒) を出し直す間隔 (秒)
+WAIT_PROGRESS_S = 30
 
-# プロセス内の同時実行カウンタ。イベントループ上の async callable からしか
-# 触らない(execute_tool_calls は async tool をループ上で直接 await する)ため、
-# lock は不要 — check と increment の間に await を挟まないことだけが規律。
+# 席 = 同時に走る子ターンの数 (SUBAGENT_MAX_CONCURRENCY。プロセス全体 — 全ユーザー・入れ子の子・
+# background の分も数える)。イベントループ上の async callable からしか触らない (execute_tool_calls は
+# async tool をループ上で直接 await する) ので lock は要らない — 席の数を見てから取るまでに await を
+# 挟まないことだけが規律。
 _active_turns = 0
+
+# 席を待っている呼び出し (到着順)。2026-10-30 (llens staging P11): 上限で即エラーにしていたが、
+# モデルはエラーの次の手より利用者の「章ごとに子に読ませて」を優先して呼び直し続けた (1 run に 4〜13 回、
+# 文言を変えても減らなかった) — 上限を超えた呼び出しはサーバーの側で席が空くまで待たせる。
+# 席を返すときは数を減らさずに先頭の待ち手へ渡す (handoff) ので、返した瞬間に新しい呼び出しが割り込めず
+# 到着順になる (ユーザーをまたいで FIFO)。待ち手は future (作ったループに紐づく)
+_slot_waiters: deque = deque()
 
 # 実行中の agent session id 集合。同一 session への並行継続は chat JSON の
 # read-modify-write を後勝ちで壊す(先行ターンの user/assistant 対が消え、
@@ -74,38 +88,96 @@ _active_turns = 0
 # check→add の間に await を挟まない(_active_turns と同じ規律)。
 _running_agent_sessions: set[str] = set()
 
-# 親チャットごとの実行中の数 (_active_turns の内訳) と、そのうち席を持っている background のタスク
-# (exec id)。上限の ERROR で「このチャットの分が走っている」か・どのタスクを待つかを言い分ける
-# (2026-10-30 llens staging P11: 上限の ERROR の後も run_subagent を 3〜13 回呼び続けた)。exec の行の
-# status では挙げない — 上限で弾かれた自分や兄弟の行も running のまま並び、stop した行は席を持った
-# まま stopped になる (敵対レビュー)
-_active_by_parent: dict[str, int] = {}
-_slot_exec_ids: dict[str, set[str]] = {}
-# このチャットの分が走っていないのに上限に当たった回数 (ほかの利用者の分)。2 回目からは呼び直させない
-_cap_misses: dict[str, int] = {}
 
-
-def _take_turn_slot(parent_chat_id: str) -> Optional[str]:
-    """席を取る (呼び手が上限を確かめた直後に、await を挟まずに呼ぶ)。background の runner の中なら
-    その exec id を返す (解放のときに渡す)。"""
-    from nucllei.utils.executions import current_exec_id
-
+def _release_slot() -> None:
+    """席を 1 つ返す。待ち手がいれば数を減らさずに先頭へ渡す (handoff)。待ちを抜けた (cancel・時間切れ)
+    待ち手と、閉じたループの待ち手 (テスト) は飛ばす。"""
     global _active_turns
-    _active_turns += 1
-    _active_by_parent[parent_chat_id] = _active_by_parent.get(parent_chat_id, 0) + 1
-    _cap_misses.pop(parent_chat_id, None)
-    exec_id = current_exec_id.get()
-    if exec_id:
-        _slot_exec_ids.setdefault(parent_chat_id, set()).add(exec_id)
-    return exec_id
+    while _slot_waiters:
+        fut = _slot_waiters.popleft()
+        if fut.done() or fut.get_loop().is_closed():
+            continue
+        fut.set_result(None)
+        return
+    _active_turns -= 1
 
 
-def _release_turn_slot(
-    session_id: str | None,
-    parent_chat_id: str | None = None,
-    exec_id: str | None = None,
-):
-    """同時実行カウンタと実行中集合の解放(#109 で一本化)。
+async def _acquire_slot(nested: bool) -> float:
+    """席を取る。空いていなければ席が空くまで到着順に待ち (SUBAGENT_QUEUE_TIMEOUT_S まで)、待った秒数を
+    返す。入れ子 (サブエージェントの中からの呼び出し) は待たない — 親は席を持ったまま子の結果を待つので、
+    席がすべて「子を待つ親」で埋まると、待つ子に席が回らず時間切れまで詰まる。
+
+    待ちを抜ける (時間切れ・利用者の stop・stop_task・切断の cancel) ときは待ち手を外す。席を渡された
+    直後に抜けた (渡しと cancel が同時) なら、その席を次へ返す — 席を漏らさない。"""
+    global _active_turns
+    cap = SUBAGENT_MAX_CONCURRENCY
+    if _active_turns < cap and not _slot_waiters:
+        _active_turns += 1
+        return 0.0
+    if nested:
+        raise ToolFailure(
+            f"サブエージェントの枠 ({cap} 本) が埋まっていて、サブエージェントの中からは待てない"
+            " (この分は起動していない)",
+            "自分で処理する。",
+        )
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    started = loop.time()
+    deadline = (
+        started + SUBAGENT_QUEUE_TIMEOUT_S if SUBAGENT_QUEUE_TIMEOUT_S > 0 else None
+    )
+    # 待ちは区切って (WAIT_PROGRESS_S ごとに) 進み具合を出し直す — 列が進んでも「N 番目」が古いまま
+    # 残らないように。時間切れは自前で見る (asyncio.wait は future を cancel しない — 渡しと時間切れが
+    # 同時でも、渡されていれば席を取ったまま進む)
+    _slot_waiters.append(fut)
+    try:
+        while not fut.done():
+            step = max(WAIT_PROGRESS_S, 0.01)  # 0 以下の設定で回り続けない
+            if deadline is not None:
+                left = deadline - loop.time()
+                if left <= 0:
+                    break
+                step = min(step, left)
+            ahead = 0
+            for w in _slot_waiters:
+                if w is fut:
+                    break
+                if not w.done():
+                    ahead += 1
+            tool_output.progress(
+                f"サブエージェントの枠が空くのを待っている ({ahead + 1} 番目、"
+                f"{int(loop.time() - started)} 秒)"
+            )
+            await asyncio.wait([fut], timeout=step)
+    except BaseException:
+        # 待ちを抜ける (利用者の stop・stop_task・切断・外側の timeout の cancel)。席を渡された直後なら
+        # その席を次へ返す — 席を漏らさない
+        if fut.done() and not fut.cancelled():
+            _release_slot()
+        else:
+            fut.cancel()
+            _remove_waiter(fut)
+        raise
+    if not fut.done():
+        fut.cancel()
+        _remove_waiter(fut)
+        raise ToolFailure(
+            f"サブエージェントの枠 ({cap} 本、ほかの利用者の分も数える) が"
+            f" {SUBAGENT_QUEUE_TIMEOUT_S} 秒空かず、起動しなかった",
+            "自分で処理する。",
+        )
+    return loop.time() - started
+
+
+def _remove_waiter(fut) -> None:
+    try:
+        _slot_waiters.remove(fut)
+    except ValueError:
+        pass
+
+
+def _release_turn_slot(session_id: str | None):
+    """席と実行中集合の解放(#109 で一本化)。
 
     子 task が起動した後は、この解放を子 task の done callback で行う —
     callable が cancel(親 stop / exec stop)で先に消えても、走り続ける子の
@@ -115,60 +187,9 @@ def _release_turn_slot(
     tasks.py の cleanup_task(task 登録簿の掃除)とは独立した callback で、
     互いに干渉しない(add_done_callback は複数登録可)。
     """
-    global _active_turns
-    _active_turns -= 1
-    if parent_chat_id is not None:
-        n = _active_by_parent.get(parent_chat_id, 0) - 1
-        if n > 0:
-            _active_by_parent[parent_chat_id] = n
-        else:
-            _active_by_parent.pop(parent_chat_id, None)
-        if exec_id is not None:
-            ids = _slot_exec_ids.get(parent_chat_id)
-            if ids is not None:
-                ids.discard(exec_id)
-                if not ids:
-                    _slot_exec_ids.pop(parent_chat_id, None)
+    _release_slot()
     if session_id is not None:
         _running_agent_sessions.discard(session_id)
-
-
-def _concurrency_cap_error(parent_chat_id: str) -> ToolFailure:
-    """同時数の上限に達したときの ERROR。このチャットから起動した分が走っていれば、それが終わるまで
-    run_subagent を呼んでも同じ ERROR になると言い切る。background で起動して席を持っている分は
-    タスク id を挙げ、await_task (このターンにあれば) で受け取らせる。このチャットの分が無ければ
-    (ほかの利用者・別のチャットの分)、1 回だけ呼び直させ、2 回目からは自分で処理させる。"""
-    from nucllei.utils.tool_errors import tool_in_turn
-
-    cap = SUBAGENT_MAX_CONCURRENCY
-    fact = (
-        f"サブエージェントの同時実行数がサーバー全体の上限 ({cap}、ほかの利用者の分も数える) に"
-        "達している (この分は起動していない)"
-    )
-    mine = _active_by_parent.get(parent_chat_id, 0)
-    if not mine:
-        misses = _cap_misses.get(parent_chat_id, 0) + 1
-        _cap_misses[parent_chat_id] = misses
-        fact += "。このチャットから起動した分は走っていない"
-        if misses > 1:
-            return ToolFailure(fact, "run_subagent を呼び直さず、自分で処理する。")
-        return ToolFailure(fact, "1 回だけ呼び直し、それでも同じなら自分で処理する。")
-    task_ids = sorted(_slot_exec_ids.get(parent_chat_id, ()))
-    fact += f"。このチャットから起動して走っているサブエージェントは {mine} 本" + (
-        f" (うち background のタスク: {', '.join(task_ids)})" if task_ids else ""
-    )
-    again = (
-        "終わるまで run_subagent を呼び直しても同じ ERROR になる。残りは走っている分が終わってから"
-        f"起動する (一度に {cap} 本まで)"
-    )
-    if task_ids and tool_in_turn("await_task"):
-        ids = "[" + ", ".join(f'"{t}"' for t in task_ids) + "]"
-        nxt = f"await_task(task_ids={ids}) で受け取ってから残りを起動する ({again})。"
-    elif task_ids:
-        nxt = f"background の分の結果が届いてから残りを起動する ({again})。"
-    else:
-        nxt = f"この応答で並べた分の結果がそろってから、起動できなかった分を呼ぶ ({again})。"
-    return ToolFailure(fact, nxt)
 
 
 def get_model_subagent_preset_ids(model) -> list[str]:
@@ -613,8 +634,6 @@ async def run_subagent_turn(
     session_id を運ぶので結果のまま)。入力・認可・上限のエラーは ToolError を raise する
     (#145 — 子を起動していないので運ぶ中身が無い)。
     """
-    global _active_turns
-
     if not (parent_chat_id and parent_message_id):
         raise ToolFailure(
             "サブエージェントはチャットの中でだけ起動できる (この呼び出しには親になるチャットが無い)",
@@ -626,16 +645,15 @@ async def run_subagent_turn(
             "instruction が空", "子への指示を instruction に書いて呼び直す。"
         )
 
-    # 同時数上限: 超過は待たずに即エラー(check と increment の間に await を挟まない)
-    # _active_turns はプロセス全体の数 (呼び手ごとではない — 全ユーザー・入れ子の子の分も数える)
-    if _active_turns >= SUBAGENT_MAX_CONCURRENCY:
-        raise _concurrency_cap_error(parent_chat_id)
-    slot_exec_id = _take_turn_slot(parent_chat_id)
     # 実行中登録した agent session id。None = 未登録。
     running_session_id = None
-    # 会計(_active_turns / _running_agent_sessions)の解放を子 task の
-    # done callback へ移譲済みか。移譲前のエラー経路は finally が解放する。
+    # 席を取ったか (席は検証を済ませてから、子 chat を作る・書き換える前に取る — 待って時間切れに
+    # なっても空の子 chat を残さない)
+    slot_taken = False
+    # 会計(席 / _running_agent_sessions)の解放を子 task の done callback へ移譲済みか。
+    # 移譲前のエラー経路 (待ちの cancel・時間切れを含む) は finally が解放する。
     handed_off = False
+    waited = 0.0
     try:
         # 実行時再チェック(mount 後に状態が変わりうる)。認可は enum 構築と
         # 同一述語をその場で再評価する(履歴・enum に委ねない)。
@@ -678,16 +696,10 @@ async def run_subagent_turn(
                     "起動したサブエージェントのセッションだけ)",
                     "run_subagent の返りの session_id をそのまま渡す。",
                 )
-            chat_json = child.chat
-            target_preset_id = (chat_json.get("models") or [None])[0]
+            target_preset_id = (child.chat.get("models") or [None])[0]
             preset = accessible.get(target_preset_id)
             if preset is None:
                 raise ToolFailure(f"preset を使えない: {target_preset_id}")
-            _, assistant_message_id = _append_turn_messages(
-                chat_json, instruction, preset.id, preset.name
-            )
-            await asyncio.to_thread(Chats.update_chat_by_id, session_id, chat_json)
-            child_chat_id = session_id
         else:
             # 新規 spawn
             if not preset_id:
@@ -700,6 +712,32 @@ async def run_subagent_turn(
                     f"preset を使えない: {preset_id}",
                     "run_subagent の説明の一覧にある preset_id を渡す。",
                 )
+
+        # 席: 空いていなければ到着順に待つ (入れ子は待たない — _acquire_slot)
+        waited = await _acquire_slot(nested=parent.depth > 0)
+        slot_taken = True
+        if waited:
+            # 待っている間に親チャットが消された (cascade) なら子を作らない
+            parent = await asyncio.to_thread(Chats.get_chat_by_id, parent_chat_id)
+            if parent is None or parent.deleted_at is not None:
+                raise ToolFailure("親チャットが見つからない", "自分で処理する。")
+
+        if session_id:
+            # 待っている間に書き換わっていても後勝ちで壊さないよう、席を取った後に読み直す
+            child = await asyncio.to_thread(Chats.get_chat_by_id, session_id)
+            if child is None or child.deleted_at is not None:
+                raise ToolCallError(
+                    f"session_id が不正: {session_id} (続けられるのはこのチャットから"
+                    "起動したサブエージェントのセッションだけ)",
+                    "run_subagent の返りの session_id をそのまま渡す。",
+                )
+            chat_json = child.chat
+            _, assistant_message_id = _append_turn_messages(
+                chat_json, instruction, preset.id, preset.name
+            )
+            await asyncio.to_thread(Chats.update_chat_by_id, session_id, chat_json)
+            child_chat_id = session_id
+        else:
             # 決定的タイトル(生成タスクは走らせない — agent_session マーカで抑止)
             title = f"{preset.name} — {' '.join(instruction.split())[:40]}"
             chat_json = {
@@ -785,16 +823,22 @@ async def run_subagent_turn(
             # 走り続ける子の会計を子自身の終端まで保持できる(通常経路は
             # shield 待ちの再開前に callback が走るだけで等価)。
             child_task.add_done_callback(
-                lambda t, sid=running_session_id, pid=parent_chat_id, eid=slot_exec_id: _release_turn_slot(
-                    sid, pid, eid
-                )
+                lambda t, sid=running_session_id: _release_turn_slot(sid)
             )
             handed_off = True
 
             stopped = await _await_child_task(child_task_id, child_task)
 
         # 完走後の子 chat を読み直し、最終 assistant メッセージだけを親へ返す
-        return await _format_turn_result(child_chat_id, assistant_message_id, stopped)
+        result = await _format_turn_result(child_chat_id, assistant_message_id, stopped)
+        if waited and waited >= WAIT_NOTE_MIN_S:
+            # 待ったことは結果に 1 句だけ (応答が遅れた理由)
+            note = f"枠が空くまで {int(waited)} 秒待った。"
+            result["note"] = f"{note}{result['note']}" if result.get("note") else note
+        return result
     finally:
         if not handed_off:
-            _release_turn_slot(running_session_id, parent_chat_id, slot_exec_id)
+            if slot_taken:
+                _release_slot()
+            if running_session_id is not None:
+                _running_agent_sessions.discard(running_session_id)

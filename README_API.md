@@ -288,7 +288,8 @@ separate reasoning block.
 | `TOOL_RESULT_MAX_CHARS`                                        | env  | `65536`               | tool results longer than this are truncated once at the producer (sync and background alike), flagged `truncated` / `original_chars` (§5.5)                               |
 | `SUBAGENT_TURN_TIMEOUT_S`                                      | env  | `1800` s (`-1` off)   | timeout of one `run_subagent` child turn (§5.8)                                                                                                                           |
 | `SUBAGENT_MAX_DEPTH`                                           | env  | `2`                   | nesting limit of agent sessions (user chat = depth 0); `run_subagent` is not offered beyond it (§5.8)                                                                     |
-| `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                   | per-process cap on simultaneously running subagents; excess calls fail immediately as a tool result (§5.8)                                                                |
+| `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                   | per-process cap on simultaneously running subagents; excess calls wait for a slot in arrival order (since 2026-10-30; before, they failed immediately) (§5.8)           |
+| `SUBAGENT_QUEUE_TIMEOUT_S`                                     | env  | `600` s (`-1` off)    | how long an excess `run_subagent` call waits for a slot before failing; added to its per-tool timeout; nested calls never wait (§5.8)                                     |
 | `ASYNC_EXEC_TIMEOUT_S`                                         | env  | `1800` s (`-1` off)   | timeout of one background execution unless the tool declares its own (§5.9)                                                                                               |
 | `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`            | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                            |
 | `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                   | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                             |
@@ -2566,21 +2567,34 @@ response run concurrently (§5.5) and the turn continues when all are done;
 `background: true` call in a response runs inline — §5.9).
 
 Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
-concurrency `SUBAGENT_MAX_CONCURRENCY` (default 4 — spawns over the limit fail
-immediately with an error that says the server-wide limit (N, 「ほかの利用者の
-分も数える」) was reached and that this call was not started — the counter is
-process-wide (every user and nested children; per worker process when
-`UVICORN_WORKERS > 1`), not per caller. Since 2026-10-30 (staging P11: after
-the error the model called run_subagent 3–13 more times) the error tells the
-cases apart from per-parent-chat accounting (`_active_by_parent`, plus the
-exec ids of background runs holding a slot — `current_exec_id`): this chat's
-runs are going → 「このチャットから起動して走っているサブエージェントは N 本 (うち background のタスク: <ids>)」
-with 「次の手: await_task(task_ids=[…]) で受け取ってから残りを起動する (終わるまで run_subagent を呼び直しても同じ ERROR になる。…)」
-(without background tasks: 「この応答で並べた分の結果がそろってから、起動できなかった分を呼ぶ (…)」);
-none of this chat's → 「このチャットから起動した分は走っていない」 with
-「1 回だけ呼び直し、それでも同じなら自分で処理する。」 the first time and
-「run_subagent を呼び直さず、自分で処理する。」 after that; background included). The
-docstring says the same (「同時に走れるのはサーバー全体で 4 本まで (ほかの利用者の分も、background の分も終わるまで数える)」)
+concurrency `SUBAGENT_MAX_CONCURRENCY` (default 4; every user, nested children
+and background runs count; per worker process when `UVICORN_WORKERS > 1`).
+**Since 2026-10-30 a call over the limit waits for a slot instead of failing**
+(staging P11: with an immediate error — whatever its wording, including naming
+the running tasks and telling the model not to retry — the model kept calling
+run_subagent 4–13 times per run; it put the user's "have a child read each
+chapter" before the error's next step). Waiters form one FIFO queue across
+users (`_slot_waiters`); a released slot is handed to the head waiter without
+being decremented, so a new call cannot jump the queue. A sync call waits in
+the parent turn (the tool card shows 「サブエージェントの枠が空くのを待っている (N 番目、T 秒)」, re-sent every 30 s);
+a background call returns its task id at once and waits inside the task. The
+wait is bounded by `SUBAGENT_QUEUE_TIMEOUT_S` (default 600 s), which is added to
+the per-tool timeout so waiting does not eat the child turn's time; on timeout
+the call fails with 「サブエージェントの枠 (N 本、ほかの利用者の分も数える) が T 秒空かず、起動しなかった。次の手: 自分で処理する。」
+and no child chat is created (the slot is taken after validation and before the
+child chat is created or appended to). A user stop, `stop_task` or a disconnect
+while waiting removes the waiter; a slot granted at the same instant as the
+cancel is passed on to the next waiter. A call from inside a subagent (parent
+depth ≥ 1) never waits — the parent holds its slot while waiting for the child,
+so if every slot were held by parents waiting on queued children nothing would
+free up until the timeout — and fails at once with
+「サブエージェントの枠 (N 本) が埋まっていて、サブエージェントの中からは待てない (この分は起動していない)。次の手: 自分で処理する。」.
+A call that waited carries `note` 「枠が空くまで N 秒待った。」 (from 1 s). The
+docstring says 「同時に走るのはサーバー全体で 4 本まで (ほかの利用者の分も数える) で、超えた分はエラーにならず、枠が空くまで待ってから順に走る — 5 本以上も一度に並べてよい (background を付けて起動できるのは 1 人 4 本まで)」
+(background spawns beyond `ASYNC_EXEC_MAX_CONCURRENCY` per user still fail at
+spawn with 「…急ぐなら background を付けずに呼び直す。」 — §5.9; a queued
+background run holds an exec slot while it waits). If the parent chat was
+deleted while waiting, no child is created.
 and that subagents placed in one response run **concurrently**, while sandbox
 tools placed in one response run **one at a time** (§5.5 `serial`). A call
 with no parent chat or a missing parent chat fails with 「次の手: 自分で処理する。」.

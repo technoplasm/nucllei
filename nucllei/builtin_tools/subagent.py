@@ -39,7 +39,12 @@ import inspect
 import re
 from typing import Annotated, Optional, Union
 
-from nucllei.env import SUBAGENT_MAX_CONCURRENCY, SUBAGENT_TURN_TIMEOUT_S
+from nucllei.env import (
+    ASYNC_EXEC_MAX_CONCURRENCY,
+    SUBAGENT_MAX_CONCURRENCY,
+    SUBAGENT_QUEUE_TIMEOUT_S,
+    SUBAGENT_TURN_TIMEOUT_S,
+)
 from nucllei.utils.tool_render import RenderAs
 
 
@@ -57,7 +62,7 @@ class Tools:
     - 使う: 長大な資料・多数のページを読んで結論だけ欲しいとき / 互いに独立した調べものを並行させたいとき
     - 使わない: 自分で数手で済む作業、会話の流れに強く依存する判断(子はこの会話を見ていない)
     - instruction は単独で完結させる: 目的・対象・返してほしい形を書く。開かせたいもの(/workspace や /ext のパス・URL・file_id・doc の path)は受け取った形のまま書き、中身は貼らない
-    - 並行させるなら 1 回の応答の中に run_subagent を並べる(サブエージェントどうしは同時に走り、全部そろってから次の手。1 本ずつ別の手で出すと直列になる)。待たずに別の作業を進めたいときだけ background: true。同時に走れるのはサーバー全体で 4 本まで(ほかの利用者の分も、background の分も終わるまで数える)・超過は即エラー — 5 本以上なら 4 本ずつ、先の分がそろってから次
+    - 並行させるなら 1 回の応答の中に run_subagent を並べる(サブエージェントどうしは同時に走り、全部そろってから次の手。1 本ずつ別の手で出すと直列になる)。待たずに別の作業を進めたいときだけ background: true。同時に走るのはサーバー全体で 4 本まで(ほかの利用者の分も数える)で、超えた分はエラーにならず、枠が空くまで待ってから順に走る — 5 本以上も一度に並べてよい (background を付けて起動できるのは 1 人 4 本まで)
     - 結果は子のまとめであって原文ではない。根拠が要る点・食い違いは自分で確かめる。追加の質問は session_id で同じ子に続ける
     """
 
@@ -69,7 +74,15 @@ class Tools:
     # #107 決定 7: 子ターン全体(モデル呼び出しと tool 実行の反復)を包むので
     # TOOL_EXEC_TIMEOUT_S より長い。-1 等の非正値は「システム側上限なし」
     # (get_tools が非正値も per-entry timeout として通す)。
-    timeouts = {"run_subagent": SUBAGENT_TURN_TIMEOUT_S}
+    # 2026-10-30: 席が空くのを待つ分 (SUBAGENT_QUEUE_TIMEOUT_S) を足す — 待ちで子ターンの持ち時間を
+    # 削らない (どちらかが非正値 = 無制限なら子ターンの値のまま)
+    timeouts = {
+        "run_subagent": (
+            SUBAGENT_TURN_TIMEOUT_S + SUBAGENT_QUEUE_TIMEOUT_S
+            if SUBAGENT_TURN_TIMEOUT_S > 0 and SUBAGENT_QUEUE_TIMEOUT_S > 0
+            else SUBAGENT_TURN_TIMEOUT_S
+        )
+    }
 
     # ---- get_tools の汎用フック(#140)— spec 化されない予約名 ----
 
@@ -140,11 +153,15 @@ def _base_description() -> str:
 # 同時数上限の文言は docstring(モデル向け)に数値で書いている。env で変えた配備で
 # 食い違わないよう、既定値以外ならクラス docstring の数値を差し替える。
 if SUBAGENT_MAX_CONCURRENCY != 4:
+    Tools.__doc__ = (
+        (Tools.__doc__ or "")
+        .replace(
+            "サーバー全体で 4 本まで",
+            f"サーバー全体で {SUBAGENT_MAX_CONCURRENCY} 本まで",
+        )
+        .replace("5 本以上も", f"{SUBAGENT_MAX_CONCURRENCY + 1} 本以上も")
+    )
+if ASYNC_EXEC_MAX_CONCURRENCY != 4:
     Tools.__doc__ = (Tools.__doc__ or "").replace(
-        "サーバー全体で 4 本まで(ほかの利用者の分も、background の分も終わるまで数える)・超過は即エラー"
-        " — 5 本以上なら 4 本ずつ",
-        f"サーバー全体で {SUBAGENT_MAX_CONCURRENCY} 本まで(ほかの利用者の分も、background の分も"
-        "終わるまで数える)・"
-        f"超過は即エラー — {SUBAGENT_MAX_CONCURRENCY + 1} 本以上なら "
-        f"{SUBAGENT_MAX_CONCURRENCY} 本ずつ",
+        "1 人 4 本まで", f"1 人 {ASYNC_EXEC_MAX_CONCURRENCY} 本まで"
     )
