@@ -3092,7 +3092,13 @@ exit_code=0 (0.1s)
   are packed in order and the one that does not fit is cut with
   `…(ここで切った: この資料は <n> 字のうち <m> 字まで — load_recipe の結果の上限 <max> 字。続きは read_file('<path>', offset=…) で読む)`
   (`shell` / `python`: `出力を絞って (head・grep 等) run_shell で実行し直す`).
-- **Escaping.** `</recipe` inside the body or an entry's output is escaped.
+- **Escaping.** Every user-supplied string put into the result — the body, an
+  entry's output (read contents, shell / python stdout and stderr), the target in a
+  heading, a warning's reason, the author / title — has `<recipe` and `</recipe`
+  (any case; `<recipe-part` included) turned into `&lt;recipe` / `&lt;/recipe`. Only
+  the server writes the frames (`<recipe path="…">`, `<recipe-part key="…">`), so a
+  shared recipe cannot forge the "already loaded" marks (which would stop another
+  recipe or entry from loading) or a frame around a fake warning (2026-10-30).
 
 A **broken** recipe (the light check above) is an ERROR, with no body and no
 entries: `レシピ <folder> は壊れている: <reasons>` with the next step

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import shlex
 from dataclasses import dataclass, field
 from datetime import date
@@ -77,17 +78,24 @@ def _unattr(v: str) -> str:
     return v.replace("&lt;", "<").replace("&quot;", '"').replace("&amp;", "&")
 
 
+_FRAME_TAG = re.compile(r"<(/?recipe)", re.IGNORECASE)
+
+
 def _defuse(text: str) -> str:
-    """中に入れる文字列が枠 (`</recipe>` `</recipe-part>`) を閉じないように。"""
-    return text.replace("</recipe", "&lt;/recipe")
+    """中に入れる利用者由来の文字列 (本文・要素の出力・見出しの対象・警告の理由) が枠を作らない
+    ように、`<recipe` / `</recipe` (`<recipe-part` も) を `&lt;recipe` / `&lt;/recipe` に潰す。
+    閉じタグだけでなく開きタグも潰す (2026-10-30 llens): `_history_marks` は結果の中の
+    `<recipe path="…">` / `<recipe-part key="…">` で「読み込み済み」を拾うので、共有レシピの本文や
+    読ませたファイルに書かれると別のレシピ・要素を止められる。偽の枠が作れなければ、本文の中の
+    「警告: …」のような行も `<recipe>` の中 = 利用者が書いた文だと構造で分かる。何度掛けても同じ。"""
+    return _FRAME_TAG.sub(r"&lt;\1", text)
 
 
 def _history_marks(messages) -> _Marks:
     """履歴の load_recipe の結果に出ている印から、読み込み済みのレシピと requires の要素を集める。
     結果の中の `<recipe path="…">` (読み込んだレシピの本文の枠) と `<recipe-part key="…">` (実行した
-    要素) だけを見る — load_recipe 以外の結果 (利用者が貼った文・ファイルの中身) の同じ文字列は見ない。"""
-    import re
-
+    要素) だけを見る — load_recipe 以外の結果 (利用者が貼った文・ファイルの中身) の同じ文字列は見ない。
+    load_recipe の結果の中に入る利用者由来の文字列は `_defuse` 済みなので、そこに書かれた印も数えない。"""
     ids, texts = set(), []
     for message in messages or []:
         calls = list(message.get("tool_calls") or [])
@@ -124,11 +132,12 @@ def _part_key(item, folder: str) -> str:
 
 
 def _part_heading(item) -> str:
+    # 対象のパス・引数は利用者が書いた値
     if item.kind == "read":
-        return f"### read {item.ref_path}"
+        return _defuse(f"### read {item.ref_path}")
     if item.kind == "recipe":
-        return f"### recipe {item.args['path']}"
-    return f"### {item.kind} {item.raw} の出力"
+        return _defuse(f"### recipe {item.args['path']}")
+    return _defuse(f"### {item.kind} {item.raw} の出力")
 
 
 @dataclass
@@ -157,7 +166,7 @@ def _compose(sections: list) -> str:
             text = (
                 text[:budget]
                 + f"\n…(ここで切った: この資料は {len(x.text)} 字のうち {budget} 字まで —"
-                f" load_recipe の結果の上限 {TOOL_RESULT_MAX_CHARS} 字。{x.note})"
+                f" load_recipe の結果の上限 {TOOL_RESULT_MAX_CHARS} 字。{_defuse(x.note)})"
             )
             budget = 0
         elif x.cut:
@@ -316,8 +325,11 @@ class RecipeTools:
                 reason, next_step = warns.items[n]
                 out.append(
                     _Section(
-                        f"<recipe-part>\n{head}\n警告: {reason} — 読まなかった。"
-                        f"次の手: {next_step}。\n</recipe-part>"
+                        f"<recipe-part>\n{head}\n"
+                        + _defuse(
+                            f"警告: {reason} — 読まなかった。次の手: {next_step}。"
+                        )
+                        + "\n</recipe-part>"
                     )
                 )
                 continue
@@ -364,7 +376,8 @@ class RecipeTools:
             lead += f"\n警告: {reason}。次の手: {next_step}。"
         out.append(
             _Section(
-                f"{lead}\n\n"
+                # 作者・題名・付属のファイル名・警告の理由は利用者由来
+                f"{_defuse(lead)}\n\n"
                 f'<recipe path="{_attr(ref.folder)}" author="{_attr(author)}"'
                 f' updated="{_attr(str(updated))}">\n{body}\n</recipe>'
             )
@@ -380,7 +393,7 @@ class RecipeTools:
         head = _part_heading(item)
 
         def line(text: str) -> list:
-            return [_Section(f"<recipe-part>\n{head}\n{text}\n</recipe-part>")]
+            return [_Section(f"<recipe-part>\n{head}\n{_defuse(text)}\n</recipe-part>")]
 
         if target.folder in marks.folders:
             return line(
