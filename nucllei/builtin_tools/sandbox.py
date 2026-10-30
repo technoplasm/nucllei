@@ -1496,9 +1496,8 @@ class Tools:
         __chat_id__: Optional[str] = None,
     ) -> str:
         """
-        サーバーの隔離環境で Python コードを実行する。この会話の中では変数・import・関数
-        定義が実行を跨いで保持される (前のセルで作った DataFrame をそのまま使える)。
-        最後の式は notebook のように値が表示される。
+        sandbox で Python コードを実行する。この会話の中では変数・import・関数定義が実行を跨いで
+        残り、最後の式の値が表示される。
 
         :param code: 実行する Python コード
         :param timeout_s: このセルの wall clock 秒数 (省略時 120、上限 600)
