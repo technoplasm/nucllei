@@ -434,7 +434,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     始まり・NUL・255 バイト超は 400)。nucllei の `save_recipe` が前の版の RECIPE.md を
     `<レシピ名>.RECIPE.md` として移すのに使う
   - `POST /recipes/index` — `{user_id, places, mounts?, head_bytes?}` (2026-10-30、llens 依頼)。
-    nucllei の `{{USER_RECIPES}}` (見えるレシピの一覧を system prompt に出す) 用。`places` は層の
+    nucllei のレシピの一覧 (モデルの能力「レシピ」が有効なとき、見えるレシピの一覧を `load_recipe` の説明に差し込む) 用。`places` は層の
     jail のパス (`/workspace` / `/ext/groups/<g>` / `/ext/public`) で、各層の `recipes/` の直下を
     `{places: [{place, exists, recipes: [{name, type, md: {type, size, head_b64, truncated} | null,
     entries: {<直下の名前>: <種類>}}]}]}` で返す (`.` 始まりは出さない・1 層 500 件まで、`head_bytes` は既定 16KB・上限 64KB)。symlink の
@@ -444,7 +444,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `POST /files/stat_many` — `{user_id, paths, mounts?}` → `{results: {<path>: "file" | "dir" |
     "symlink" | "other" | null}}` (2026-10-30)。jail の絶対パス (`/workspace/…` `/ext/…`) を 500 件まで
     まとめて stat する (経路も末端も symlink を辿らない、`null` は無い・見えない)。nucllei の
-    `{{USER_RECIPES}}` が全レシピの requires の参照先 (`read:` `recipe:`) の有無を 1 回で調べるのに使う
+    レシピの一覧が全レシピの requires の参照先 (`read:` `recipe:`) の有無を 1 回で調べるのに使う
   - `POST /recipes/folder` — `{user_id, path, mounts?, limit_bytes?}`。レシピのフォルダの中身を
     再帰で返す: `{exists, is_dir, files: [{rel, size, b64, mtime}], skipped: [{rel, why}], dirs,
     truncated}` (付属を含む。200 ファイルまで)。symlink・普通のファイルでないものは辿らず
@@ -595,7 +595,7 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 | `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (nucllei の `SANDBOX_TEXT_MAX_SIZE_MB`) |
 | `edit_file(path, old_text, new_text)` | テキストファイルの一部を直す (`/files/stat` → `/files/read` → `/files/write`)。`old_text` がちょうど 1 か所一致するときだけ `new_text` に置き換え、0 か所・2 か所以上・`old_text` 空は断る (追記の専用引数は無い)。読んだ文字コード (BOM 付き UTF-8 / UTF-8 / cp932) のまま書き戻す。`path` の範囲と上限は `write_file` と同じ |
 | `remove_file(path)` | ファイル・フォルダ (中身ごと) をその置き場のゴミ箱の直下へ移す (`/files/trash`)。`/workspace/…` → `/workspace/trash/`、`/ext/groups/<g>/…` → `/ext/groups/<g>/trash/`、`/ext/public/…` → `/ext/public/trash/`。完全には消さない。同名は `-2` `-3`…。ゴミ箱の中・ゴミ箱そのもの・置き場の root・`.` 始まり・`/workspace/imports` と末端の symlink は断る。`path` の範囲は `write_file` と同じ |
-| `load_recipe(path)` / `save_recipe(…)` / `edit_recipe(path, old_text, new_text)` | レシピ (`<層>/recipes/<名前>/RECIPE.md`) を読み込む・作る・直す。読み出しと検査は `/recipes/folder`、前の版は `/files/trash` (`name`) で `<層>/trash/<名前>.RECIPE.md` へ、書き込みは `/files/write`。一覧は `/recipes/index` (`{{USER_RECIPES}}`)。判定と引数は nucllei の README_API |
+| `load_recipe(path)` / `save_recipe(…)` / `edit_recipe(path, old_text, new_text)` | (sandbox のツールではなく、モデルの能力「レシピ」で入る別の tool。sandbox の API を使うのでここに載せる) レシピ (`<層>/recipes/<名前>/RECIPE.md`) を読み込む・作る・直す。読み出しと検査は `/recipes/folder`、前の版は `/files/trash` (`name`) で `<層>/trash/<名前>.RECIPE.md` へ、書き込みは `/files/write`。一覧は `/recipes/index` (`load_recipe` の説明に差し込む)。判定と引数は nucllei の README_API |
 | `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧。管理者が所属していないグループには「所属していない (管理者なので見えている)」を添える — その中の一覧も同じ)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
 | `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/ext/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。nucllei 側にも在る (= 既に URL `/ext/…` で配信されている) `/ext/…` のファイルは添付せず、その URL (同じ文字列) を返す (下記) |
 
