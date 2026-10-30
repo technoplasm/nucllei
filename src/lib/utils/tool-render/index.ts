@@ -462,3 +462,50 @@ export const classifyToolResult = (
 	// ディスクリプタなし・未知 kind: 文字列をそのまま出す(動的解釈しない)
 	return { kind: 'text', value: content };
 };
+
+// 中で順に読み込んだ・実行したものの木(results[i].chain — BE tool_output.set_chain、2026-10-30)。
+// load_recipe の requires(recipe は入れ子)と、load_skill(/command・自動ロード)の before / after。
+// モデルには渡らない表示専用のデータ — 中の実行は別のカードにせず、この木で見せる。
+export type ToolChainStatus = 'ok' | 'loaded' | 'warning' | 'error';
+
+export type ToolChainNode = {
+	kind: string;
+	target: string;
+	status: ToolChainStatus;
+	reason?: string;
+	output?: string;
+	phase?: 'before' | 'after';
+	args?: Record<string, unknown>;
+	children?: ToolChainNode[];
+	body?: string;
+	notes?: string[];
+};
+
+export type ToolChain = {
+	entries: ToolChainNode[];
+	body?: string;
+	notes?: string[];
+};
+
+// 不正な形(古いデータ・壊れた値)は null — カードは通常の表示に戻る
+export const toToolChain = (value: unknown): ToolChain | null => {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+	const entries = (value as { entries?: unknown }).entries;
+	if (!Array.isArray(entries)) return null;
+	return value as ToolChain;
+};
+
+// 警告・ERROR の件数(入れ子とレシピ全体の警告 notes も数える)— カードの見出しの印
+export const chainIssueCount = (chain: ToolChain | null): number => {
+	if (!chain) return 0;
+	const count = (nodes: ToolChainNode[] | undefined): number =>
+		(nodes ?? []).reduce(
+			(sum, node) =>
+				sum +
+				(node.status === 'warning' || node.status === 'error' ? 1 : 0) +
+				(node.notes?.length ?? 0) +
+				count(node.children),
+			0
+		);
+	return count(chain.entries) + (chain.notes?.length ?? 0);
+};

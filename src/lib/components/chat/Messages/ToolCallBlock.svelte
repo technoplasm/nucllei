@@ -14,10 +14,12 @@
 
 	import { settings } from '$lib/stores';
 	import {
+		chainIssueCount,
 		classifyToolResult,
 		formatJSONString,
 		parseToolArgumentsStreaming,
 		toolErrorKind,
+		toToolChain,
 		TOOL_ERROR_LOOKS,
 		type RenderDescriptor,
 		type ToolCallRender,
@@ -39,6 +41,7 @@
 	import SubagentSessionBlock from './SubagentSessionBlock.svelte';
 	import ExecutionBlock from './ExecutionBlock.svelte';
 	import ToolResultTable from './ToolResultTable.svelte';
+	import ToolChainTree from './ToolChainTree.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -59,6 +62,9 @@
 		duration?: number;
 		// tool のエラー種別(README_API §5.1)。content はモデルに渡した ERROR 文そのもの
 		error_kind?: ToolErrorKind;
+		// 中で順に読み込んだ・実行したものの木(load_recipe の requires・load_skill の
+		// before / after — 2026-10-30)。表示専用でモデルには渡らない
+		chain?: unknown;
 	};
 
 	let {
@@ -160,6 +166,11 @@
 	const resultDisplay = $derived(
 		result ? classifyToolResult(result.content ?? '', result.render) : null
 	);
+
+	// 中で読み込んだ・実行したものの木(あれば結果はこの木で見せる — 中の実行は別のカードに
+	// しないので、ここが唯一の見え方)。警告・ERROR の件数はヘッダに印で出す
+	const chain = $derived(toToolChain(result?.chain));
+	const chainIssues = $derived(chainIssueCount(chain));
 
 	// #110: background 昇格された呼び出し。spawn は result(running 形)が即存在するため
 	// isDone が緑チェックを出してしまう — exec 行が running の間はスピナーに上書きする。
@@ -278,6 +289,23 @@
 	};
 </script>
 
+{#snippet skillTools(tools: string[])}
+	<div class="mt-1.5 mb-1">
+		<span
+			class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
+		>
+			{$i18n.t('Tools loaded')}
+		</span>
+	</div>
+	<div class="flex flex-wrap gap-1 my-0.5 px-0.5">
+		{#each tools as toolName}
+			<span class="text-xs font-mono rounded-md bg-gray-100 dark:bg-gray-850 px-1.5 py-0.5"
+				>{toolName}</span
+			>
+		{/each}
+	</div>
+{/snippet}
+
 {#snippet displayBody(separated: boolean)}
 	<!--
 		display チャネル(#88): tool が __display__(content) で押した人間向け表示。
@@ -351,6 +379,15 @@
 			-->
 			{#if isDone && !execRunning && errorKind}
 				<ToolErrorLabel kind={errorKind} class="font-normal shrink-0" />
+			{/if}
+			{#if chainIssues > 0}
+				<span
+					class="inline-flex items-center gap-0.5 font-normal shrink-0 text-amber-600 dark:text-amber-400"
+					title={$i18n.t('{{COUNT}} warnings or errors inside', { COUNT: chainIssues })}
+				>
+					<span class="i-lucide-triangle-alert size-3.5 block"></span>
+					<span class="tabular-nums">{chainIssues}</span>
+				</span>
 			{/if}
 			{#if subagentLabel}
 				<div class="max-w-52 truncate font-normal">{subagentLabel}</div>
@@ -438,6 +475,16 @@
 					>
 						{#if !resultDisplay || resultDisplay.kind === 'subagent'}
 							<!-- 子 session は下の固定位置で描く(live → 結果到着で同じインスタンス) -->
+						{:else if chain}
+							<!--
+								中で読み込んだ・実行したものの木(load_recipe の requires・load_skill の
+								before / after)+ 本文。モデルに渡した本文(資料と本文を 1 つにした文)は
+								ここでは出さない — 同じ中身を行ごとに見せる
+							-->
+							<ToolChainTree id={`${id || call.id}-chain`} {chain} />
+							{#if resultDisplay.kind === 'skill' && resultDisplay.tools.length > 0}
+								{@render skillTools(resultDisplay.tools)}
+							{/if}
 						{:else if resultDisplay.kind === 'skill'}
 							<!--
 								load_skill の構造化結果(#35): 指示本文(md レンダリング)+ 導入 tool 一覧。
@@ -448,21 +495,7 @@
 								<Markdown id={`${id || call.id}-skill`} content={resultDisplay.value} />
 							</div>
 							{#if resultDisplay.tools.length > 0}
-								<div class="mt-1.5 mb-1">
-									<span
-										class="inline-block text-xs font-medium text-content-muted bg-gray-100 dark:bg-gray-850 rounded-md px-1.5 py-0.5"
-									>
-										{$i18n.t('Tools loaded')}
-									</span>
-								</div>
-								<div class="flex flex-wrap gap-1 my-0.5 px-0.5">
-									{#each resultDisplay.tools as toolName}
-										<span
-											class="text-xs font-mono rounded-md bg-gray-100 dark:bg-gray-850 px-1.5 py-0.5"
-											>{toolName}</span
-										>
-									{/each}
-								</div>
+								{@render skillTools(resultDisplay.tools)}
 							{/if}
 						{:else if resultDisplay.kind === 'execution'}
 							<!--

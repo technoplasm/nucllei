@@ -4,7 +4,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	chainIssueCount,
 	classifyToolResult,
+	toToolChain,
 	formatJSONString,
 	parseToolArguments,
 	parseToolArgumentsStreaming,
@@ -502,5 +504,30 @@ describe('executionErrorKind', () => {
 		expect(executionErrorKind('running', 'call')).toBeNull();
 		expect(executionErrorKind('stopped', null)).toBeNull();
 		expect(executionErrorKind('orphaned', null)).toBeNull();
+	});
+});
+
+describe('toToolChain / chainIssueCount', () => {
+	it('壊れた形は null、件数は入れ子と notes も数える', () => {
+		expect(toToolChain(null)).toBeNull();
+		expect(toToolChain({ entries: 'x' })).toBeNull();
+		const chain = toToolChain({
+			entries: [
+				{ kind: 'read', target: '/a', status: 'ok' },
+				{ kind: 'read', target: '/b', status: 'warning', reason: '無い' },
+				{
+					kind: 'recipe',
+					target: '/r',
+					status: 'ok',
+					notes: ['使える人が限られる'],
+					children: [{ kind: 'shell', target: 'prep.sh', status: 'error' }]
+				},
+				{ kind: 'read', target: '/c', status: 'loaded' }
+			],
+			notes: ['全体の警告']
+		});
+		expect(chain).not.toBeNull();
+		expect(chainIssueCount(chain)).toBe(4);
+		expect(chainIssueCount(null)).toBe(0);
 	});
 });

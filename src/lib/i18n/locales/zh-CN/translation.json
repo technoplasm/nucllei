@@ -1,4 +1,8 @@
 {
+	"Ran": "已完成",
+	"Already loaded": "已加载",
+	"Body": "正文",
+	"{{COUNT}} warnings or errors inside": "其中有 {{COUNT}} 个警告或错误",
 	"Run before": "在正文之前运行",
 	"Run after": "在正文之后运行",
 	"{{name}} must be a JSON array.": "“{{name}}”必须是 JSON 数组。",

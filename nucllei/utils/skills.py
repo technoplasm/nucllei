@@ -347,6 +347,39 @@ def compose_skill_result(skill_id: str, body: str, records) -> str:
     return "\n\n".join([*before, body, *after])
 
 
+# 結果のカードに見せる木の 1 つの出力の上限(モデル向けの本文とは別に保存される)
+CHAIN_OUTPUT_MAX = 20000
+
+_CHAIN_STATUS = {"ok": "ok", "error": "error", "unavailable": "error"}
+
+
+def skill_chain(body: str, records) -> dict:
+    """結果のカードに見せる木(results[i].chain — tool_output.set_chain と同じ形): before / after の
+    記録を書いた順の節にし、本文を添える。モデルには渡らない(モデル向けは compose_skill_result)。"""
+    entries = []
+    for record in records or []:
+        content = record.get("content") or ""
+        status = _CHAIN_STATUS.get(record.get("status"), "error")
+        if len(content) > CHAIN_OUTPUT_MAX:
+            content = (
+                content[:CHAIN_OUTPUT_MAX]
+                + f"\n…(表示はここまで: {len(record['content'])} 字のうち {CHAIN_OUTPUT_MAX} 字)"
+            )
+        node = {
+            "kind": "tool",
+            "phase": record["phase"],
+            "target": record["tool"],
+            "status": status,
+            "output": content,
+        }
+        if record.get("args"):
+            node["args"] = record["args"]
+        if status == "error":
+            node["reason"] = content.split("\n", 1)[0]
+        entries.append(node)
+    return {"entries": entries, "body": body}
+
+
 async def apply_skill_hooks(activations, tools: dict, execute) -> None:
     """`/command`・自動ロードの発火の before / after を実行し、その発火の load_skill の結果を
     before → 本文 → after に組み直す(このリクエストの messages に入れた result_message と、
@@ -601,7 +634,9 @@ def current_skill_activation_seeds(skill_activations) -> list:
             "call_id": a["call_id"],
             "id": a["id"],
             "result": a["result"],
-            **({"hooks": a["hooks"]} if a.get("hooks") else {}),
+            **(
+                {"hooks": a["hooks"], "content": a["content"]} if a.get("hooks") else {}
+            ),
         }
         for a in skill_activations
     ]
@@ -700,9 +735,13 @@ def build_load_skill_tool(model, user, load_tools=None, messages=None, run_hooks
             records = []
             if run_hooks is not None and (skill.before or skill.after):
                 records = await run_hooks(skill)
-            result = compose_skill_result(
-                skill.id, activate_skill(skill, user, model), records
-            )
+            body = activate_skill(skill, user, model)
+            result = compose_skill_result(skill.id, body, records)
+            if records:
+                # カードに見せる木(results[i].chain — モデルには渡らない)
+                from nucllei.utils.tool_output import set_chain
+
+                set_chain(skill_chain(body, records))
         # 戻り値は構造化 JSON {result, tools}(#35): 指示本文と「何が導入されたか」を
         # モデル/UI の双方に見せる。str のまま返す(ループは str を素通しする)。
         return json.dumps(
@@ -748,7 +787,16 @@ def skill_activation_seed_block(skill_activations) -> dict:
             for a in skill_activations
         ],
         "results": [
-            {"tool_call_id": a["call_id"], "content": a["result"]}
+            {
+                "tool_call_id": a["call_id"],
+                "content": a["result"],
+                # before / after の木(カードの表示 — モデルには渡らない)
+                **(
+                    {"chain": skill_chain(a.get("content") or "", a["hooks"])}
+                    if a.get("hooks")
+                    else {}
+                ),
+            }
             for a in skill_activations
         ],
     }

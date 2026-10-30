@@ -744,6 +744,71 @@ def test_load_recipe_warnings_stay_in_the_stored_result(sbx):
     assert "### read /workspace/無い.md\n警告:" in tool_message["content"]
 
 
+def test_load_recipe_chain_for_the_card(sbx, shell):
+    """結果のカードに見せる木 (results[i].chain): requires を書いた順の節 (recipe は入れ子で、その
+    requires と本文)、状態は ok / loaded / warning / error、最後に本文。モデル向けの本文とは別。"""
+    from nucllei.utils.tool_output import ToolOutputSink, current_sink
+
+    _put(
+        sbx["ws"],
+        "親",
+        _md(
+            body="親の手順\n",
+            extra=(
+                "requires:\n  - read: a.md\n  - recipe: /workspace/recipes/子\n"
+                "  - read: /workspace/無い.md\n  - shell: prep.sh 30d\n  - read: a.md\n"
+            ),
+        ),
+        **{"a.md": "AAA", "prep.sh": "echo"},
+    )
+    _put(
+        sbx["ws"],
+        "子",
+        _md(body="子の手順\n", extra="requires:\n  - read: c.md\n"),
+        **{"c.md": "CCC"},
+    )
+    shell["behaviour"]["stdout"] = "30 件"
+    sink = ToolOutputSink("c1")
+    tool = _tool()
+
+    async def go():
+        token = current_sink.set(sink)
+        try:
+            return await call_text(
+                tool.load_recipe(
+                    "/workspace/recipes/親",
+                    __user__=USER,
+                    __metadata__={},
+                    __messages__=[],
+                )
+            )
+        finally:
+            current_sink.reset(token)
+
+    out = asyncio.run(go())
+    chain = sink.chain()
+    assert chain["body"] == "親の手順"
+    rows = [(n["kind"], n["target"], n["status"]) for n in chain["entries"]]
+    assert rows == [
+        ("read", "/workspace/recipes/親/a.md", "ok"),
+        ("recipe", "/workspace/recipes/子", "ok"),
+        ("read", "/workspace/無い.md", "warning"),
+        ("shell", "prep.sh 30d", "ok"),
+        ("read", "/workspace/recipes/親/a.md", "loaded"),
+    ]
+    assert "AAA" in chain["entries"][0]["output"]
+    child = chain["entries"][1]
+    assert child["body"] == "子の手順"
+    assert [(n["kind"], n["status"]) for n in child["children"]] == [("read", "ok")]
+    assert (
+        "無い" in chain["entries"][2]["reason"]
+        and "次の手:" in chain["entries"][2]["reason"]
+    )
+    assert "30 件" in chain["entries"][3]["output"]
+    # モデル向けの本文は今までどおり 1 つの文
+    _pos(out, "AAA", "CCC", "子の手順", "30 件", "親の手順")
+
+
 def test_load_recipe_cuts_long_parts_but_keeps_the_body(sbx, monkeypatch):
     import nucllei.env
 

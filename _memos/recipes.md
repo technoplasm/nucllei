@@ -57,7 +57,10 @@
   閉じタグだけ潰していたので、共有レシピの本文に開きタグの印を書けば別のレシピ・要素を止められた。
   偽の枠が作れないので、本文の中の「警告: …」も `<recipe>` の中 = 利用者の文だと構造で分かる)。
 - **中の実行は run_shell / read_file をそのまま呼ぶ** (sink を外す — 中の表示・失敗の旗を load_recipe の
-  カードに混ぜない)。失敗はその位置の ERROR 1 行で、他は続ける。
+  カードに混ぜない)。
+  代わりにカードは木で見せる (results[i].chain — `tool_output.set_chain`、ken 2026-10-30「chain されたことが
+  分かるといい」): requires の節 (kind・target・status ok / loaded / warning / error・reason・output、recipe は
+  children / body / notes) と本文。モデルには渡らない。FE は ToolChainTree (行 → 開くと出力、見出しに件数)。失敗はその位置の ERROR 1 行で、他は続ける。
 - **大きさは TOOL_RESULT_MAX_CHARS に収める**: 共通の切り詰めは末尾を落とす = 本文が消えるので、
   本文・見出し・警告は残し、資料を書いた順に詰めて入らない所で切る (切った位置と続きの取り方を書く)。
 - **「使えない」の所属は {{USER_GROUPS}} と同じ** (管理者でも所属で見る — 0c6de9e14 と揃える)。

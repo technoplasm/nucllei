@@ -406,6 +406,12 @@ execute_tool_calls を閉じ込めたフック)を呼び、同じ 1 つの結果
 - 本文の変数(`{{CURRENT_DATE}}` 等)は発火したターンの値で固定される(以前の `/command` は
   毎リクエスト展開していた)。モデルの load_skill は前からそう。
 
+**カード(results[i].chain、同日)**: モデル向けの本文とは別に、before / after の節(phase・tool・
+args・status・output)と本文を `skill_chain` で組んで結果に載せる(`/command`・自動ロードは発火の
+ブロックの結果に、モデルの load_skill は `tool_output.set_chain` → middleware が display と同じく
+harvest)。FE は ToolChainTree で before の行 → 本文 → after の行を描き、ERROR の件数を見出しに出す。
+モデルへの再送(convert / expandAssistantToolHistory)は content しか読まないので context は増えない。
+
 **既知の割り切り**:
 (1) 結果を書き戻すのは、payload に注入した result_message の dict(inlet filter より後)— filter が
 messages を作り直していればそのターンのモデルには本文だけが届く(応答に残る結果は組み直した物。

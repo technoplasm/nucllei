@@ -1,4 +1,8 @@
 {
+	"Ran": "済",
+	"Already loaded": "読み込み済み",
+	"Body": "本文",
+	"{{COUNT}} warnings or errors inside": "中に警告・ERROR が {{COUNT}} 件",
 	"Run before": "本文の前に実行",
 	"Run after": "本文の後に実行",
 	"{{name}} must be a JSON array.": "「{{name}}」は JSON の配列で書いてください。",

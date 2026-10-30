@@ -832,3 +832,39 @@ def test_progress_helper_passes_subagent_through_context():
     finally:
         tool_output.current_sink.reset(token)
     assert emitted[0]["subagent"] == {"session_id": "s1"}
+
+
+def test_set_chain_is_harvested_into_result_and_not_sent_to_model():
+    """set_chain(load_recipe / load_skill の木)は results[i].chain に載り、モデル向けの
+    履歴(convert_content_blocks_to_messages)には入らない(2026-10-30)。"""
+    import asyncio
+
+    from nucllei.utils.middleware import execute_tool_calls
+    from nucllei.utils.tool_output import set_chain
+
+    tree = {"entries": [{"kind": "read", "target": "/a", "status": "ok"}], "body": "b"}
+
+    async def chained():
+        set_chain(tree)
+        return "本文"
+
+    tools = {
+        "chained": {
+            "spec": {
+                "name": "chained",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            "callable": chained,
+        }
+    }
+    call = {
+        "id": "c1",
+        "type": "function",
+        "function": {"name": "chained", "arguments": "{}"},
+    }
+    (result,) = asyncio.run(execute_tool_calls([call], tools))
+    assert result["chain"] == tree and result["content"] == "本文"
+    messages = convert_content_blocks_to_messages(
+        [{"type": "tool_calls", "content": [call], "results": [result]}]
+    )
+    assert messages[1] == {"role": "tool", "tool_call_id": "c1", "content": "本文"}

@@ -676,3 +676,74 @@ class TestSkillHooks(AbstractPostgresTest):
         messages = convert_content_blocks_to_messages(saved)
         assert [m["role"] for m in messages] == ["assistant", "tool"]
         assert _called_skill_ids(messages) == ["emr"]
+
+    # ── カードの木 (results[i].chain) ─────────────────────────
+
+    def test_seed_block_carries_chain_not_sent_to_model(self, monkeypatch):
+        """発火のブロックの結果に before / after の木と本文が載る(モデルには渡らない)。"""
+        from nucllei.utils.content_blocks import (
+            convert_content_blocks_to_messages,
+            snapshot_content_blocks,
+        )
+        from nucllei.utils.skills import skill_activation_seed_block
+
+        self._patch_get_tools(monkeypatch)
+        self._skill(
+            "emr",
+            before=[{"tool": "probe", "args": {"x": 1}}],
+            after=[{"tool": "missing"}],
+        )
+        _, metadata = self._payload(
+            [{"role": "user", "content": "/emr"}],
+            _model("emr", tool_ids=["probe-tools"]),
+        )
+        block = skill_activation_seed_block(metadata["skill_activations"])
+        chain = block["results"][0]["chain"]
+        assert chain["body"] == "【emr の手順書】"
+        assert [
+            (n["phase"], n["kind"], n["target"], n["status"]) for n in chain["entries"]
+        ] == [("before", "tool", "probe", "ok"), ("after", "tool", "missing", "error")]
+        assert chain["entries"][0]["output"] == "probe result 1"
+        assert chain["entries"][0]["args"] == {"x": 1}
+        assert chain["entries"][1]["reason"].startswith(
+            "ERROR: skill emr の読み込み時に実行する missing は使えない"
+        )
+        saved = snapshot_content_blocks([block])
+        assert saved[0]["results"][0]["chain"] == chain  # 保存される
+        (tool_message,) = [
+            m for m in convert_content_blocks_to_messages(saved) if m["role"] == "tool"
+        ]
+        assert set(tool_message) == {"role", "tool_call_id", "content"}
+
+    def test_model_load_skill_sets_chain_on_its_sink(self):
+        from nucllei.utils.skills import build_load_skill_tool, run_skill_hooks
+        from nucllei.utils.tool_output import ToolOutputSink, current_sink
+
+        self._skill("emr", before=[{"tool": "probe", "args": {"x": 2}}])
+        tools = {"probe": self._tool_entry()}
+
+        async def execute(calls):
+            return [
+                {"tool_call_id": c["id"], "content": "ok", "duration": 0.0}
+                for c in calls
+            ]
+
+        async def run_hooks(skill):
+            return await run_skill_hooks(skill, tools, execute)
+
+        entry = build_load_skill_tool(_model("emr"), self.user, run_hooks=run_hooks)
+        sink = ToolOutputSink("functions.load_skill:0")
+
+        async def go():
+            token = current_sink.set(sink)
+            try:
+                return await entry["callable"](skill_id="emr")
+            finally:
+                current_sink.reset(token)
+
+        asyncio.run(go())
+        chain = sink.chain()
+        assert chain["body"] == "【emr の手順書】"
+        assert [(n["phase"], n["status"]) for n in chain["entries"]] == [
+            ("before", "ok")
+        ]

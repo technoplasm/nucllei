@@ -93,6 +93,9 @@ class ToolOutputSink:
         self._context_images: list[str] = []
         self._displays: list[dict] = []
         self._result_render: Optional[dict] = None
+        # 中で順に読み込んだ・実行したものの木(load_recipe の requires・skill の before / after —
+        # set_chain)。results[i].chain に載る人間向けの表示で、モデルには渡らない
+        self._chain: Optional[dict] = None
         # 結果に付ける失敗の種別(#145 — mark_error_kind)。raise せずに返した結果を
         # 「失敗」として見せる口
         self._error_kind: Optional[str] = None
@@ -151,6 +154,18 @@ class ToolOutputSink:
     def result_render(self) -> Optional[dict]:
         with self._lock:
             return dict(self._result_render) if self._result_render else None
+
+    # --- 中で読み込んだ・実行したものの木(2026-10-30)-----------------------
+
+    def set_chain(self, chain: dict) -> None:
+        if not isinstance(chain, dict) or not chain:
+            return
+        with self._lock:
+            self._chain = chain
+
+    def chain(self) -> Optional[dict]:
+        with self._lock:
+            return self._chain
 
     # --- 結果の失敗フラグ(#145)-------------------------------------------
 
@@ -420,6 +435,22 @@ def progress(
         log.debug("progress push failed", exc_info=True)
 
 
+def set_chain(chain: dict) -> None:
+    """この tool の中で順に読み込んだ・実行したもの(load_recipe の requires、load_skill の
+    before / after)の木を、結果のカードに見せる(results[i].chain — 2026-10-30)。
+
+    `{"entries": [node…], "body": <本文>}`。node は {kind, target, status (ok / loaded /
+    warning / error), reason?, output?, phase? (before / after), children? / body? (入れ子の
+    レシピ)}。display と同じく**人間向けで、モデルへは渡らない**(convert_content_blocks_to_messages・
+    FE の履歴の展開は content しか読まない)— モデル向けの本文は戻り値のまま。成功時だけ載る。
+    tool 実行文脈外(sink 未設定)では no-op。
+    """
+    sink = current_sink.get()
+    if sink is None:
+        return
+    sink.set_chain(chain)
+
+
 def mark_error_kind(kind: str = "failure") -> None:
     """返す結果を「失敗」として見せる(#145、raise しない版)。
 
@@ -445,4 +476,5 @@ __all__ = [
     "feed_image",
     "mark_error_kind",
     "progress",
+    "set_chain",
 ]

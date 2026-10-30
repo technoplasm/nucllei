@@ -2878,6 +2878,19 @@ exit_code=0 (0.1s)
 There is no separate tool card or tool exchange for them. A skill with both
 empty returns its content alone, as before.
 
+**The card** — besides the model-facing `content`, the result carries
+`results[i].chain` (display only — never sent to the model; the history
+expansion reads `content` alone): `{"entries": [node…], "body": "<skill
+content>"}`, one node per `before` / `after` entry in the order written,
+`{"kind": "tool", "phase": "before"|"after", "target": "<tool>", "args": {…},
+"status": "ok"|"error", "output": "…", "reason"?: "<first line of the ERROR>"}`
+(`output` capped at 20,000 characters). The UI shows the `before` rows, the
+skill content, then the `after` rows inside the `load_skill` card, with the
+count of errors on the card header. For `/command` / attachments it is on the
+stored activation block; for the model's `load_skill` the tool sets it through
+the tool sink (`tool_output.set_chain`, harvested into `results[i].chain` like
+`display`).
+
 - **Once per chat.** They run only when the skill's content enters the context
   — the activation of `/command` / an attachment (which fires once, §6.3) or
   the model's first `load_skill`. A later `load_skill` of the same skill returns
@@ -3015,7 +3028,18 @@ tool **in the order written**, each under a heading, and **this recipe's body
 last**. A `recipe:` entry is expanded depth-first at its position — that
 recipe's own `requires`, then its body. (Until this change the body came first
 and the entries followed as separate synthetic tool exchanges; that order broke
-on `/command` and attachment turns, so it is gone.) Example (personal recipe; `read` · `recipe` ·
+on `/command` and attachment turns, so it is gone.) The card does not show this
+text: the result also carries `results[i].chain` (display only, never sent to
+the model): `{"entries": [node…], "body": "<this recipe's body>", "notes"?:
+[<recipe-wide warnings>]}`, a node per `requires` entry in the order written —
+`{"kind": "read"|"shell"|"python"|"recipe", "target": "<path / file and args>",
+"status": "ok"|"loaded"|"warning"|"error", "reason"?: "…", "output"?: "…"}`; a
+`recipe` node that was expanded also has `children` (its own entries), `body`
+and `notes`. `output` is capped at 20,000 characters for the card (the model
+text has its own budget, below). The UI shows one row per node (kind · target ·
+済 / 読み込み済み / 警告 / ERROR, the reason under warnings and errors), each
+row opening to its output, then the body; the card header shows the count of
+warnings and errors. Example of the model text (personal recipe; `read` · `recipe` ·
 `shell` · a warning):
 
 ```

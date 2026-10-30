@@ -2075,6 +2075,7 @@ async def _execute_one_tool_call(
     flagged_error_kind = None
     context_image_file_ids = []
     display_items = []
+    chain = None
     result_render_override = None
     # background に昇格した call の結果は spawn の封筒(running 形)— 実 tool の静的な宣言は
     # 封筒には当てない(中身は await_task が持ち上げる)
@@ -2201,6 +2202,8 @@ async def _execute_one_tool_call(
             context_image_file_ids = sink.context_images() if tool_succeeded else []
             # display(人間の目、#88)も同じ規律で成功時のみ harvest。
             display_items = sink.displays() if tool_succeeded else []
+            # 中で読み込んだ・実行したものの木(load_recipe / load_skill — set_chain)も同じ
+            chain = sink.chain() if tool_succeeded else None
             # #110(§8): await_task が宣言した表示ディスクリプタ
             # (exec 行の render_descriptor)は型由来の render より優先する
             result_render_override = sink.result_render() if tool_succeeded else None
@@ -2261,6 +2264,7 @@ async def _execute_one_tool_call(
             {"context_images": context_image_file_ids} if context_image_file_ids else {}
         ),
         **({"display": display_items} if display_items else {}),
+        **({"chain": chain} if chain else {}),
     }
 
 

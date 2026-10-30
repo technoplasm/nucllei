@@ -140,6 +140,37 @@ def _part_heading(item) -> str:
     return _defuse(f"### {item.kind} {item.raw} の出力")
 
 
+# 結果のカードに見せる木(results[i].chain — tool_output.set_chain)の 1 つの出力の上限。モデルに
+# 渡す本文とは別に保存されるので、長い資料はカードでは途中まで(全体はモデル向けの本文にある)
+CHAIN_OUTPUT_MAX = 20000
+
+
+def _chain_text(text: str) -> str:
+    text = text or ""
+    if len(text) <= CHAIN_OUTPUT_MAX:
+        return text
+    return (
+        text[:CHAIN_OUTPUT_MAX]
+        + f"\n…(表示はここまで: {len(text)} 字のうち {CHAIN_OUTPUT_MAX} 字)"
+    )
+
+
+def _chain_node(item, status: str, reason: str = "", output: str = "") -> dict:
+    """requires の 1 要素の表示用の節。status は ok / loaded / warning / error。"""
+    if item.kind == "read":
+        target = item.ref_path
+    elif item.kind == "recipe":
+        target = item.args["path"]
+    else:
+        target = item.raw
+    node = {"kind": item.kind, "target": target, "status": status}
+    if reason:
+        node["reason"] = reason
+    if output:
+        node["output"] = _chain_text(output)
+    return node
+
+
 @dataclass
 class _Section:
     """load_recipe の結果の一片。`cut` は上限を超えたら切ってよいもの (requires の実行結果)、
@@ -283,8 +314,9 @@ class RecipeTools:
                 f"レシピ {ref.folder} が無い",
                 f"list_workspace で {ref.layer.recipes} を見てパスを確かめる。",
             )
+        root: dict = {"children": []}
         sections = await self._expand_recipe(
-            ref, __user__, marks, files, skipped, depth=0
+            ref, __user__, marks, files, skipped, depth=0, node=root
         )
         if sections is None:  # 壊れている (理由は marks に積んだ)
             raise sb.ToolCallError(
@@ -294,13 +326,24 @@ class RecipeTools:
         if isinstance(__metadata__, dict):
             __metadata__[RECIPES_LOADED_KEY] |= marks.folders
             __metadata__[RECIPE_PARTS_DONE_KEY] |= marks.keys
+        # カードに見せる木 (モデルには渡らない)。中の実行の表示は外しているので、ここで見せる
+        from nucllei.utils.tool_output import set_chain
+
+        set_chain(
+            {
+                "entries": root["children"],
+                "body": root.get("body", ""),
+                **({"notes": root["notes"]} if root.get("notes") else {}),
+            }
+        )
         return _compose(sections)
 
     async def _expand_recipe(
-        self, ref, user: dict, marks, files: dict, skipped: dict, depth: int
+        self, ref, user: dict, marks, files: dict, skipped: dict, depth: int, node: dict
     ) -> Optional[list]:
         """1 つのレシピを「その requires (書いた順) → その本文」の _Section の並びにする。壊れていれば
-        None (理由は `marks.broken`)。requires の recipe: は深さ優先でここを呼び直す。"""
+        None (理由は `marks.broken`)。requires の recipe: は深さ優先でここを呼び直す。
+        カードの木は `node` に積む (children = requires の節、body = 本文、notes = レシピ全体の警告)。"""
         from nucllei.utils.recipe_index import assess_loaded_recipe
         from nucllei.utils.recipes import (
             RECIPE_MD,
@@ -323,6 +366,9 @@ class RecipeTools:
             head = _part_heading(item)
             if n in warns.items:
                 reason, next_step = warns.items[n]
+                node["children"].append(
+                    _chain_node(item, "warning", f"{reason}。次の手: {next_step}。")
+                )
                 out.append(
                     _Section(
                         f"<recipe-part>\n{head}\n"
@@ -334,10 +380,13 @@ class RecipeTools:
                 )
                 continue
             if item.kind == "recipe":
-                out += await self._expand_required_recipe(item, user, marks, depth)
+                out += await self._expand_required_recipe(
+                    item, user, marks, depth, node["children"]
+                )
                 continue
             key = _part_key(item, ref.folder)
             if key in marks.keys:
+                node["children"].append(_chain_node(item, "loaded"))
                 out.append(
                     _Section(
                         f"<recipe-part>\n{head}\n(読み込み済み — この会話の上にある"
@@ -346,6 +395,11 @@ class RecipeTools:
                 )
                 continue
             body, ok, note = await self._run_part(item, user)
+            node["children"].append(
+                _chain_node(item, "ok", output=body)
+                if ok
+                else _chain_node(item, "error", body.split("\n", 1)[0], output=body)
+            )
             if ok:
                 marks.keys.add(key)
             open_tag = f'<recipe-part key="{_attr(key)}">' if ok else "<recipe-part>"
@@ -356,6 +410,11 @@ class RecipeTools:
         author = plain(fm.get("author")) or "不明"
         updated = fm.get("updated")
         title = plain(fm.get("title")) or ref.name
+        node["body"] = fm.body.strip("\n")
+        if warns.recipe:
+            node["notes"] = [
+                f"{reason}。次の手: {next_step}。" for reason, next_step in warns.recipe
+            ]
         body = _defuse(fm.body.strip("\n"))
         attachments = sorted(rel for rel in files if rel != RECIPE_MD)
         lead = (
@@ -384,20 +443,25 @@ class RecipeTools:
         )
         return out
 
-    async def _expand_required_recipe(self, item, user: dict, marks, depth: int):
-        """requires の recipe: の 1 要素 (その位置に入れ子で展開する)。"""
+    async def _expand_required_recipe(
+        self, item, user: dict, marks, depth: int, tree: list
+    ):
+        """requires の recipe: の 1 要素 (その位置に入れ子で展開する)。カードの節は `tree` に積む。"""
         from nucllei.utils.recipes import parse_recipe_path
         from nucllei.utils.tool_errors import ToolError
 
         target = parse_recipe_path(item.args["path"])
         head = _part_heading(item)
 
-        def line(text: str) -> list:
+        def line(text: str, status: str = "warning") -> list:
+            reason = text.removeprefix("警告: ") if status == "warning" else ""
+            tree.append(_chain_node(item, status, reason))
             return [_Section(f"<recipe-part>\n{head}\n{_defuse(text)}\n</recipe-part>")]
 
         if target.folder in marks.folders:
             return line(
-                "(読み込み済み — この会話の上にある load_recipe の結果。循環ならここで止まる)"
+                "(読み込み済み — この会話の上にある load_recipe の結果。循環ならここで止まる)",
+                "loaded",
             )
         if depth + 1 >= RECIPE_MAX_DEPTH:
             return line(
@@ -416,8 +480,9 @@ class RecipeTools:
                 "次の手: 参照先を戻すか、edit_recipe で requires から外す・直す。"
             )
         before = getattr(marks, "broken", None)
+        child = {**_chain_node(item, "ok"), "children": []}
         inner = await self._expand_recipe(
-            target, user, marks, files, skipped, depth + 1
+            target, user, marks, files, skipped, depth + 1, node=child
         )
         if inner is None:
             reasons, marks.broken = marks.broken, before
@@ -427,6 +492,7 @@ class RecipeTools:
                 + " — 読まなかった。次の手: そのレシピを edit_recipe で直す"
                 " (直すまでこのレシピの手順はそのレシピ無しで進める)。"
             )
+        tree.append(child)
         return (
             [_Section(f'<recipe-part key="recipe:{_attr(target.folder)}">\n{head}')]
             + inner
