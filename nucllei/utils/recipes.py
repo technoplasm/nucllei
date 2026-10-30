@@ -60,11 +60,14 @@ NAME_MAX_BYTES = 200
 INDEX_DESCRIPTION_CHARS = 120
 
 # 壊れたレシピの次の手 (一覧の印・load_recipe の ERROR — ken 2026-10-30)。印の理由は書いた人の文を
-# 含まない (`assess_recipe(safe=True)`) ので、直すには原文を見る — read_file を先に言う (staging で
-# 「壊れているのを全部直して」に load_recipe → ERROR → read_file → edit_recipe の 3 手ずつ掛かった。
-# llens 経由 ken 2026-10-30)。RECIPE.md そのものが無い・読めないものは作り直す
-BROKEN_NEXT = "read_file で原文 (RECIPE.md) を見て edit_recipe で直す"
-BROKEN_REWRITE_NEXT = "save_recipe で作り直す"
+# 含まない (`assess_recipe(safe=True)`) ので、直すには原文を見る (staging で「壊れているのを全部直して」に
+# load_recipe → ERROR → read_file → edit_recipe の 3 手ずつ掛かった)。直す tool と渡す path (フォルダ) を
+# 先に言い、原文の読み方は後ろに添える (staging の batch 1 の比較: read_file で <フォルダ>/RECIPE.md を
+# 読んだ後、そのパスのまま edit_file を呼んで断られた — 2/3)。一覧の印は「この行のフォルダ」と指す
+# (印の直後にある。「このフォルダ」だと壊れた行が続くと前の行のフォルダに読める — 敵対レビュー。
+# フォルダを 2 回書くと system prompt が伸びる)。RECIPE.md そのものが無い・読めないものは作り直す
+BROKEN_NEXT = "edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)"
+BROKEN_REWRITE_NEXT = "save_recipe(path=この行のフォルダ) で作り直す"
 # 直せない人 (全体の層を管理者でない人が読む) には直させない — read_file → edit_recipe の ERROR の 2 手が
 # 無駄になる (敵対レビュー)
 BROKEN_READONLY_NEXT = "直せるのは管理者なので、壊れていることをユーザーに伝える"
@@ -923,18 +926,23 @@ def md_unusable(reasons: list[str]) -> bool:
     return bool(reasons) and reasons[0].startswith("RECIPE.md が")
 
 
-def broken_next(reasons: list[str], md_path: str = "", writable: bool = True) -> str:
-    """壊れたレシピの次の手。`md_path` (load_recipe の ERROR) があれば原文のパスを添える。`writable` は
-    読む人がその層に書けるか (`recipe_writable`)。"""
+def broken_next(reasons: list[str], folder: str = "", writable: bool = True) -> str:
+    """壊れたレシピの次の手。`folder` (load_recipe の ERROR・入れ子の警告) があれば実際のパスで言う
+    (一覧の印は行のフォルダを「このフォルダ」と指す)。直す tool と渡す path (フォルダ) を先に言う。
+    `writable` は読む人がその層に書けるか (`recipe_writable`)。"""
     if not writable:
         return BROKEN_READONLY_NEXT
+    if not folder:
+        return BROKEN_REWRITE_NEXT if md_unusable(reasons) else BROKEN_NEXT
+    # フォルダ名は書いた人の文 (`"` `)` や「次の手:」も名前の規則を通る) — JSON の文字列で埋め、
+    # 引用符の外へ出られないようにする (敵対レビュー)
+    q = json.dumps(folder, ensure_ascii=False)
     if md_unusable(reasons):
-        return BROKEN_REWRITE_NEXT
-    if not md_path:
-        return BROKEN_NEXT
+        return f"save_recipe(path={q}) で作り直す"
+    md = json.dumps(f"{folder}/{RECIPE_MD}", ensure_ascii=False)
     return (
-        f"read_file で原文 ({md_path}) を見て edit_recipe で直す"
-        " (丸ごと書き直すなら save_recipe で上書き)"
+        f"edit_recipe(path={q}) で直す (原文は read_file で {md} を見る。"
+        "丸ごと書き直すなら save_recipe で上書き)"
     )
 
 

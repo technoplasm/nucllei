@@ -448,7 +448,7 @@ class RecipeTools:
                 f"レシピ {ref.folder} は壊れている: " + "、".join(marks.broken),
                 broken_next(
                     marks.broken,
-                    ref.md,
+                    ref.folder,
                     recipe_writable(ref.folder, __user__.get("role")),
                 )
                 + "。",
@@ -651,7 +651,9 @@ class RecipeTools:
                 + "、".join(reasons)
                 + " — 読まなかった。次の手: "
                 + broken_next(
-                    reasons, target.md, recipe_writable(target.folder, user.get("role"))
+                    reasons,
+                    target.folder,
+                    recipe_writable(target.folder, user.get("role")),
                 )
                 + " (直すまでこのレシピの手順はそのレシピ無しで進める)。"
             )

@@ -738,14 +738,29 @@ def _list_truncated_note(res: dict, entries: list) -> list[str]:
 
 
 def _recipe_md_refused(abs_path: str) -> ToolError:
-    """write_file / edit_file で RECIPE.md を書こうとした (レシピの本体は検査を通す tool で書く)。"""
+    """write_file / edit_file で RECIPE.md を書こうとした (レシピの本体は検査を通す tool で書く)。
+    次の手は渡す path (フォルダ) を実際の値で言う — read_file で RECIPE.md を読んだ後、そのパスのまま
+    edit_file を呼ぶ (staging 2026-10-30)。レシピの tool がこのターンに無ければ能力の案内。"""
+    # フォルダ名は書いた人の文 — JSON の文字列で埋める (`broken_next` と同じ)
+    folder = json.dumps(posixpath.dirname(abs_path), ensure_ascii=False)
+    keep = (
+        " (同じフォルダの付属は write_file / edit_file で書いてよい。RECIPE.md を run_python /"
+        " run_shell で書いて回り込まない)。"
+    )
+    if tool_in_turn("edit_recipe") or tool_in_turn("save_recipe"):
+        nxt = (
+            f"一部を直すなら edit_recipe(path={folder})、新しく作る・丸ごと書き直すなら"
+            f" save_recipe(path={folder}) を使う (path は RECIPE.md でなくフォルダ)"
+            + keep
+        )
+    else:
+        nxt = (
+            "このモデルではレシピが無効なので、使うなら管理者にモデルの能力「レシピ」を有効にして"
+            "もらうようユーザーに伝える" + keep
+        )
     return ToolCallError(
         f"{abs_path} はレシピの本体 (RECIPE.md) で、write_file / edit_file では書かない",
-        "レシピの tool があれば、新しく作る・丸ごと書き直すなら save_recipe、一部を直すなら"
-        " edit_recipe を使う。無ければ、このモデルではレシピが無効なので、使うなら管理者に"
-        "モデルの能力「レシピ」を有効にしてもらうようユーザーに伝える"
-        " (同じフォルダの付属は write_file / edit_file で書いてよい。RECIPE.md を run_python /"
-        " run_shell で書いて回り込まない)。",
+        nxt,
     )
 
 
@@ -2300,9 +2315,21 @@ class Tools:
         if end < size:
             body += f"\n\n(続きあり: next_offset={end}。続きは offset={end} で読む)"
         if is_recipe_md_path(abs_path):
+            from nucllei.utils.recipes import recipe_writable
+
+            folder = posixpath.dirname(abs_path)
+            # 直せない人 (全体の層を管理者でない人が読む) には edit_recipe を勧めない (敵対レビュー)。
+            # フォルダ名は書いた人の文 — JSON の文字列で埋める
+            fix = (
+                f" 直すなら edit_recipe(path={json.dumps(folder, ensure_ascii=False)}) で直す"
+                " (path は RECIPE.md でなくフォルダ。edit_file では書かない)。"
+                if recipe_writable(folder, __user__.get("role"))
+                else ""
+            )
             body += (
-                "\n\nレシピは load_recipe(path) で読み込み、直すなら edit_recipe で直す"
-                " (load_recipe が無いモデルではレシピが無効)。"
+                "\n\nレシピは load_recipe(path) で読み込む。"
+                + fix
+                + " load_recipe が無いモデルではレシピが無効。"
             )
         return _read_rendered(abs_path, body)
 

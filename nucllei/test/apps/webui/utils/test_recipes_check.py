@@ -530,10 +530,10 @@ def test_missing_and_hidden_references_are_warnings_not_broken():
         "RECIPE.md が普通のファイルでない"
     )
     assert R.broken_line(["a", "b", "c"]) == (
-        "[壊れている: a、b ほか 1 件。read_file で原文 (RECIPE.md) を見て edit_recipe で直す]"
+        "[壊れている: a、b ほか 1 件。edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)]"
     )
     assert R.broken_line(["RECIPE.md が無い"]) == (
-        "[壊れている: RECIPE.md が無い。save_recipe で作り直す]"
+        "[壊れている: RECIPE.md が無い。save_recipe(path=この行のフォルダ) で作り直す]"
     )
 
 
@@ -737,7 +737,9 @@ def test_broken_mark_names_the_key_only_when_it_is_a_plain_name(key, shown):
     assert reasons == [shown]
     line = R.broken_line(reasons)
     assert "SECRET" not in line and line.count("[") == 1 and line.count("]") == 1
-    assert line.endswith("。read_file で原文 (RECIPE.md) を見て edit_recipe で直す]")
+    assert line.endswith(
+        "。edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)]"
+    )
 
 
 @pytest.mark.parametrize(
@@ -781,7 +783,9 @@ def test_broken_mark_for_each_kind_says_what_and_where_without_author_text(
     assert reason in reasons
     line = R.broken_line(reasons)
     assert "SECRET" not in line
-    assert line.endswith("。read_file で原文 (RECIPE.md) を見て edit_recipe で直す]")
+    assert line.endswith(
+        "。edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)]"
+    )
 
 
 def test_broken_reasons_are_detailed_for_save_and_edit():

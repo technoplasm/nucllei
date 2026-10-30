@@ -70,7 +70,7 @@
 - **壊れている印に書いた人の文を混ぜない** (llens 経由 ken 2026-10-30): 一覧の印は system prompt / tool の
   説明に tool の文として入るので、理由は何が・どこが (行番号・requires の何番目・キーの名前は
   `[A-Za-z0-9_-]{1,32}` のときだけ。廃止キーは短い案内) だけ — 値・行の中身・本文は出さない
-  (`assess_recipe(safe=True)`)。次の手は「read_file で原文 (RECIPE.md) を見て edit_recipe で直す」(RECIPE.md が無い・
+  (`assess_recipe(safe=True)`)。次の手は「edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)」(RECIPE.md が無い・
   読めないものは「save_recipe で作り直す」、管理者でない人が見る全体の層のものは「直せるのは管理者なので…伝える」)。
   YAML が日付として読めない値・深い入れ子で一覧ごと落ちていたのも「YAML として読めない」に (敵対レビュー)。staging で「壊れているのを全部直して」に load_recipe → ERROR →
   read_file → edit_recipe の 3 手ずつ掛かった。load_recipe の ERROR も同じ理由で、次の手に原文のパス。

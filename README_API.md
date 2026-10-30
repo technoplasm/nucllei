@@ -3089,7 +3089,7 @@ variable the list stays in the description:
 ```
 - /workspace/recipes/月次集計 — 月次の件数を集計して表にする
 - [警告: requires の read /ext/groups/EMR/notes/検査結果.md が無い。読み込めるが、その要素は実行しない] /ext/groups/EMR/recipes/抽出 — EMR の抽出
-- [壊れている: frontmatter の知らないキー on_load (requires に変わった)。read_file で原文 (RECIPE.md) を見て edit_recipe で直す] /ext/public/recipes/共通
+- [壊れている: frontmatter の知らないキー on_load (requires に変わった)。edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)] /ext/public/recipes/共通
 ```
 
 The `description` is folded to one line and cut at 120 characters (`…`); the
@@ -3120,7 +3120,7 @@ marks, both **computed every time** and never stored, and both shared with
   when it matches `[A-Za-z0-9_-]{1,32}` (otherwise 「知らないキー (名前は原文で)」),
   a retired key's short hint (`on_load (requires に変わった)`, `tools (廃止)`) —
   never a value, a line's content or body text, and ends with
-  「read_file で原文 (RECIPE.md) を見て edit_recipe で直す」 (「save_recipe で作り直す」 when
+  「edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)」 (「save_recipe で作り直す」 when
   `RECIPE.md` itself is missing / not a file / not text; 「直せるのは管理者なので、
   壊れていることをユーザーに伝える」 for a non-admin reading a broken `/ext/public`
   recipe), so 「壊れているのを全部
@@ -3313,8 +3313,17 @@ exit_code=0 (0.1s)
 A **broken** recipe (the light check above) is an ERROR, with no body and no
 entries: `レシピ <folder> は壊れている: <reasons>` (the same reasons as the list
 mark) with the next step
-`read_file で原文 (<folder>/RECIPE.md) を見て edit_recipe で直す (丸ごと書き直すなら save_recipe で上書き)。`
-(`save_recipe で作り直す。` when `RECIPE.md` itself is unusable). A broken recipe
+`edit_recipe(path="<folder>") で直す (原文は read_file で "<folder>/RECIPE.md" を見る。丸ごと書き直すなら save_recipe で上書き)。`
+(`save_recipe(path="<folder>") で作り直す。` when `RECIPE.md` itself is unusable) —
+the fixing tool and the path to pass (the folder) come first since 2026-10-30
+(staging: after `read_file <folder>/RECIPE.md` the model called `edit_file` on
+that path). The list mark says the same with 「この行のフォルダ」 (the folder right
+after the mark — 「このフォルダ」 read as the previous line's folder when broken
+lines follow each other). The folder is embedded as a JSON string (a folder
+name is author text and may contain `"`). `write_file` / `edit_file` on a `RECIPE.md` name the recovery
+with the real folder (`edit_recipe(path="<folder>")` / `save_recipe(path="<folder>")`)
+when a recipe tool is on the turn, and `read_file`'s note on a `RECIPE.md` says
+`edit_recipe(path="<folder>")` (the folder, not RECIPE.md). A broken recipe
 in `requires` is a warning entry with the same next step.
 
 **The `requires` notation.** A recipe is written by users, so it takes a YAML
