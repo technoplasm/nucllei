@@ -514,25 +514,20 @@ class Tools:
         __metadata__: Optional[dict] = None,
         __feed_image__: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """画像 (PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF)・PDF を自分の目 (VLM) に入れ、実際に見て判断する (図・レイアウト・印影・手書き)。入れた画像は以降のターンにも残るので、PDF は pages で要るページに絞る。
-        ユーザーには何も表示されず、新しいファイルも作らない — 本文に `![図: …](URL)` を書いて見せてよいのは url で渡したものに限る (それ以外は戻り値に従う)。
+        """画像 (PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF)・PDF を自分の目 (VLM) に入れ、実際に見て判断する (図・レイアウト・印影・手書き)。入れた画像は以降のターンにも残るので、PDF は pages で要るページに絞る。ユーザーには表示されない。
+        対象は url / path / file_id のどれか 1 つ。3 つとも省くと、この会話に添付された PDF を全部合わせて 10 ページまで見る (直接添付の画像は既に見えている)。PDF は 1 件 3 ページまで (pages が無ければ url の #page=N か先頭から) 見て、総ページ数を返す。
 
-        対象は url / path / file_id のどれか 1 つ。受け取った形のまま渡す (組み立てない・書き換えない・
-        ホストを補わない)。3 つとも省略すると、この会話に添付された PDF を全部合わせて先頭から 10 ページまで
-        (filename で絞り込み。直接添付の画像は既に見えている。続きは file_id と pages で)。
-        PDF は pages のページ (無ければ url の #page=N、どちらも無ければ先頭 3 ページと総ページ数が返る)。
-
-        戻り値は何を目に入れたかの説明。失敗時は "ERROR: ..." で始まる文 — 何が起きたか (事実) と、
-        「次の手:」以降に自分が次にすること (ユーザーには伝えない)。
-
-        :param url: (任意) スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content` (戻り値の literal をそのまま)。
-        :param path: (任意) sandbox のファイルの絶対パス (`/workspace/…` `/ext/…`)。
-        :param file_id: (任意) 見たい画像・PDF の file_id (添付・生成物の id。UUID)。
-        :param filename: (任意) 対象ファイル名の部分一致フィルタ。
-        :param pages: (任意) PDF のページ範囲。"3" / "4-6" / "1-2,7" 形式。画像には付けない。
+        :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。受け取った形のまま (組み立てない・書き換えない・ホストを補わない)
+        :param path: sandbox のファイルの絶対パス (`/workspace/…` `/ext/…`)
+        :param file_id: 添付・生成物の file_id
+        :param filename: 3 つとも省いたときに、添付 PDF をファイル名の部分一致で絞る
+        :param pages: PDF のページ範囲 ("3" / "4-6" / "1-2,7")
         """
         # 使い方の細目 (失敗の種類・#page=N・file_id の出どころ等) は README_API §5.7.1。
-        # 型の判定・ERROR 文の次の一手は実行時の戻り値が持つ。
+        # 型の判定・ERROR 文の次の一手は実行時の戻り値が持つ。説明から外した細目 (2026-10-30 llens
+        # 「削って ERROR へ」) もその場面の戻り値が言う: 見せ方 (url は ![…](…)、path は
+        # fetch_from_workspace) は成功の結果、続きのページ (file_id と pages) は打ち切りの結果、画像に
+        # pages は url / path では ERROR (file_id の画像では pages を見ない)
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         if __feed_image__ is None:
@@ -602,7 +597,8 @@ class Tools:
             raise ToolError(
                 "対象が見つからない。無指定で対象になるのは添付 PDF だけ "
                 "(添付画像は既に自分の目に入っている)",
-                "URL なら url を、sandbox のファイルなら path を指定する。",
+                ("filename は添付 PDF の名前の一部で絞る。" if filename else "")
+                + "添付・生成物なら file_id を、URL なら url を、sandbox のファイルなら path を指定する。",
                 kind="outcome" if filename else "call",
             )
 

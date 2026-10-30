@@ -2403,7 +2403,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 
 The docstrings of `feed_image` and `fetch_url` carry only what the model needs
 to decide whether and how to call them — purpose, the accepted form of each
-argument, the return shape and the one-line ERROR shape. They are sent on every
+argument, the return shape and the one-line ERROR shape (`feed_image` dropped
+the return / ERROR shape on 2026-10-30 — the deployment's system prompt states
+the `ERROR:` / `次の手:` convention once for every tool — and leaves how to
+show what it saw, the continuation of a cut PDF and `pages` on an image to the
+result or error of that case). They are sent on every
 turn, so the finer guidance was moved here on 2026-10-04 (it cost ~900 tokens
 per turn). A deployment that wants the model to know it carries it in its
 prompts / skill bodies; the text below is a **template** (テンプレート — skill

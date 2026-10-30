@@ -401,13 +401,14 @@ def test_docstring_names_url_and_path_with_their_fixed_meanings():
     )
     assert "URL" in url_line and "/ext/" in url_line and "/workspace/" not in url_line
     assert "/workspace/" in path_line and "URL" not in path_line
-    assert "ホストを補わない" in doc
+    assert "ホストを補わない" in url_line
     assert "取り違え" not in doc and "どちらでも" not in doc
     assert "BE 上" not in doc and "添付・生成物" in doc
     # 2026-10-04: `#page=N` の扱い等の細目は README_API §5.7.1 へ移した (毎ターン送る
-    # token の節約)。docstring に残すのは引数の形・戻り値・ERROR の形だけ
-    assert "受け取った形のまま" in doc and '"ERROR: ..."' in doc
-    assert "先頭 3 ページと総ページ数が返る" in doc and '"4-6"' in doc
+    # token の節約)。2026-10-30 (llens「削って ERROR へ」): ERROR の形 (「次の手:」) は llens の
+    # system prompt が持つので外し、受け取った形のままは url の引数へ
+    assert "受け取った形のまま" in url_line and "ERROR" not in doc
+    assert "1 件 3 ページまで" in doc and "総ページ数を返す" in doc and '"4-6"' in doc
     assert "cage" not in doc.lower() and "棚" not in doc
 
 
@@ -1048,15 +1049,16 @@ def test_no_args_targets_attached_pdfs_only_not_images(monkeypatch):
     result, fed, _r = _run_with_files(monkeypatch, recs, n_pages=1, __files__=files[:1])
     assert fed == [] and result == (
         "ERROR: 対象が見つからない。無指定で対象になるのは添付 PDF だけ"
-        " (添付画像は既に自分の目に入っている)。次の手: URL なら url を、sandbox のファイル"
-        "なら path を指定する。"
+        " (添付画像は既に自分の目に入っている)。次の手: 添付・生成物なら file_id を、URL なら"
+        " url を、sandbox のファイルなら path を指定する。"
     )
 
 
 def test_no_target_kind_depends_on_whether_something_was_named(monkeypatch):
     """「対象が見つからない」は url / path / file_id 無しのときだけ。何も指していない (添付
     PDF も無い) は call、filename で指したのに一致する添付 PDF が無いは outcome — 文面は同じ
-    (llens 判定 2026-10-04)。file_id の不在は別経路 (file_id_error = call)。"""
+    (llens 判定 2026-10-04 — filename で指したときだけ、次の手に filename の効き方を前置する
+    2026-10-30)。file_id の不在は別経路 (file_id_error = call)。"""
     mod, _resolver = _install(monkeypatch, TABLE, n_pages=1)
     files = [
         {
@@ -1079,7 +1081,9 @@ def test_no_target_kind_depends_on_whether_something_was_named(monkeypatch):
     assert nothing.kind == "call"
     missing = run(filename="other", __files__=files)
     assert missing.kind == "outcome"
-    assert missing.text == nothing.text
+    assert missing.text == nothing.text.replace(
+        "次の手: ", "次の手: filename は添付 PDF の名前の一部で絞る。"
+    )
 
 
 def test_file_id_image_is_pushed_by_id_with_the_size_cap(monkeypatch):
@@ -1599,5 +1603,14 @@ def test_spec_description_carries_the_new_sentences():
         in desc
     )
     assert "このターン内で" not in desc
-    assert "全部合わせて先頭から 10 ページまで" in desc
-    assert "Files" not in desc and "新しいファイルも作らない" in desc
+    assert "全部合わせて 10 ページまで" in desc
+    # 見せ方・作らないことは成功の結果が言う (2026-10-30 llens「削って ERROR へ」)
+    assert "Files" not in desc and "ユーザーには表示されない" in desc
+    for gone in ("新しいファイル", "![", "(任意)", "続きは"):
+        assert gone not in json_dumps(spec), gone
+
+
+def json_dumps(obj):
+    import json
+
+    return json.dumps(obj, ensure_ascii=False)
