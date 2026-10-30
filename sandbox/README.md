@@ -444,7 +444,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - `POST /files/stat_many` — `{user_id, paths, mounts?}` → `{results: {<path>: "file" | "dir" |
     "symlink" | "other" | null}}` (2026-10-30)。jail の絶対パス (`/workspace/…` `/ext/…`) を 500 件まで
     まとめて stat する (経路も末端も symlink を辿らない、`null` は無い・見えない)。nucllei の
-    `{{USER_RECIPES}}` が全レシピの on_load の参照先 (`read:` `recipe:`) の有無を 1 回で調べるのに使う
+    `{{USER_RECIPES}}` が全レシピの requires の参照先 (`read:` `recipe:`) の有無を 1 回で調べるのに使う
   - `POST /recipes/folder` — `{user_id, path, mounts?, limit_bytes?}`。レシピのフォルダの中身を
     再帰で返す: `{exists, is_dir, files: [{rel, size, b64, mtime}], skipped: [{rel, why}], dirs,
     truncated}` (付属を含む。200 ファイルまで)。symlink・普通のファイルでないものは辿らず
