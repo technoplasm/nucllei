@@ -59,6 +59,12 @@ from nucllei.utils.misc import (
     get_message_list,
     convert_logit_bias_input_to_json,
 )
+from nucllei.utils.recipe_commands import (
+    apply_recipe_command,
+    recipe_activation_seed_calls,
+    recipe_activation_seeds,
+    run_recipe_activations,
+)
 from nucllei.utils.skills import (
     apply_skill_auto_load,
     apply_skill_command,
@@ -631,6 +637,10 @@ async def process_chat_payload(
     # 合成の load_skill tool exchange(call + 展開済み content の result)を
     # ヒットした user メッセージの直後へ注入する。
     form_data, skill_activations = apply_skill_command(form_data, user, model)
+    # `/name` でレシピを呼ぶ (utils/recipe_commands — skill に当たらなかった今の発言だけ)。
+    # 合成の load_recipe 往復を今の発言の直後に入れ、結果は能力の tool が揃ってから入れる (inlet の
+    # Filter が見るのは中身の空の結果)
+    form_data, recipe_activations = await apply_recipe_command(form_data, user, model)
 
     # 今回の発火は応答先頭の tool_calls ブロックとして残す(process_chat_response 側。
     # 次のリクエストからは履歴の load_skill 往復 — 同じターンの追撃では in_payload の印で
@@ -922,6 +932,15 @@ async def process_chat_payload(
             log.warning(f"tool '{name}' is shadowed by the capability tool")
         tools_dict[name] = entry
 
+    # `/name` で呼んだレシピの load_recipe を実行する (モデルの call と同じ execute_tool_calls で、
+    # このターンの load_recipe — 読める範囲・判定は load_recipe のまま)。結果は今の発言の直後の往復と、
+    # 応答の先頭に残す往復の両方に入る
+    if recipe_activations:
+        await run_recipe_activations(
+            recipe_activations, form_data["messages"], hook_execute
+        )
+        metadata["recipe_activations"] = recipe_activation_seeds(recipe_activations)
+
     # llens(#140): run_subagent は builtin `builtin_subagent`(Tools 行)になり、上の
     # get_tools 経路(meta.toolIds × 行の read ACL × available / spec_overrides フック)で
     # 載る。#107 以来の擬似 tool 直接注入はここから撤去した。
@@ -990,6 +1009,27 @@ async def process_chat_payload(
     # 表示(message.sources の emit)は撤去済み(2026-10-05 ken 決定 — 引用は一旦
     # 撤去。_memos/feature-triage.md)。
     return form_data, metadata, events
+
+
+def activation_seed_blocks(metadata) -> list:
+    """このターンの発火 (`/command`・自動ロードの load_skill、`/name` の load_recipe) を応答の先頭に置く
+    tool_calls ブロック (0 か 1 つ)。並びは messages に入れた順 — 同じ発言の直後では skill (自動ロード) の後に
+    レシピ。in_payload の印で同じターンの追撃には二重に載せず、保存で印が落ちて次からは履歴の往復になる。"""
+    block = None
+    if metadata.get("skill_activations"):
+        block = skill_activation_seed_block(metadata["skill_activations"])
+    if metadata.get("recipe_activations"):
+        calls, results = recipe_activation_seed_calls(metadata["recipe_activations"])
+        if block is None:
+            block = {
+                "type": "tool_calls",
+                "in_payload": True,
+                "content": [],
+                "results": [],
+            }
+        block["content"].extend(calls)
+        block["results"].extend(results)
+    return [block] if block is not None else []
 
 
 def blocks_event_data(content_blocks) -> dict:
@@ -2522,13 +2562,9 @@ async def process_chat_response(
     async def post_response_handler(response, events):
         tool_calls = []
 
-        # llens(#35): この turn の `/command`・自動ロードの発火を、モデル自律起動と同じ
-        # load_skill 往復として応答先頭に置く(保存され、次のリクエストからは履歴になる)。
-        seed_blocks = []
-        if metadata.get("skill_activations"):
-            seed_blocks.append(
-                skill_activation_seed_block(metadata["skill_activations"])
-            )
+        # llens(#35): この turn の `/command`・自動ロード・`/name` のレシピの発火を、モデル自律起動と
+        # 同じ tool 往復として応答先頭に置く(保存され、次のリクエストからは履歴になる)。
+        seed_blocks = activation_seed_blocks(metadata)
 
         # llens(#17/#23): デルタ → content_blocks の組み立ては assembler
         # (utils/response_assembler.py)へ分離。reasoning は SGLang reasoning

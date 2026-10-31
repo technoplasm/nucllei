@@ -127,9 +127,9 @@ def apply_skill_command(form_data, user, model):
     """
     activations = []
 
-    if not is_skills_feature_enabled(model):
+    model_skill_ids = command_skill_ids(model)
+    if not model_skill_ids:
         return form_data, activations
-    model_skill_ids = set(get_model_skill_ids(model))
 
     messages = form_data.get("messages", [])
     new_messages = []
@@ -141,35 +141,8 @@ def apply_skill_command(form_data, user, model):
         if message.get("role") != "user":
             continue
 
-        # content は文字列 or マルチパート(text パート)。text 部分を取り出す。
-        content = message.get("content")
-        if isinstance(content, list):
-            text = next(
-                (
-                    item.get("text", "")
-                    for item in content
-                    if item.get("type") == "text"
-                ),
-                None,
-            )
-        else:
-            text = content
-
-        if not isinstance(text, str):
-            continue
-
-        match = SKILL_COMMAND_PATTERN.match(text)
-        if not match:
-            continue
-
-        # llens(#43): skill の可読キーは id 一本(旧 command)。/command 一致 = id 一致。
-        skill = Skills.get_skill_by_id(match.group(1))
-        if (
-            skill is None
-            or skill.id not in model_skill_ids
-            or not is_skill_visible(skill, user)
-            or skill.id in loaded
-        ):
+        skill = command_skill(message_text(message), user, model_skill_ids)
+        if skill is None or skill.id in loaded:
             continue
         loaded.add(skill.id)
 
@@ -182,6 +155,50 @@ def apply_skill_command(form_data, user, model):
 
     form_data["messages"] = new_messages
     return form_data, activations
+
+
+def message_text(message) -> str | None:
+    """user メッセージの text (content が文字列ならそれ、マルチパートなら最初の text パート)。"""
+    content = message.get("content")
+    if isinstance(content, list):
+        return next(
+            (
+                item.get("text", "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            ),
+            None,
+        )
+    return content if isinstance(content, str) else None
+
+
+def command_skill(text, user, model_skill_ids):
+    """`text` の先頭行の行頭の `/command` で発火する skill (無ければ None)。
+
+    条件は AND: その skill がモデルに紐づく (`model_skill_ids` — 機能「スキル」が OFF なら空で渡す) ∧
+    read 可視。`/` でレシピも呼べるが、同じ `/name` なら skill が先 — レシピの発火
+    (utils/recipe_commands) もこれで「skill が使われる」を判定する。"""
+    if not isinstance(text, str) or not model_skill_ids:
+        return None
+    match = SKILL_COMMAND_PATTERN.match(text)
+    if not match:
+        return None
+    # llens(#43): skill の可読キーは id 一本(旧 command)。/command 一致 = id 一致。
+    skill = Skills.get_skill_by_id(match.group(1))
+    if (
+        skill is None
+        or skill.id not in model_skill_ids
+        or not is_skill_visible(skill, user)
+    ):
+        return None
+    return skill
+
+
+def command_skill_ids(model) -> set[str]:
+    """`/command` で発火しうる skill id (機能「スキル」が OFF なら空)。"""
+    if not is_skills_feature_enabled(model):
+        return set()
+    return set(get_model_skill_ids(model))
 
 
 def synthesize_load_skill_exchange(skill, user, model, call_id):

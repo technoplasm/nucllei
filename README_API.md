@@ -1646,6 +1646,22 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
   (`GET /api/v1/groups/`, `/id/{id}`, the update) returns it there, with
   `writers` already normalised to `writers ∩ user_ids` (in the stored order).
   See §3.8 "Group ACL" for what it means.
+- Recipes the user can see (the chat input's `/` menu, §6.5 "`/name`"):
+  `GET /api/v1/recipes/` → `{available, error, recipes: [...], skill_ids}`. `available` is
+  false when the deployment has no sandbox (`recipes` is then empty); `error` is
+  `"old"` / `"unreachable"` when the sandbox could not give the list, else
+  `null`. Each recipe is
+  `{name, folder, place, group, title, description, broken, warnings}`
+  (`place` is `"personal"` / `"group"` / `"public"`; `broken` / `warnings` are
+  lists of reasons, empty when none) — the
+  same list as `load_recipe`'s (personal, the groups the user belongs to, then
+  everyone; admins too see only their own groups), with the reasons of the
+  list's `(壊れている: …)` / `(警告: …)` marks. Each call asks the sandbox (one
+  `/recipes/index`, one `/files/stat_many`); the capability is per model, so the
+  caller checks `meta.features.recipes` of the selected model. `skill_ids` are
+  the skills `/` can fire for this user (owner or read access — admins too go
+  by the access control), for the menu's "the skill wins" rule; the caller
+  narrows them to the model's `meta.skillIds`.
 - Config import/export (admin): `POST /api/v1/configs/import`, `GET /api/v1/configs/export`.
 - External OpenAPI tool servers (admin): `GET/POST /api/v1/configs/tool_servers`.
 
@@ -3265,6 +3281,8 @@ condition passes through as plain text (no error).
   again (a skill already loaded anywhere in the history is never injected).
   Branching from before the command drops it with the response; regenerating
   that response fires it again.
+  The same `/` also calls recipes (§6.5 "`/name`"); when a `/name` fires a
+  skill, no recipe of that name is called.
 - **Model path**: when a preset lists skills with non-empty descriptions, the
   model gets one `load_skill(skill_id)` pseudo-tool whose description embeds the
   manifest (`- <id>: <description>` lines, enum-constrained). Tools loaded this
@@ -3708,6 +3726,52 @@ with the real folder (`edit_recipe(path="<folder>")` / `save_recipe(path="<folde
 when a recipe tool is on the turn, and `read_file`'s note on a `RECIPE.md` says
 `edit_recipe(path="<folder>")` (the folder, not RECIPE.md). A broken recipe
 in `requires` is a warning entry with the same next step.
+
+**`/name` in the chat input.** A user message whose first line starts with
+`/<name>` calls the recipe `<name>` (the folder name; the name runs up to the
+first whitespace) like a skill's `/command` (§6.3): right after that message the
+server puts an assistant `load_recipe(path=<folder>)` call (call id
+`recipe:<n>`) and its result, and stores the same exchange at the head of that
+turn's response, so the next request carries it back as history. The result is
+the real `load_recipe` of the turn, run like a model's call — the same read
+access, broken / warning / already-loaded handling and card. The rest of the
+message is the user's request.
+
+- **Which name wins.** A skill first: if `/<name>` fires a skill (§6.3 — the
+  skill's `/command` is the leading run of `[A-Za-z0-9_-]`, so `/foo.bar` fires
+  skill `foo`), no recipe is called. Between recipes the narrower place wins:
+  personal, then groups (by group name), then everyone. If the winner is broken,
+  nothing is called (the same-named recipe of a wider place is not used instead).
+  A recipe whose name has whitespace cannot be called with `/`.
+- **Which recipes.** The list of `load_recipe`'s description (personal, the
+  groups the user belongs to, everyone). It needs the capability "Recipes" on and
+  a sandbox; otherwise `/<name>` is plain text and the sandbox is not asked. The
+  list is fetched only when the current message starts with `/` and fires no
+  skill, and is shared with `load_recipe`'s description and the preamble in that
+  request (one `/recipes/index`).
+- **Only the current message.** The last user message is checked. The
+  exchange is not added again once a `load_recipe` of that folder follows the
+  message (the stored exchange, or the model's own call); regenerating the
+  response or editing the message calls it again. A second `/<name>` of a
+  recipe already loaded gets `load_recipe`'s "already loaded" result. A
+  headless client that does not send the stored exchange back has the recipe
+  only in that turn (unlike a skill's `/command`, which is re-injected).
+- **When it runs.** `load_recipe` (with its `requires`, `shell` / `python`
+  included) runs inside the request before the model is called, after the
+  turn's tools are known; inlet filters see the exchange with an empty result.
+  The result is written into the exchange found by call id in the messages the
+  inlets returned; if an inlet dropped it, nothing runs and nothing is stored.
+- **The menu.** Typing `/` lists 個人のレシピ, グループのレシピ (with the group
+  name), 全体のレシピ and スキル, in that order, filtered by prefix then
+  substring (`GET /api/v1/recipes/`, §4.6; the skills are the selected model's).
+  Every recipe is listed; the ones `/<name>` would not call are grayed out and
+  cannot be picked, with the reason (スキル「…」が使われる / 個人のレシピが使われる /
+  グループ「…」のレシピが使われる / 個人のレシピが先 (壊れているので何も呼ばれない) /
+  壊れている: … / 名前に空白があるので / では呼べない). Arrow keys skip grayed rows;
+  a row whose name equals what was typed is selected first.
+  A recipe with a warning can be picked and shows 警告: ….
+  The rules are in `utils/recipe_commands.py` and
+  `src/lib/utils/slash-commands.ts` (kept the same).
 
 **The `requires` notation.** A recipe is written by users, so it takes a YAML
 list of single-key entries only:

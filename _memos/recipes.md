@@ -11,6 +11,7 @@
 | tool (load_recipe / save_recipe / edit_recipe)、requires の展開、能力「レシピ」の合成 | `nucllei/builtin_tools/recipe_tools.py` (`build_recipe_tools` — middleware が load_skill の隣で差し込む。中に sandbox.Tools を持って HTTP・書き先・read_file / run_shell を借りる) |
 | sandbox | `/recipes/index` `/recipes/folder` `/files/stat_many`、`/files/trash` の `name` |
 | ホストの lint | `nucllei recipe-check` (共有の層だけ) |
+| `/name` の発火 (入力欄) | `nucllei/utils/recipe_commands.py` (BE)・`src/lib/utils/slash-commands.ts` (FE の補完)・`GET /api/v1/recipes/` (`routers/recipes.py`) |
 
 ## 決めたこと
 
@@ -123,6 +124,26 @@
   利用者をまたいだ prefix cache から外れる。system prompt・skill の本文の {{USER_RECIPES}} は空 (WARN)。
   取得は前置きを組む・比べるときだけ (`task.fetch_context_sections` — 記憶の目次と並べて 1 回。再生成では取らない)。
 
+- **`/name` で呼ぶ**: skill の `/command` と同じく「load_recipe を呼んだことにする」往復を
+  今の発言の直後に入れ、応答の先頭に残す (`middleware.activation_seed_blocks` — skill の発火と 1 つの
+  tool_calls ブロック、自動ロードの skill の後)。結果は本物の load_recipe をこのターンの tools_dict から
+  execute_tool_calls で — 読める範囲・壊れている・警告・読み込み済み・カードの木は load_recipe のまま
+  (権限の判定を 2 か所に書かない)。
+  - 名前の規則: skill が先 (`/name` で発火する skill = `skills.command_skill`。skill の `/command` は行頭の
+    `[A-Za-z0-9_-]+` なので `/foo.bar` は skill foo) → レシピは狭い置き場 (個人 → グループ名の順 → 全体)。
+    勝った物が壊れていれば何も呼ばない (広い置き場に回すと、自分の上書きのつもりが黙って共有の物になる)。
+    名前は空白までの 1 語 — 空白のある名前は `/` では呼べない (補完に理由付きで灰色)。
+  - 候補は一覧 (`recipe_index.user_recipe_listing`) と同じ。load_recipe は管理者なら所属していない
+    グループも読めるが、`/` は一覧に出る物だけ。
+  - 見るのは今の発言 (最後の user) だけ。前の発言の `/name` はそのターンの応答に残っている —
+    後のターンで requires の shell / python を走らせ直さない。今の発言の後に同じフォルダの load_recipe が
+    あれば (保存された往復・モデル自身の呼び出し — 続きターン) 足さない。読み込み済みの判定は
+    load_recipe に任せる (2 回目の `/name` は「読み込み済み」の結果が残る。直した後なら新しい版)。
+  - 一覧の取得は、今の発言が `/` で始まって skill に当たらないときだけ。`task.get_user_recipe_listing`
+    (ContextVar) で load_recipe の説明・会話の前置きと 1 回の問い合わせを共有する。
+  - 補完 (FE) は `GET /api/v1/recipes/` を開くたびに (30 秒だけ使い回す)。規則は FE と BE に同じ物を
+    書き、テスト (`slash-commands.test.ts` / `test_recipe_commands.py`) で同じ場面を固定する。
+
 ## 割り切り・未了
 
 - ファイルブラウザ (FE) で RECIPE.md を直接書くのは止めていない (検査が掛からない。壊れれば一覧に出る)。
@@ -136,3 +157,13 @@
 - 入りきらずに切った要素 (`truncated="true"`) も「読み込み済み」に数える (続きは案内の read_file で読む)。
 - ホストの lint の対象は共有の層だけ。個人の /workspace は点検しない。
 - 実機 (コンテナ) は未確認 — sandbox の image の更新が要る。
+- 送信済みの発言の `/name` は chip にしない (skill だけ — 一覧を持っていないページの読み込み直後に表示が
+  揺れるので)。発火したかは応答の先頭の load_recipe のカードで見る。
+- `/name` の load_recipe は応答が始まる前 (process_chat_payload の中) に走る — requires の shell / python の間は
+  画面にカードが無く、停止も効かない (skill の before / after と同じ)。inlet の Filter は中身の空の結果を見る
+  (結果は tool が揃ってから入る。入れる先は call id で引き直すので、inlet が messages を作り直しても入る。
+  往復を落とされたら実行も保存もしない)。
+- 保存した往復を送り返さない headless のクライアントでは、`/name` のレシピはそのターンだけ (skill の
+  `/command` のように毎リクエスト入れ直さない — requires を走らせ直さないため)。
+- 補完のスキルの節は選んでいるモデルの和集合 (複数モデルのとき)。灰色の判定もその和集合で見るので、
+  モデルごとに skill が違うと、送った先のモデルでは灰色のレシピが呼ばれることがある。

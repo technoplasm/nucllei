@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import Optional
 
 from nucllei.utils.recipes import (
@@ -148,18 +149,73 @@ def recipe_index_block(index_text: str) -> str:
     return f"{RECIPE_INDEX_HEADING}\n{index_text}"
 
 
+@dataclass
+class RecipeEntry:
+    """一覧の 1 件。`line` は一覧の 1 行 (index_line)、ほかは `/` の補完 (GET /api/v1/recipes/) が見せる材料。
+    `broken` / `warnings` は印の理由と同じ文 (書いた人の値を混ぜない — `assess_recipe(safe=True)` /
+    `RefWarnings.index_reasons`)。"""
+
+    folder: str
+    name: str
+    place: str  # "personal" | "group" | "public"
+    group: str
+    title: str
+    description: str
+    broken: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+    line: str = ""
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "folder": self.folder,
+            "place": self.place,
+            "group": self.group,
+            "title": self.title,
+            "description": self.description,
+            "broken": list(self.broken),
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass
+class RecipeListing:
+    """見えるレシピの一覧。`status` は "ok" / "none" (sandbox の無い配備・user 不明) / "old" / "unreachable"。"""
+
+    status: str = "none"
+    entries: list = field(default_factory=list)
+
+    @property
+    def text(self) -> str:
+        """一覧の行 (1 行ずつ index_line の形)。取れなかったときはその 1 行、0 件・"none" は空文字列。"""
+        if self.status == "old":
+            return RECIPES_OLD_SANDBOX
+        if self.status == "unreachable":
+            return RECIPES_UNREACHABLE
+        return "\n".join(e.line for e in self.entries)
+
+
 async def user_recipes_text(user) -> str:
-    """見えるレシピの一覧 (1 行ずつ index_line の形 — コード表記のフォルダ + 印 + description)。0 件なら空文字列。"""
+    """見えるレシピの一覧 (1 行ずつ index_line の形 — コード表記のフォルダ + 印 + description)。0 件なら空文字列。
+    材料はこのリクエストで取った一覧 (`task.get_user_recipe_listing`) — `/` の発火と同じ 1 回の問い合わせ。"""
+    from nucllei.utils.task import get_user_recipe_listing
+
+    return (await get_user_recipe_listing(user)).text
+
+
+async def user_recipe_listing(user) -> RecipeListing:
+    """見えるレシピの一覧 (構造化)。並びは個人 → 所属グループ (名前順) → 全体、各層の中はフォルダ名の順
+    (sandbox の `/recipes/index` の順)。"""
     from nucllei.env import SANDBOX_URL
 
     if not SANDBOX_URL:
-        return ""
+        return RecipeListing()
     from nucllei.builtin_tools.sandbox import SandboxHTTPError, sandbox_post
     from nucllei.utils.ext_acl import sandbox_ext_mounts
 
     uid, _ = _uid_role(user)
     if not uid:
-        return ""
+        return RecipeListing()
     started = time.perf_counter()
     groups = member_groups(user)
     places = member_places(user, groups)
@@ -171,17 +227,17 @@ async def user_recipes_text(user) -> str:
         )
     except SandboxHTTPError as e:
         log.warning(f"[recipes] /recipes/index failed: {e!r}")
-        return RECIPES_OLD_SANDBOX if e.status == 404 else RECIPES_UNREACHABLE
+        return RecipeListing("old" if e.status == 404 else "unreachable")
     except Exception as e:
         log.warning(f"[recipes] /recipes/index failed: {e!r}")
-        return RECIPES_UNREACHABLE
+        return RecipeListing("unreachable")
 
     by_place = {
         p.get("place"): p
         for p in (res.get("places") if isinstance(res, dict) else None) or []
         if isinstance(p, dict)
     }
-    found = []  # (folder, md, entries)
+    found = []  # (layer, name, md, entries)
     refs = RecipeRefs()
     for place in places:
         layer = layer_of_place(place)
@@ -201,18 +257,27 @@ async def user_recipes_text(user) -> str:
             entries = (
                 item.get("entries") if isinstance(item.get("entries"), dict) else None
             )
-            found.append((folder, md, entries))
+            found.append((layer, name, md, entries))
             recipe_refs((md or {}).get("text"), folder, refs, groups)
 
     # stat が取れなかった参照先はキーが無い = 「分からない」で、警告しない
     # (sandbox の一時的な失敗で警告を出さない — reference_warnings)
     path_types = await stat_paths(user, refs.paths) if refs.paths else {}
 
-    lines = []
+    out = []
     writable_of: dict = (
         {}
     )  # 層 -> 書けるか (壊れたレシピの印の分だけ ACL を引く。層ごとに 1 回)
-    for folder, md, entries in found:
+    for layer, name, md, entries in found:
+        folder = f"{layer.recipes}/{name}"
+        recipe = RecipeEntry(
+            folder=folder,
+            name=name,
+            place=layer.kind,
+            group=layer.group,
+            title="",
+            description="",
+        )
         reasons = assess_recipe(folder, md, safe=True)
         if reasons:
             writable = writable_of.get(_layer_key(folder))
@@ -220,17 +285,28 @@ async def user_recipes_text(user) -> str:
                 writable = writable_of[_layer_key(folder)] = recipe_writable(
                     folder, user
                 )
-            lines.append(index_line(folder, "", broken_line(reasons, writable, folder)))
+            recipe.broken = list(reasons)
+            recipe.line = index_line(folder, "", broken_line(reasons, writable, folder))
+            out.append(recipe)
             continue
         fm, _ = read_frontmatter(md["text"])
+        recipe.title = _one_line(fm.get("title"))
+        recipe.description = _one_line(fm.get("description"))
         warns = reference_warnings(
             folder, md["text"], entries, path_types, member_groups=groups
         )
-        mark = warning_line(warns.index_reasons()) if warns else ""
-        lines.append(index_line(folder, fm.get("description"), mark))
+        recipe.warnings = warns.index_reasons() if warns else []
+        mark = warning_line(recipe.warnings) if warns else ""
+        recipe.line = index_line(folder, fm.get("description"), mark)
+        out.append(recipe)
     took = time.perf_counter() - started
-    log.debug(f"[recipes] index for {uid}: {len(lines)} recipes in {took:.3f}s")
-    return "\n".join(lines)
+    log.debug(f"[recipes] index for {uid}: {len(out)} recipes in {took:.3f}s")
+    return RecipeListing("ok", out)
+
+
+def _one_line(v) -> str:
+    """frontmatter の文字列を画面の 1 行に (モデルには渡らない — 一覧の行は index_line が別に作る)。"""
+    return " ".join(v.split()) if isinstance(v, str) else ""
 
 
 def _layer_key(folder: str) -> str:

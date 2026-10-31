@@ -58,6 +58,7 @@ from nucllei.routers import (
     sandbox_files,
     functions,
     models,
+    recipes,
     skills,
     tools,
     users,
@@ -629,6 +630,7 @@ app.include_router(chats.router, prefix="/api/v1/chats", tags=["chats"])
 
 app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
 app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])
+app.include_router(recipes.router, prefix="/api/v1/recipes", tags=["recipes"])
 app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
 
 app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])

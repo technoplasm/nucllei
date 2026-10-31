@@ -411,6 +411,16 @@ before / after も毎回動く。
 (5) 履歴はクライアント入力なので、偽の load_skill の結果を履歴に入れれば発火・実行を止められる —
 止まるのはその利用者自身の context に入る結果だけで、権限は増えない。
 
+## `/` でレシピも呼ぶ
+
+- 入力欄の `/` はレシピも呼ぶ。補完は「個人のレシピ」「グループのレシピ」「全体のレシピ」「スキル」の順で、
+  前方一致 → 部分一致に絞る。キーボードの上下は灰色の行を飛ばす。
+- **skill が先**: `/name` で発火する skill (`skills.command_skill` — 機能「スキル」ON ∧ skillIds ∧ 見える) が
+  あれば、同じ名前のレシピはどの置き場でも呼ばない (読み込み済みで skill が発火しないときも)。
+  `apply_skill_command` と `utils/recipe_commands.apply_recipe_command` が同じ判定を通る。
+- 発火したレシピの load_recipe 往復は skill の発火と同じブロックで応答の先頭に残る
+  (`middleware.activation_seed_blocks`)。詳細・名前の規則は `_memos/recipes.md`「`/name` で呼ぶ」。
+
 ## プレビュー
 
 - preset の編集画面「プロンプト」タブの System Prompt 欄と、skill の編集画面の本文欄に「編集 / プレビュー」。

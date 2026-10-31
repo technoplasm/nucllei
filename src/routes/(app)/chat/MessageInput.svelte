@@ -67,6 +67,13 @@
 			.flatMap((m) => m?.info?.meta?.skillIds ?? [])
 	);
 
+	// `/` でレシピも呼べる: 選択モデルのどれかで能力「レシピ」が ON なら補完に出す(sandbox の有無は一覧の API が返す)
+	const recipesEnabled = $derived(
+		selectedModelIds
+			.map((id) => $models.find((m) => m.id === id))
+			.some((m) => m && (m?.info?.meta?.features?.recipes ?? true) !== false)
+	);
+
 	$effect(() => {
 		onChange({
 			prompt,
@@ -181,7 +188,17 @@
 			editButton?.click();
 		}
 
-		if (commandsContainerElement) {
+		// 補完の一覧はキーを取る。ただし IME の変換中は取らない(変換確定の Enter・候補選択の ↑↓ を奪わない)。
+		// 選べる行が無い(全部灰色)ときの Enter は普段の送信キーの扱い
+		const selectedCommandOption = (
+			[...document.getElementsByClassName('selected-command-option-button')] as HTMLElement[]
+		)?.at(-1);
+		const composing = isComposing || e.isComposing || e.keyCode === 229;
+		if (
+			commandsContainerElement &&
+			!composing &&
+			!(e.key === 'Enter' && !e.shiftKey && !selectedCommandOption)
+		) {
 			if (commandsContainerElement && e.key === 'ArrowUp') {
 				e.preventDefault();
 				commandsElement.selectUp();
@@ -211,10 +228,8 @@
 
 				if (e.shiftKey) {
 					prompt = `${prompt}\n`;
-				} else if (commandOptionButton) {
-					commandOptionButton?.click();
 				} else {
-					document.getElementById('send-message-button')?.click();
+					commandOptionButton?.click();
 				}
 			}
 
@@ -504,6 +519,7 @@
 						bind:this={commandsElement}
 						bind:prompt
 						{allowedSkillIds}
+						{recipesEnabled}
 						onSelect={(data) => {
 							if (data?.type === 'model') {
 								atSelectedModel = data.data;

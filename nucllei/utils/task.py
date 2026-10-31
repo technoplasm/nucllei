@@ -251,6 +251,9 @@ _user_recipes: ContextVar[Optional[dict]] = ContextVar(
 _user_memory: ContextVar[Optional[dict]] = ContextVar(
     "nucllei_user_memory_index", default=None
 )
+_user_recipe_listing: ContextVar[Optional[dict]] = ContextVar(
+    "nucllei_user_recipe_listing", default=None
+)
 # 一覧・目次はリクエストの間だけ持ち回る (前置きを組むときと load_recipe の説明で 2 回聞かない)。
 # 念のため古い値は使わない
 _PROMPT_FETCH_TTL_S = 60
@@ -337,6 +340,14 @@ async def get_user_recipes(user) -> str:
     return await _cached_fetch(_user_recipes, user, user_recipes_text)
 
 
+async def get_user_recipe_listing(user):
+    """見えるレシピの一覧の材料 (recipe_index.RecipeListing)。一覧の行 (get_user_recipes) と `/` の発火
+    (utils/recipe_commands) が同じこれを通るので、1 リクエストで sandbox に聞くのは 1 回。"""
+    from nucllei.utils.recipe_index import user_recipe_listing
+
+    return await _cached_fetch(_user_recipe_listing, user, user_recipe_listing)
+
+
 async def get_user_memory_index(user) -> str:
     """{{USER_MEMORY_INDEX}} の中身 (utils/memory_index)。このリクエストで取ってあればそれを。"""
     from nucllei.utils.memory_index import user_memory_index_text
@@ -347,6 +358,7 @@ async def get_user_memory_index(user) -> str:
 def reset_prompt_fetches() -> None:
     """このリクエストで取ったレシピの一覧・記憶の目次を捨てる (次に要るとき取り直す)。"""
     _user_recipes.set(None)
+    _user_recipe_listing.set(None)
     _user_memory.set(None)
 
 
@@ -380,7 +392,7 @@ async def fetch_context_sections(user, model, template: str) -> dict[str, str]:
         return sections
     # 持ち回りの dict はここ (呼び手の context) で作っておく — gather は別の task で走らせるので、
     # その中で ContextVar に set した dict は呼び手に戻らない
-    for var in (_user_recipes, _user_memory):
+    for var in (_user_recipes, _user_recipe_listing, _user_memory):
         if var.get() is None:
             var.set({})
     results = await asyncio.gather(*jobs.values())
