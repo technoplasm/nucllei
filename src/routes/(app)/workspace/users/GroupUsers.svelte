@@ -8,19 +8,16 @@
 
 	const i18n = getContext('i18n');
 
-	// writeMode / writers: グループの置き場(/ext/groups/<名前>)への書き込み。
-	// 'members' = メンバー全員が書ける(既定)、'listed' = writers のメンバーだけ書ける。
-	// 所属(userIds)の意味は変えない。writers は保存時に BE が userIds との積に揃えるが、
-	// 画面でもメンバーから外したら writers から落とす
+	// writers: グループの置き場(/ext/groups/<名前>)に書けるメンバー。所属(userIds)の意味は変えない。
+	// メンバーに入れた人は「書き込み」に印を付けた状態で入り、外したら writers からも落とす
+	// (BE も保存時に userIds との積に揃える)
 	let {
 		users = [],
 		userIds = $bindable([]),
-		writeMode = $bindable('members'),
 		writers = $bindable([])
 	}: {
 		users?: any[];
 		userIds?: string[];
-		writeMode?: 'members' | 'listed';
 		writers?: string[];
 	} = $props();
 
@@ -29,9 +26,7 @@
 	const filteredUsers = $derived(
 		users
 			.filter((user) => {
-				// 管理者も候補に出す(ken 指示 2026-10-21。以前は role === 'admin' を隠していたが
-				// BE は元々 target の role を見ていない。admin の所属が効くのは {{USER_GROUPS}} だけ:
-				// 権限は所属に関係なく全部通り、/ext/groups は admin には全グループ見える)
+				// 管理者も候補に出す(権限と /ext/groups の可否は role で決まり、所属に関係なく全部通る)
 				if (query === '') {
 					return true;
 				}
@@ -55,25 +50,6 @@
 </script>
 
 <div>
-	<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-3">
-		<label class="text-xs font-medium shrink-0" for="group-ext-write">
-			{$i18n.t('Writing to the group folder')}
-		</label>
-		<select
-			id="group-ext-write"
-			class="min-w-0 rounded-xs py-1 pl-2 pr-7 text-sm text-content bg-surface-muted hover:bg-surface-hover outline-hidden"
-			bind:value={writeMode}
-		>
-			<option value="members">{$i18n.t('All members can write')}</option>
-			<option value="listed">{$i18n.t('Only selected members can write')}</option>
-		</select>
-	</div>
-	{#if writeMode === 'listed'}
-		<div class="-mt-1.5 mb-3 text-xs text-content-subtle">
-			{$i18n.t('Members without “Write” can only read the group folder. Admins can always write.')}
-		</div>
-	{/if}
-
 	<div class="flex w-full">
 		<div class="flex flex-1">
 			<div class=" self-center mr-3">
@@ -98,6 +74,7 @@
 								onChange={(state) => {
 									if (state === 'checked') {
 										userIds = [...userIds, user.id];
+										writers = [...writers.filter((id) => id !== user.id), user.id];
 									} else {
 										userIds = userIds.filter((id) => id !== user.id);
 										writers = writers.filter((id) => id !== user.id);
@@ -124,7 +101,7 @@
 							</Tooltip>
 
 							<div class="flex items-center gap-1.5">
-								{#if writeMode === 'listed' && userIds.includes(user.id)}
+								{#if userIds.includes(user.id)}
 									<!-- 管理者は書き込みの指定に関係なく常に書ける(role で決まる)— 固定表示 -->
 									<Tooltip
 										content={user.role === 'admin' ? $i18n.t('Admins can always write.') : ''}
