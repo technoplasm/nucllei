@@ -42,7 +42,8 @@
 	type="button"
 	{disabled}
 >
-	<div class="top-0 left-0 absolute w-full flex justify-center">
+	<!-- 印はクリックを受けない: 受けると <label> 内に置いたとき、label がボタンへもう一度 click を送って 2 回切り替わる -->
+	<div class="top-0 left-0 absolute w-full flex justify-center pointer-events-none">
 		{#if _state === 'checked'}
 			<span class="i-lucide-check size-3.5 block" aria-hidden="true"></span>
 		{:else if indeterminate}
