@@ -596,6 +596,43 @@ llens 側が cage の公開ルートを固定の `/ext/doc`(doc の HTML)・`/ex
   配備の Attachment 次第。
 - 添付チップのモーダルは `audio/*` をその場で再生できる。
 
+## 改訂(2026-10-31)— 会話の側: 前置き・更新の枠・添付の `<source>` を user 発言の先頭へ
+
+設計は ken 承認の「会話の前置き」案 (A〜D)。契約の正典は README_API §4.2 (`params.context`・preview) /
+§4.3「Conversation side」/ §6.1 (変数の置ける場所)。コードは `utils/conversation_context.py`・`utils/frames.py`・
+`models/chat_context.py`。
+
+- system は「preset の system + チャットの system」だけ。記憶の目次・レシピの一覧・添付の本文で system が
+  変わらない (prefix cache が会話全体に効く)。`<source>` を system に入れる経路と Ollama の特別扱い
+  (`prepend_to_first_user_message_content`) は撤去。全モデル同じ
+- **前置き** = preset の `params.context` を展開して `<conversation-context>` 枠に入れ、枝の最初の user 発言の
+  content の先頭へ。枠の中の地の文はデプロイ (llens) が書き、nucllei はタグ 2 行だけ。`{{USER_MEMORY_INDEX}}` /
+  `{{USER_RECIPES}}` は前置きでだけ展開 (system・skill では空 + プレビューの印 + log WARN)。前置きでは日時・利用者
+  の変数は空 (凍結されるので古くなる — system に書く)
+- **凍結**: 最初に組んだバイト列を新テーブル `chat_context` (chat_id, user メッセージ id) に 1 回だけ書き、毎ターン
+  同じ位置に送り直す。新しい user 発言 (行が無い) では、今の前置きテンプレートの変数の展開を枝の祖先の `state`
+  と比べ、変わった節を丸ごと `<conversation-context-update>` でその発言の先頭へ (1 行目は nucllei 固定)。
+  再生成は行を使う (sandbox に聞かない)。分岐・編集は枝の祖先とだけ比べる。不通・古い sandbox・空は「変わった」と
+  しない。preset を替えても地の文は最初のまま (変数だけ比べる)。行の無い既存チャットは次の発言に initial
+  - chat の JSON・メッセージに書かない理由: FE の保存が history を丸ごと置き換える・import で偽の前置きを持ち込める
+  - chat は soft delete だけなので行も消さない。clone・import・共有は持ち越さない (次の発言で組み直す)
+- **添付**: そのファイルを付けた user 発言の先頭 (前置き・更新の後、本文の前) に毎ターン入れ直す。どの発言かは
+  wire の目印 `files`、入れるのは inlet 後の `metadata["files"]` に残ったものだけ (gate が外したものは何も残さない)。
+  同じファイルは最初の発言だけ。目印の無いものは最後の user 発言。保存しない (中身は不変 → 同じバイト)
+- **wire の目印**: user メッセージの `id` (chat-wire で、DB の鎖の上の user のときだけ位置に使う — 中身は常に
+  サーバの保存値) と `files` (`[{type:'file', id}]`)。組み終えたら全メッセージから取り除いて推論エンジンへ。
+  FE は `buildWireMessages`、続きターンは `execution_resume._user_message_to_wire`。FE の request `files` は今の枝の
+  user 発言の添付だけ (`branchRequestFiles` — チャット全体の一覧を送るのはやめた)。続きターンも
+  `execution_resume.branch_request_files`
+- **無害化** (`utils/frames.py`): 枠の名前 (`conversation-context(-update)` / `source`、記憶の目次・レシピの一覧・
+  添付の本文には `memory-index` も) に見える箇所の `<` だけを `&lt;` に (見えない文字・`<` に似た括弧・似た文字の
+  変種も)。記憶の目次・レシピの一覧 (前置きの変数の値)、`<source>` の本文、利用者の本文に掛ける。前置きの
+  テンプレートの地の文 (配備が書く) には掛けない。冪等・入力だけで決まる (毎ターン同じバイト)
+- headless (chat が DB に無い): 毎リクエスト展開して最初の user へ。保存も更新の枠も無い。サブエージェントの
+  子ターン: 前置きも更新も無し (レシピの一覧は load_recipe の説明へ)
+- 自動ロード (`apply_skill_auto_load`) の exchange は最後の user 発言 (今の発言) の直後 — 発火の記録が残る応答の
+  先頭と同じ位置 (`_memos/skill-design.md`)
+
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`。
   ※ **sandbox は prism 側に無い**(#114 で移設): tool = `nucllei/builtin_tools/sandbox.py`、

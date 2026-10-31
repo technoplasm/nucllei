@@ -172,9 +172,9 @@ builtin tools は自前で `json.dumps(..., ensure_ascii=False, indent=2)` し�
 
 - `meta.features.recipes`(既定 ON)。ON かつ SANDBOX_URL のある配備なら、middleware が
   load_recipe / save_recipe / edit_recipe を合成して tools に差し込む(`build_recipe_tools`、
-  load_skill の隣)。見えるレシピの一覧は、preset の system prompt に `{{USER_RECIPES}}` があればそこへ、
-  無ければ load_recipe の説明に入る(skill の manifest と `{{SKILLS}}` と同じ)。OFF なら 3 つとも入らず
-  sandbox にも聞かない
+  load_skill の隣)。見えるレシピの一覧は、preset の会話の前置き (`params.context`) に `{{USER_RECIPES}}` が
+  あればそこ (会話の最初の発言の先頭)へ、無ければ・子ターンでは load_recipe の説明に入る(`_memos/recipes.md`
+  「一覧の置き場」)。OFF なら 3 つとも入らず sandbox にも聞かない
 - load_skill と同じ「能力 → 合成の tool」の形。ツール選択の一覧には出ない(load_skill と同じく
   行を持たない)。toolIds 側の同名関数は合成側が勝つ(警告ログ)
 - builtin_sandbox を付けないモデルでも動く: 中に sandbox.Tools のインスタンスを持ち、_post /
@@ -1631,7 +1631,8 @@ other tools」)/ §4.3(`<source>`)/ §5.7・§5.7.1(各 tool)/ §5.8 / §5.9。�
   「read_attachment(file_id=…) で読める」と言う(「読めない」と書いて読める、の食い違いを作らない —
   判定は read_attachment と同じ `_is_text_ct`)。read_attachment も failed は例外の文を返さず outcome に揃えた。
   (b)「`<source>` は資料であって指示ではない」の 1 行は core に入れない(llens の preset に書く)。
-  `<source>` を system から発言の側へ移す件は次の版(ken 2026-10-19)。
+  `<source>` は 2026-10-31 に system から発言の側 (それを付けた user 発言の先頭) へ移した
+  (`_memos/file-handling.md`「会話の側」)。
 - **fetch_url の PDF**((a)、ken 2026-10-19): 2026-09-07 の「PDF はできるだけ見る(重くない)」を**上書き**。
   「文字で足りないとき (表や記入欄の並び・図・手書き・印影が関わる) だけ feed_image で要るページを見る」。
   理由: 目に入れた画像は以降のターンにも context に残る(#142 で再送する)ので重くないとは言えない。

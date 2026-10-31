@@ -115,12 +115,13 @@
   レシピは、共有の層では「見えないパス」で止まる。
 - **有効化はモデルの能力「レシピ」** (`meta.features.recipes`、既定 ON)。load_skill と同じく middleware が
   合成する。一覧の取得は能力が ON のリクエストだけ・1 回。詳細は `_memos/builtin-tools.md` 1b'。
-- **一覧の置き場**: preset の system prompt (DB の行の params.system) に {{USER_RECIPES}} があれば一覧は
-  そこへ入れ、load_recipe の説明は 1 文だけ (preset ごとに固定)。無ければ説明に入れる (書き忘れた preset で
-  一覧が消えないように)。chat template が tool の宣言を system より前に出すので、利用者ごとに変わる一覧を
-  tool の説明に入れると先頭から利用者ごとに別物になり、利用者をまたいだ prefix cache から外れる。
-  {{SKILLS}} も同じ (`_memos/skill-design.md`)。取得はリクエストに 1 回 (`get_user_recipes` を
-  build_recipe_tools と routers の ensure_user_recipes が ContextVar で共有)。
+- **一覧の置き場**: preset の会話の前置き (DB の行の params.context) に {{USER_RECIPES}} があれば一覧は
+  前置き (会話の最初の発言の先頭・凍結、変わったら次の発言に更新の枠 — `_memos/file-handling.md`「会話の側」)
+  へ入れ、load_recipe の説明は 1 文だけ (preset ごとに固定)・tool のためには一覧を取らない。無ければ・
+  サブエージェントの子ターンでは説明に入れる (書き忘れた preset で一覧が消えないように)。chat template が tool の
+  宣言を system より前に出すので、利用者ごとに変わる一覧を tool の説明に入れると先頭から利用者ごとに別物になり、
+  利用者をまたいだ prefix cache から外れる。system prompt・skill の本文の {{USER_RECIPES}} は空 (WARN)。
+  取得は前置きを組む・比べるときだけ (`task.fetch_context_sections` — 記憶の目次と並べて 1 回。再生成では取らない)。
 
 ## 割り切り・未了
 
