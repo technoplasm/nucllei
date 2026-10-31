@@ -1302,9 +1302,9 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
 `test_image_refs_resolve.py::test_proxy_bridge_follows_redirects_inside_the_base`。経緯と配備の形は
 [[file-handling]] の 2026-10-06 節。上の節の `/ext/cage/…` の例は当時の形。
 
-## `/ext` のグループ別 ACL(2026-10-07、#152)— `/ext/groups/<g>` はメンバー rw・`/ext/public` は admin だけ rw
+## `/ext` のグループ別 ACL(2026-10-07、#152)— `/ext/groups/<g>` は書き込みを許されたメンバーが rw・`/ext/public` は admin だけ rw
 
-(グループごとに書ける人を絞れる — 末尾の「グループの書き込みを絞る」)
+(書けるメンバーはグループごとに管理者が決める — 末尾の「グループの書き込み」)
 
 仕様は #152 本文(ken と llens で合意)。jail の見え方は rw / ro / 見えない の 3 値で、jail のパス = URL の
 `/ext/...` は同じ文字列のまま。
@@ -1344,38 +1344,51 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
 - 未了: グループ改名時のディレクトリの追従(旧名のディレクトリが残り、メンバーからは見えなくなる。admin には
   見える)、共有チャットを非メンバーが開いたときの 404 は仕様。
 
-### グループの書き込みを絞る — メンバーは読むだけ・指定した人だけ書ける
+### グループの書き込み — 書き込みを許されたメンバーだけ書ける
 
 - **所属(`user_ids`)の意味は一切変えない**(権限の合成・モデルのアクセス・`/ext/groups/<g>` が見えるか・
   `{{USER_GROUPS}}`・`NUCLLEI_USER_GROUPS`)。書ける人は**グループの属性** `data.ext =
-  {"write": "members" | "listed", "writers": [user_id, …]}`(既存の JSON 列 `data` のキー `ext` — migration 不要)。
-  無い・`members` = メンバー全員 rw、
-  `listed` = `writers` のメンバーだけ rw・他のメンバーは ro。admin は role で全グループ rw のまま。
+  {"writers": [user_id, …]}`(JSON 列 `data` のキー `ext`)。`writers` のメンバーだけ rw・他のメンバーは ro。
+  `ext` か `writers` が無ければメンバー全員 ro。admin は role で全グループ rw のまま。
+- **メンバーを足したとき**: 管理画面はメンバーに入れた人の「書き込み」に既定で印を付けて `writers` ごと送る
+  (画面の既定。サーバーの規則ではない)。OAuth のグループ同期と、`ext` を送らずに `user_ids` で足した API
+  呼び出しでは、足したメンバーは `writers` に入らない(読むだけ)。既存の `writers` は残る(所属との積)。
+- **migration `31221e5f4d38`**(`group_ext_writers`): 既存のグループを書ける人が変わらない形に揃える —
+  `ext` が無い・`ext.write` が無い / null / `members` は `writers = user_ids`、それ以外(`listed`・知らない値)は
+  `writers ∩ user_ids`。`ext` は `{"writers": …}` だけにし(`write` を落とす)、`data` の他のキーは残す。
 - **ユーザーの権限(permissions)ではなくグループの属性**(誰がそのグループの置き場に書けるか)。
   permissions の項目も sandbox 専用の権限も作らない。編集は admin だけ(グループの編集と同じ
-  `POST /api/v1/groups/id/{id}/update` の `ext`。省略は今の設定を保つ、`data` の他のキーは触らない)。
+  `POST /api/v1/groups/id/{id}/update` の `ext: {"writers": [...]}`(`writers` は必須、他のキーは 422)。
+  省略は今の `writers` を保つ、`data` の他のキーは触らない)。
 - **`writers ⊆ user_ids` を 2 重に守る**: 保存のたび `writers ∩ user_ids` に揃える(`models/groups.update_group_by_id`
-  — 画面・OAuth の同期の両方が通る。`remove_user_from_all_groups`(ユーザー削除)でも落とす)うえ、
+  — 画面・OAuth の同期の両方が通る。`remove_user_from_all_groups` でも落とす)うえ、
   判定(`ext_acl.can_write_group`)でも所属を確かめる — DB に非メンバーが残っていても何も与えない。
-  メンバーから外して入れ直しても書き込みは戻らない(安全側)。`write` の知らない値は `listed` 扱い(fail closed)。
-  writers は user_id で持つので改名で外れない。
+  メンバーから外して入れ直しても書き込みは戻らない(安全側)。writers は user_id で持つので改名で外れない。
 - **判定は `ext_access` 1 か所のまま**(`member_group_access(uid) -> {名前: rw|ro}` を足し、`member_group_names`
   はそのキー)。従う側: `sandbox_ext_mounts`(グループの bind も `rw: false` になりうる — sandbox は
   `/ext/public` と同じ `--bindmount_ro`、`/files/*` の書き込みは 403)、write_file / edit_file / remove_file
   (`_write_target`)、save_recipe / edit_recipe(同じ書き先の検査)、ファイルブラウザ(`places` / 一覧・読みの
   `rw`、書き換えは 403 — 画面は `/ext/public` と同じく鍵の印を出し、書き換えの操作を出さない)。
   `/ext` ゲートと resolver は読むだけなので ro のメンバーにも配る。
-- **モデルへの見せ方**: toolkit 共通注記(tool の spec)は規則だけ(「書けるかはグループごと — list_workspace で
-  分かる」)にして利用者で変えない(prefix cache)。利用者ごとの rw / ro は `list_workspace("/ext/groups")` の
-  各行(`書ける` / `読み取り専用 — グループ「X」の置き場に書けるのは、管理者が書き込みを許した人だけ`)と、
+- **モデルへの見せ方**: toolkit 共通注記(tool の spec)は規則だけ(「書けるのは書き込みを許された
+  メンバーだけ。list_workspace で分かる」)にして利用者で変えない(prefix cache)。利用者ごとの rw / ro は
+  `list_workspace("/ext/groups")` の各行(`書ける` / `読み取り専用 — グループ「X」の置き場に書けるのは、
+  管理者が書き込みを許したメンバーだけ`)と、
   中を一覧したときの末尾の注記、書けないときの ERROR が言う。`{{USER_GROUPS}}` は名前の契約(llens の skill が
   引数に使う)なので変えない。
+- **`{{USER_WRITABLE_GROUPS}}`**(`utils/task.user_writable_group_names`): 置き場に書ける所属グループの名前
+  (`, ` つなぎ・`{{USER_GROUPS}}` と同じ並び・無ければ空)。一般の利用者は `member_group_access` が rw のもの
+  (= `ext_access` の rw)、admin は所属グループ全部(所属していないグループは入れない)。ディレクトリ名にできる
+  名前だけ。展開は `{{USER_GROUPS}}` と同じ全経路(preset の system prompt・skill の本文・続きターン・タイトル生成・
+  プレビューは `PROMPT_VARIABLE_SCOPES` で user)。jail の env には出さない(`NUCLLEI_USER_GROUPS` に当たる env は
+  無い — jail の中では書けない置き場は ro の bind で分かる)。
 - **レシピ**: 直す案内(一覧の壊れた印・load_recipe の ERROR と警告の次の手・read_file の RECIPE.md の注記)は
   `recipe_index.recipe_writable(folder, user)`(= ACL が rw か)で出し分け、書けない人には全体の層の非管理者と
   同じく「伝える」(グループは「この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許した
-  人だけ)なので…」)。警告の次の手(`WARN_NEXT_MISSING` / `WARN_NEXT_LAYER`)も同じく置き換える
+  メンバーだけ)なので…」)。警告の次の手(`WARN_NEXT_MISSING` / `WARN_NEXT_LAYER`)も同じく置き換える
   (`recipes.readonly_warnings` — 全体の層を管理者でない人が読むときも同じ)。save_recipe の
-  結果の「誰が見て直せるか」は `listed` のグループでは「直せるのは管理者が書き込みを許した人だけ」。
+  結果の「誰が見て直せるか」はグループでは「メンバー全員が見られる。直せるのは管理者が書き込みを許した
+  メンバーだけ」(`recipes.Layer.audience`)。
   `recipes.py` は I/O をしない約束なので、ACL を引く `recipe_writable` は `recipe_index.py` に置く。
   ホストの lint(`nucllei recipe-check`)は層の規則だけを見るので影響なし。
 - **途中で変えたとき**: 判定は毎回 DB から引く(キャッシュしない)。常駐 kernel は bind の指紋(rw を含む)が
@@ -1387,12 +1400,13 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
   `imports/` の取り込みと `.exec/` のスクリプトも fd 経路で書き、`imports/` `trash/` `.exec/` が symlink に
   差し替えられていたら `_ensure_ws_dirs` が作り直す(`sandbox/tests/test_ext_mounts.py` の 2 本)。
 - ERROR(書けないメンバー): `<パス> はこの利用者には読み取り専用 (グループ「X」の置き場に書けるのは、管理者が
-  書き込みを許した人だけ)。次の手: この置き場には書けないとユーザーに伝える (書けるようにするのは管理者。
+  書き込みを許したメンバーだけ)。次の手: この置き場には書けないとユーザーに伝える (書けるようにするのは管理者。
   別の置き場に書くかはユーザーが決める)。` run_* の中の書き込みは OS の "Read-only file system" のまま
   (注記の規則と list_workspace で予測できる)。
 - 回帰: `test_ext_acl.py::TestGroupWriters`、`test_sandbox_files.py::test_group_read_only_for_non_writer`、
-  `test_builtin_recipes.py::test_group_recipe*`、`sandbox/tests/test_ext_mounts.py::test_read_only_group_is_ro_bind_and_403`。
-  画面は `src/routes/(app)/workspace/users/GroupUsers.svelte`(書き込みの選択と各メンバーの「書き込み」)。
+  `test_builtin_recipes.py::test_group_recipe*`、`sandbox/tests/test_ext_mounts.py::test_read_only_group_is_ro_bind_and_403`、
+  migration は `test_ext_acl.py` の `test_migration_*`。
+  画面は `src/routes/(app)/workspace/users/GroupUsers.svelte`(各メンバーの「書き込み」)。
 
 ## sandbox のファイルブラウザ(2026-10-07、#150)— Workspace → Sandbox
 

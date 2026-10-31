@@ -14,7 +14,7 @@ rw / ro / 見えない のどれか」を決め、次の全員がそれに従う
 
 | パス | 一般ユーザー | admin |
 |---|---|---|
-| `/ext/groups/<グループ名>/` | メンバーは rw(書き込みが「指定した人だけ」のグループでは、指定された人だけ rw・他のメンバーは ro)、メンバー以外は見えない | 全部 rw |
+| `/ext/groups/<グループ名>/` | 書き込みを許されたメンバー(`writers`)は rw、他のメンバーは ro、メンバー以外は見えない | 全部 rw |
 | `/ext/groups`(直下の一覧) | 自分が見えるグループだけ(`ext_visible_groups`) | 全グループ |
 | `/ext/public/` | ro | rw |
 | `/ext/<それ以外>/`(doc 等) | ro | ro |
@@ -25,9 +25,8 @@ rw / ro / 見えない のどれか」を決め、次の全員がそれに従う
   名前は `utils/group_names.validate_group_name` を通る物だけを扱う(#151 より前に作られた
   `:` 入り等の名前は bind も配信もしない — warning を 1 行出して飛ばす)
 - **グループの書き込み**: 所属(`user_ids`)の意味は変えず、グループの属性
-  `data.ext = {"write": "members" | "listed", "writers": [user_id, …]}` で書ける人を絞れる。
-  無い・`members` はメンバー全員 rw、
-  `listed` は `writers` にいるメンバーだけ rw・他のメンバーは ro。`writers` は保存のたびに
+  `data.ext = {"writers": [user_id, …]}` で書けるメンバーを決める。`writers` にいるメンバーだけ
+  rw・他のメンバーは ro(`ext` か `writers` が無ければメンバー全員 ro)。`writers` は保存のたびに
   `user_ids` との積に揃える(`normalize_group_data`)うえ、判定でも所属を確かめる — メンバーで
   ない人が `writers` に残っていても何も与えない。これは**グループの属性で、ユーザーの権限
   (permissions)ではない**。編集は admin だけ
@@ -98,11 +97,8 @@ def is_safe_path_segment(seg) -> bool:
     return not any(unicodedata.category(c) == "Cc" for c in seg)
 
 
-# グループの書き込み (data.ext.write)。無い = WRITE_MEMBERS
+# グループの書き込み (data.ext.writers)
 EXT_DATA_KEY = "ext"
-WRITE_MEMBERS = "members"
-WRITE_LISTED = "listed"
-WRITE_MODES = (WRITE_MEMBERS, WRITE_LISTED)
 
 
 def _ext_setting(group) -> dict:
@@ -111,24 +107,9 @@ def _ext_setting(group) -> dict:
     return ext if isinstance(ext, dict) else {}
 
 
-def group_write_mode(group) -> str:
-    """グループの書き込みの形。無い・null は `members`。知らない値は `listed`
-    (書ける人を広げない側 — 保存時の検証を通らない値は DB を直接触ったときにしか入らない)。"""
-    mode = _ext_setting(group).get("write")
-    if mode is None or mode == WRITE_MEMBERS:
-        return WRITE_MEMBERS
-    if mode != WRITE_LISTED:
-        log.warning(
-            f"ext_acl: group {getattr(group, 'id', '?')} の data.ext.write {mode!r} は"
-            " 知らない値 — 指定した人だけ書ける扱いにする"
-        )
-    return WRITE_LISTED
-
-
-def group_writers(group) -> list[str]:
-    """`listed` で書ける人 (`writers` のうち今もメンバーの人。保存された順)。"""
-    raw = _ext_setting(group).get("writers")
-    members = set(getattr(group, "user_ids", None) or [])
+def _member_writers(raw, user_ids) -> list[str]:
+    """`raw` (保存された `writers`) のうち `user_ids` にいる人 (順序は保つ・重複なし・文字列だけ)。"""
+    members = set(user_ids or [])
     out: list[str] = []
     for uid in raw if isinstance(raw, list) else []:
         if isinstance(uid, str) and uid in members and uid not in out:
@@ -136,44 +117,29 @@ def group_writers(group) -> list[str]:
     return out
 
 
+def group_writers(group) -> list[str]:
+    """グループの置き場に書けるメンバー (`writers` のうち今もメンバーの人。保存された順)。
+    `ext` か `writers` が無ければ []。"""
+    return _member_writers(
+        _ext_setting(group).get("writers"), getattr(group, "user_ids", None)
+    )
+
+
 def can_write_group(group, user_id: str) -> bool:
     """メンバー `user_id` がグループの置き場に書けるか (admin かどうかは見ない)。
-    メンバーでなければ False (`writers` に残っていても)。"""
-    if not user_id or user_id not in (getattr(group, "user_ids", None) or []):
-        return False
-    if group_write_mode(group) == WRITE_MEMBERS:
-        return True
-    return user_id in group_writers(group)
+    `writers` にいて、今もメンバーの人だけ。"""
+    return bool(user_id) and user_id in group_writers(group)
 
 
 def normalize_group_data(data, user_ids) -> Optional[dict]:
-    """保存する `data` の `ext` を揃える: `write` は `members` / `listed` (null は `members`、知らない値と
-    dict でない `ext` は `listed` — 判定の `group_write_mode` と同じく書ける人を広げない側)、
-    `writers` は `user_ids` との積 (順序は保つ・重複なし・文字列だけ)。`ext` 以外のキーはそのまま。
+    """保存する `data` の `ext` を `{"writers": writers ∩ user_ids}` に揃える (順序は保つ・重複なし・
+    文字列だけ。`writers` 以外のキーと dict でない `ext` は落とす)。`ext` 以外のキーはそのまま。
     `ext` が無ければ触らない。"""
     if not isinstance(data, dict) or EXT_DATA_KEY not in data:
         return data
     ext = data.get(EXT_DATA_KEY)
-    if not isinstance(ext, dict):
-        return {**data, EXT_DATA_KEY: {"write": WRITE_LISTED, "writers": []}}
-    mode = ext.get("write")
-    if mode is None:
-        mode = WRITE_MEMBERS
-    elif mode not in WRITE_MODES:
-        mode = WRITE_LISTED
-    members = set(user_ids or [])
-    writers: list[str] = []
-    raw = ext.get("writers")
-    for uid in raw if isinstance(raw, list) else []:
-        if isinstance(uid, str) and uid in members and uid not in writers:
-            writers.append(uid)
-    return {
-        **data,
-        EXT_DATA_KEY: {
-            "write": mode,
-            "writers": writers,
-        },
-    }
+    raw = ext.get("writers") if isinstance(ext, dict) else None
+    return {**data, EXT_DATA_KEY: {"writers": _member_writers(raw, user_ids)}}
 
 
 def _valid_groups(groups, label: str) -> list:
@@ -203,7 +169,7 @@ def _group_names(groups, label: str) -> list[str]:
 
 def member_group_access(user_id: str) -> dict[str, Access]:
     """user が所属するグループの(ディレクトリ名として使える)名前 -> `rw` / `ro`(admin かどうかは
-    見ない — 書き込みの形と `writers` だけ)。同じ名前のグループが複数あれば (#151 より前の DB)、
+    見ない — `writers` だけ)。同じ名前のグループが複数あれば (#151 より前の DB)、
     どれかで書ければ rw。"""
     from nucllei.models.groups import Groups
 
@@ -233,17 +199,6 @@ def all_group_names() -> list[str]:
     return _group_names(Groups.get_groups(), "bind / 配信")
 
 
-def group_write_mode_by_name(name: str) -> Optional[str]:
-    """名前 `name` のグループの書き込みの形 (無ければ None)。同名が複数あれば (#151 より前の DB)
-    どれかが `members` なら `members`。案内の文 (誰が直せるか) にだけ使う — 可否は `ext_access`。"""
-    from nucllei.models.groups import Groups
-
-    modes = {group_write_mode(g) for g in Groups.get_groups() if g.name == name}
-    if not modes:
-        return None
-    return WRITE_MEMBERS if WRITE_MEMBERS in modes else WRITE_LISTED
-
-
 def ext_visible_groups(user) -> list[str]:
     """`/ext/groups` の下でこの user に見えるグループ名(名前順)。admin は全グループ、
     一般ユーザーは所属グループ、user 不明は []。直下の一覧(ファイルブラウザ等)はこれで出す。"""
@@ -259,8 +214,8 @@ def ext_access(user, rel: str) -> Access:
     """`/ext/` 以降のパス `rel`(decode 済み。`"groups/EMR/a.md"`・`"public"`・`"doc/x"`)を
     この user が rw / ro / 見えない(none)のどれで扱えるか。
 
-    - `groups/<g>/…`: admin → rw、`<g>` のメンバー → rw(`listed` のグループで `writers` に
-      いないメンバーは ro)、それ以外 → none
+    - `groups/<g>/…`: admin → rw、`<g>` のメンバーで `writers` にいる → rw、他のメンバー → ro、
+      それ以外 → none
     - `groups` そのもの(`groups` / `groups/`)→ none(直下の一覧は `ext_visible_groups`)
     - `public/…`: admin → rw、他 → ro
     - それ以外の name: ro(user 不明でも ro — 公開範囲は配備の `EXT_MOUNTS` が決める)
@@ -317,8 +272,8 @@ def confine_depth(name: str) -> int:
 def sandbox_ext_mounts(user) -> list[dict]:
     """sandbox の `mounts`(jail に bind する一覧)。`[{"path": "/ext/public", "rw": bool},
     {"path": "/ext/groups/<g>", "rw": bool}, …]`。見えない物は入れない(= jail に無い)。
-    グループの rw は `ext_access` と同じ(admin は全部 rw、メンバーは書き込みの形と `writers`
-    次第 — ro の bind なら jail の中の run_* も書けない)。user 不明は []。"""
+    グループの rw は `ext_access` と同じ(admin は全部 rw、メンバーは `writers` 次第 — ro の bind
+    なら jail の中の run_* も書けない)。user 不明は []。"""
     uid, role = _uid_role(user)
     if not uid:
         return []

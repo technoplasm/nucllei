@@ -9,8 +9,8 @@ manifest と同じ)。preset の system prompt に {{USER_RECIPES}} があれば
 `utils/recipes.py`、一覧と「壊れている」の材料集めは `utils/recipe_index.py`。
 
 - 置き場は `<層>/recipes/<名前>/RECIPE.md` + 同じフォルダの付属。読む・書ける範囲は read_file /
-  write_file と同じ ACL (/workspace・所属グループの /ext/groups/<g> (書き込みを「指定した人だけ」に
-  したグループは指定された人だけ — 他のメンバーは読むだけ)・管理者は全グループと /ext/public)
+  write_file と同じ ACL (/workspace・所属グループの /ext/groups/<g> (書けるのは管理者が書き込みを
+  許したメンバーだけ — 他のメンバーは読むだけ)・管理者は全グループと /ext/public)
 - load_recipe はモデルが呼ぶ tool。結果は 1 つにまとめる (資料を先・指示を最後):
   frontmatter の requires を書いた順に中で実行して見出し付きで先に並べ、このレシピの本文を最後に
   置く。recipe: は深さ優先で、読み込んだレシピも「その requires → その本文」の順に入れ子で展開する。
@@ -892,9 +892,7 @@ class RecipeTools:
                     )
                 raise
         did = "置き換えた" if trashed else "置いた"
-        lines.append(
-            f"{ref.layer.label}に{did}: {ref.folder}/ ({_audience(ref.layer)})"
-        )
+        lines.append(f"{ref.layer.label}に{did}: {ref.folder}/ ({ref.layer.audience})")
         lines.append(f"title: {plain(values['title'])}")
         if ref.layer.shared:
             lines.append(f"author: {plain(author)}")
@@ -1106,26 +1104,6 @@ def _written_reply(lines: list, tell: str, metadata, folder: str) -> str:
         [_defuse(x) for x in lines]
         + [_reset_marks(metadata, folder), f"返答への指示: {_defuse(tell)}"]
     )
-
-
-def _audience(layer) -> str:
-    """save_recipe の結果の「誰が見て直せるか」。書き込みを「指定した人だけ」にしたグループは
-    メンバー全員が直せるとは言わない。"""
-    if layer.kind == "group":
-        from nucllei.utils.ext_acl import WRITE_LISTED, group_write_mode_by_name
-
-        try:
-            listed = group_write_mode_by_name(layer.group) == WRITE_LISTED
-        except Exception as e:
-            # 分からないときは誰が直せるかを言わない
-            log.warning(f"[recipes] group write mode of {layer.group!r}: {e!r}")
-            return f"グループ「{layer.group}」のメンバー全員が見られる"
-        if listed:
-            return (
-                f"グループ「{layer.group}」のメンバー全員が見られる。"
-                "直せるのは管理者が書き込みを許した人だけ"
-            )
-    return layer.audience
 
 
 def _warning_lines(warns) -> list[str]:

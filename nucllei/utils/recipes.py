@@ -66,11 +66,9 @@ BROKEN_NEXT = "edit_recipe(path=この行のフォルダ) で直す (原文は�
 BROKEN_REWRITE_NEXT = "save_recipe(path=この行のフォルダ) で作り直す"
 # 直せない人 (全体の層を管理者でない人が読む) には直させない
 BROKEN_READONLY_NEXT = "直せるのは管理者なので、壊れていることをユーザーに伝える"
-# 書き込みを「指定した人だけ」にしたグループで、指定されていないメンバーが読む。
+# 書き込みを許されていないグループのメンバーが読む。
 # グループ名は出さない (一覧の印の角括弧の中に入る — 行のフォルダで分かる)
-READONLY_GROUP_WHY = (
-    "この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許した人だけ)"
-)
+READONLY_GROUP_WHY = "この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許したメンバーだけ)"
 BROKEN_READONLY_GROUP_NEXT = (
     f"{READONLY_GROUP_WHY}なので、壊れていることをユーザーに伝える"
 )
@@ -163,7 +161,10 @@ class Layer:
         return {
             "personal": "本人だけが見られる",
             "public": "全員が見られる。直せるのは管理者だけ",
-        }.get(self.kind) or f"グループ「{self.group}」のメンバー全員が見て直せる"
+        }.get(self.kind) or (
+            f"グループ「{self.group}」のメンバー全員が見られる。"
+            "直せるのは管理者が書き込みを許したメンバーだけ"
+        )
 
 
 PERSONAL = Layer("personal", WORKSPACE)
@@ -937,7 +938,7 @@ def broken_next(
     """壊れたレシピの次の手。`folder` (load_recipe の ERROR・入れ子の警告) があれば実際のパスで言う
     (一覧の印は行のフォルダを「このフォルダ」と指す)。直す tool と渡す path (フォルダ) を先に言う。
     `writable` は読む人がその層に書けるか (`recipe_index.recipe_writable`)。書けないときの文は
-    層で分ける (全体 = 管理者だけ、グループ = 書き込みを許された人だけ)。`place` は `folder` を
+    層で分ける (全体 = 管理者だけ、グループ = 書き込みを許されたメンバーだけ)。`place` は `folder` を
     文に出さない一覧の印が、層を見分けるためだけに渡すレシピのフォルダ。"""
     if not writable:
         if _in_group_layer(folder or place):

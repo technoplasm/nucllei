@@ -27,12 +27,19 @@ ADMIN = {"id": "admin1", "role": "admin"}
 
 
 def _make_groups():
-    from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
+    """メンバー全員に書き込みを許したグループ (管理画面でメンバーに入れたときの既定と同じ)。"""
+    from nucllei.models.groups import GroupExtForm, GroupForm, GroupUpdateForm, Groups
 
     def make(name, user_ids):
         g = Groups.insert_new_group("admin1", GroupForm(name=name, description=""))
         Groups.update_group_by_id(
-            g.id, GroupUpdateForm(name=name, description="", user_ids=user_ids)
+            g.id,
+            GroupUpdateForm(
+                name=name,
+                description="",
+                user_ids=user_ids,
+                ext=GroupExtForm(writers=user_ids),
+            ),
         )
         return g
 
@@ -161,7 +168,7 @@ class TestExtAcl(AbstractPostgresTest):
         assert sandbox_ext_mounts(None) == []
 
     def test_membership_change_is_seen_immediately(self):
-        from nucllei.models.groups import GroupUpdateForm, Groups
+        from nucllei.models.groups import GroupExtForm, GroupUpdateForm, Groups
         from nucllei.utils.ext_acl import ext_access
 
         g = next(g for g in Groups.get_groups() if g.name == "OTHER")
@@ -169,6 +176,16 @@ class TestExtAcl(AbstractPostgresTest):
         Groups.update_group_by_id(
             g.id,
             GroupUpdateForm(name="OTHER", description="", user_ids=["member1"]),
+        )
+        # 書き込みを許すまでは読むだけ
+        assert ext_access(MEMBER, "groups/OTHER/x") == "ro"
+        Groups.update_group_by_id(
+            g.id,
+            GroupUpdateForm(
+                name="OTHER",
+                description="",
+                ext=GroupExtForm(writers=["member1"]),
+            ),
         )
         assert ext_access(MEMBER, "groups/OTHER/x") == "rw"
         Groups.update_group_by_id(
@@ -477,8 +494,8 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         out = _text(tool.write_file("/ext/doc/x.md", "x", __user__=MEMBER))
         assert out == (
             "ERROR: /ext/doc/x.md は read-only の参照データ。書き込めるのは `/workspace/` 配下と、"
-            "所属グループの `/ext/groups/<グループ名>/` だけ (書ける人を絞ったグループは許された人だけ。"
-            "管理者はすべてのグループの置き場と `/ext/public/` にも書ける)。"
+            "所属グループの `/ext/groups/<グループ名>/` だけ (グループの置き場は管理者が書き込みを許した"
+            "メンバーだけ。管理者はすべてのグループの置き場と `/ext/public/` にも書ける)。"
         )
         assert tool.calls == []
         out = _text(tool.write_file("/ext/groups/EMR/../OTHER/x", "x", __user__=MEMBER))
@@ -811,13 +828,13 @@ def test_group_dir_name(name, ok):
 
 
 # ---------------------------------------------------------------------------
-# グループの書き込み: data.ext = {"write": "members"|"listed", "writers": […]}
+# グループの書き込み: data.ext = {"writers": […]}
 # ---------------------------------------------------------------------------
 WRITER = {"id": "writer1", "role": "user"}
 READER = {"id": "reader1", "role": "user"}
 LISTED_ADMIN = {"id": "admin2", "role": "admin"}
 
-RO_WHY = "グループ「CHART」の置き場に書けるのは、管理者が書き込みを許した人だけ"
+RO_WHY = "グループ「CHART」の置き場に書けるのは、管理者が書き込みを許したメンバーだけ"
 
 
 def _group(name):
@@ -842,14 +859,25 @@ def _set_ext(name, ext, user_ids=None):
     )
 
 
-def _make_listed():
+def _set_data(name, data):
+    """DB を直接書く (保存の正規化を通らない形)。"""
+    from nucllei.internal.db import get_db
+    from nucllei.models.groups import Group
+
+    g = _group(name)
+    with get_db() as db:
+        db.query(Group).filter_by(id=g.id).update({"data": data})
+        db.commit()
+
+
+def _make_chart():
     """CHART: writer1 / reader1 / admin2 がメンバーで、書けるのは writer1 だけ。"""
     from nucllei.models.groups import GroupForm, Groups
 
     Groups.insert_new_group("admin1", GroupForm(name="CHART", description=""))
     _set_ext(
         "CHART",
-        {"write": "listed", "writers": ["writer1"]},
+        {"writers": ["writer1"]},
         user_ids=["writer1", "reader1", "admin2"],
     )
 
@@ -860,12 +888,12 @@ class TestGroupWriters(AbstractPostgresTest):
     def setup_method(self):
         super().setup_method()
         _make_groups()
-        _make_listed()
+        _make_chart()
 
-    def test_access_in_both_modes(self):
+    def test_only_writers_can_write(self):
         from nucllei.utils.ext_acl import ext_access
 
-        # listed: 指定された人だけ rw、他のメンバーは ro、admin は role で rw
+        # writers のメンバーだけ rw、他のメンバーは ro、admin は role で rw
         assert ext_access(WRITER, "groups/CHART/a.md") == "rw"
         assert ext_access(READER, "groups/CHART/a.md") == "ro"
         assert ext_access(READER, "groups/CHART") == "ro"
@@ -873,32 +901,45 @@ class TestGroupWriters(AbstractPostgresTest):
         assert ext_access(ADMIN, "groups/CHART/a.md") == "rw"
         assert ext_access(OUTSIDER, "groups/CHART/a.md") == "none"
         assert ext_access("reader1", "groups/CHART/a.md") == "ro"
-        # members (無いときと同じ): メンバー全員 rw
-        assert _group("EMR").data is None
-        assert ext_access(MEMBER, "groups/EMR/a.md") == "rw"
-        _set_ext("CHART", {"write": "members", "writers": []})
+        # 全員を writers にすればメンバー全員 rw
+        _set_ext("CHART", {"writers": ["writer1", "reader1", "admin2"]})
         assert ext_access(READER, "groups/CHART/a.md") == "rw"
         assert ext_access(WRITER, "groups/CHART/a.md") == "rw"
+        # 空にすればメンバー全員 ro (admin は rw のまま)
+        _set_ext("CHART", {"writers": []})
+        assert ext_access(WRITER, "groups/CHART/a.md") == "ro"
+        assert ext_access(READER, "groups/CHART/a.md") == "ro"
+        assert ext_access(LISTED_ADMIN, "groups/CHART/a.md") == "rw"
+
+    def test_missing_ext_or_writers_means_read_only(self):
+        from nucllei.utils.ext_acl import ext_access, sandbox_ext_mounts
+
+        for data in (
+            None,
+            {},
+            {"other": 1},
+            {"ext": None},
+            {"ext": "writer1"},
+            {"ext": {}},
+            {"ext": {"writers": None}},
+            {"ext": {"writers": "writer1"}},
+            # write は読まない (writers だけで決まる)
+            {"ext": {"write": "members"}},
+            {"ext": {"write": "members", "writers": []}},
+        ):
+            _set_data("CHART", data)
+            assert ext_access(WRITER, "groups/CHART/a.md") == "ro", data
+            assert ext_access(READER, "groups/CHART/a.md") == "ro", data
+            assert ext_access(LISTED_ADMIN, "groups/CHART/a.md") == "rw", data
+            assert {"path": "/ext/groups/CHART", "rw": False} in sandbox_ext_mounts(
+                WRITER
+            ), data
 
     def test_non_member_in_writers_grants_nothing(self):
         """保存の正規化をすり抜けた (DB を直接触った) writers でも、判定は所属を確かめる。"""
-        from nucllei.internal.db import get_db
-        from nucllei.models.groups import Group
         from nucllei.utils.ext_acl import ext_access, sandbox_ext_mounts
 
-        g = _group("CHART")
-        with get_db() as db:
-            db.query(Group).filter_by(id=g.id).update(
-                {
-                    "data": {
-                        "ext": {
-                            "write": "listed",
-                            "writers": ["writer1", "outsider1", "member1"],
-                        }
-                    }
-                }
-            )
-            db.commit()
+        _set_data("CHART", {"ext": {"writers": ["writer1", "outsider1", "member1"]}})
         assert ext_access(OUTSIDER, "groups/CHART/a.md") == "none"
         assert ext_access(MEMBER, "groups/CHART/a.md") == "none"
         assert {"path": "/ext/groups/CHART", "rw": True} not in sandbox_ext_mounts(
@@ -907,87 +948,83 @@ class TestGroupWriters(AbstractPostgresTest):
         assert all("CHART" not in m["path"] for m in sandbox_ext_mounts(MEMBER))
         assert ext_access(WRITER, "groups/CHART/a.md") == "rw"
 
-    def test_unknown_mode_fails_closed(self):
-        from nucllei.internal.db import get_db
-        from nucllei.models.groups import Group
+    def test_writers_are_normalized_on_save(self):
         from nucllei.utils.ext_acl import ext_access
 
-        g = _group("CHART")
-        with get_db() as db:
-            db.query(Group).filter_by(id=g.id).update(
-                {"data": {"ext": {"write": "everyone", "writers": ["writer1"]}}}
-            )
-            db.commit()
-        assert ext_access(READER, "groups/CHART/a.md") == "ro"
-        assert ext_access(WRITER, "groups/CHART/a.md") == "rw"
-
-    def test_writers_are_normalized_on_save(self):
         # writers は保存のたびに user_ids との積 (順序は保つ・重複なし)
         g = _set_ext(
             "CHART",
-            {
-                "write": "listed",
-                "writers": ["reader1", "outsider1", "reader1", "writer1"],
-            },
+            {"writers": ["reader1", "outsider1", "reader1", "writer1"]},
         )
-        assert g.data["ext"] == {"write": "listed", "writers": ["reader1", "writer1"]}
+        assert g.data["ext"] == {"writers": ["reader1", "writer1"]}
         # メンバーから外すと writers からも落ちる (ext を送らない更新 = OAuth の同期と同じ形でも)
         g = _set_ext("CHART", None, user_ids=["writer1", "admin2"])
-        assert g.data["ext"] == {"write": "listed", "writers": ["writer1"]}
-        # 入れ直しても書き込みは戻らない (安全側)
+        assert g.data["ext"] == {"writers": ["writer1"]}
+        # 入れ直しても書き込みは戻らない
         g = _set_ext("CHART", None, user_ids=["writer1", "admin2", "reader1"])
-        assert g.data["ext"]["writers"] == ["writer1"]
+        assert g.data["ext"] == {"writers": ["writer1"]}
+        assert ext_access(READER, "groups/CHART/x") == "ro"
+        # ext を送らずに足したメンバーは読むだけ・既存の writers は残る
+        g = _set_ext("CHART", None, user_ids=["writer1", "admin2", "reader1", "new1"])
+        assert g.data["ext"] == {"writers": ["writer1"]}
+        assert ext_access("new1", "groups/CHART/x") == "ro"
+        assert ext_access(WRITER, "groups/CHART/x") == "rw"
+
+    def test_members_added_to_group_without_ext_are_read_only(self):
+        """ext の無いグループに ext を送らずにメンバーを足しても、誰も書けない (ext も作らない)。"""
+        from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
         from nucllei.utils.ext_acl import ext_access
 
-        assert ext_access(READER, "groups/CHART/x") == "ro"
+        g = Groups.insert_new_group("admin1", GroupForm(name="NEW", description=""))
+        Groups.update_group_by_id(
+            g.id, GroupUpdateForm(name="NEW", description="", user_ids=["writer1"])
+        )
+        assert Groups.get_group_by_id(g.id).data is None
+        assert ext_access(WRITER, "groups/NEW/a") == "ro"
 
-    def test_normalize_keeps_unknown_modes_closed(self):
+    def test_normalize_group_data(self):
         from nucllei.utils.ext_acl import normalize_group_data
 
         ids = ["a", "b"]
+        # write とその他の ext のキーは落とす
         assert normalize_group_data(
-            {"ext": {"write": "everyone", "writers": ["a", "x"]}}, ids
-        ) == {"ext": {"write": "listed", "writers": ["a"]}}
+            {"ext": {"write": "members", "writers": ["a", "x", 1, "a"], "k": 1}}, ids
+        ) == {"ext": {"writers": ["a"]}}
         assert normalize_group_data({"ext": "members", "k": 1}, ids) == {
-            "ext": {"write": "listed", "writers": []},
+            "ext": {"writers": []},
             "k": 1,
         }
         assert normalize_group_data({"ext": {"writers": "a"}}, ids) == {
-            "ext": {"write": "members", "writers": []}
+            "ext": {"writers": []}
         }
+        assert normalize_group_data({"ext": None}, ids) == {"ext": {"writers": []}}
         assert normalize_group_data({"k": 1}, ids) == {"k": 1}
         assert normalize_group_data(None, ids) is None
 
     def test_update_without_ext_keeps_the_setting_and_other_data(self):
         """ext を送らない更新 (名前・権限だけ・OAuth の同期) は data を消さない。改名でも writers は
         user_id で持つので残る。"""
-        from nucllei.internal.db import get_db
-        from nucllei.models.groups import Group, GroupUpdateForm, Groups
+        from nucllei.models.groups import GroupUpdateForm, Groups
+        from nucllei.utils.ext_acl import ext_access
 
         g = _group("CHART")
-        with get_db() as db:
-            db.query(Group).filter_by(id=g.id).update(
-                {"data": {**g.data, "other": {"k": 1}}}
-            )
-            db.commit()
+        _set_data("CHART", {**g.data, "other": {"k": 1}})
         Groups.update_group_by_id(
             g.id, GroupUpdateForm(name="CHART", description="", permissions={})
         )
         assert _group("CHART").data == {
-            "ext": {"write": "listed", "writers": ["writer1"]},
+            "ext": {"writers": ["writer1"]},
             "other": {"k": 1},
         }
         Groups.update_group_by_id(g.id, GroupUpdateForm(name="CHART2", description=""))
         g2 = Groups.get_group_by_id(g.id)
         assert g2.name == "CHART2" and g2.data["ext"]["writers"] == ["writer1"]
-        from nucllei.utils.ext_acl import ext_access
-
         assert ext_access(WRITER, "groups/CHART2/a") == "rw"
         assert ext_access(READER, "groups/CHART2/a") == "ro"
         # ext を送った更新でも、ext 以外のキーは残る
-        _set_ext("CHART2", {"write": "members"})
+        _set_ext("CHART2", {"writers": ["reader1"]})
         assert _group("CHART2").data == {
-            "ext": {"write": "members", "writers": []},
+            "ext": {"writers": ["reader1"]},
             "other": {"k": 1},
         }
 
@@ -1087,7 +1124,7 @@ class TestGroupWriters(AbstractPostgresTest):
         )
         out = _text(_tool(listing).list_workspace("/ext/groups/CHART", __user__=WRITER))
         assert out == "- /ext/groups/CHART/a.md (3B)"
-        # members のグループはメンバー全員が書ける
+        # メンバー全員が writers のグループ
         out = _text(_tool({}).list_workspace("/ext/groups", __user__=MEMBER))
         assert out.splitlines() == [
             "- /ext/groups/EMR/ (グループの共有の置き場。書ける)",
@@ -1100,7 +1137,9 @@ class TestGroupWriters(AbstractPostgresTest):
         from nucllei.builtin_tools.sandbox import Tools
 
         doc = " ".join(Tools.__doc__.split())
-        assert "(書けるかはグループごと — list_workspace で分かる)" in doc
+        assert (
+            "(書けるのは書き込みを許されたメンバーだけ。list_workspace で分かる)" in doc
+        )
         assert "書ける)" not in doc.split("`/ext/public/` は")[0]
 
     # ---- API (admin だけ) -------------------------------------------------------
@@ -1108,18 +1147,19 @@ class TestGroupWriters(AbstractPostgresTest):
         from test.util.mock_user import mock_webui_user_strict
 
         g = _group("EMR")
+        before = _group("EMR").data
         body = {
             "name": "EMR",
             "description": "",
             "user_ids": ["member1"],
-            "ext": {"write": "listed", "writers": ["member1", "ghost"]},
+            "ext": {"writers": ["member1", "ghost"]},
         }
         with mock_webui_user_strict(id="member1", role="user"):
             r = self.fast_api_client.post(
                 self.create_url(f"/id/{g.id}/update"), json=body
             )
         assert r.status_code == 401, r.text
-        assert _group("EMR").data is None
+        assert _group("EMR").data == before
 
         from nucllei.models.users import Users
 
@@ -1135,7 +1175,7 @@ class TestGroupWriters(AbstractPostgresTest):
             # user_ids は実在のユーザーに絞られ、writers はその積
             got = r.json()
             assert sorted(got["user_ids"]) == ["member1", "reader1"]
-            assert got["data"] == {"ext": {"write": "listed", "writers": ["member1"]}}
+            assert got["data"] == {"ext": {"writers": ["member1"]}}
             from nucllei.utils.ext_acl import ext_access
 
             assert ext_access("reader1", "groups/EMR/x") == "ro"
@@ -1143,9 +1183,255 @@ class TestGroupWriters(AbstractPostgresTest):
             # 一覧 (GET /) も同じ形で返す (画面はここから読む)
             r = self.fast_api_client.get(self.create_url("/"))
             emr = next(x for x in r.json() if x["name"] == "EMR")
-            assert emr["data"]["ext"] == {"write": "listed", "writers": ["member1"]}
-            bad = {**body, "ext": {"write": "everyone", "writers": []}}
+            assert emr["data"]["ext"] == {"writers": ["member1"]}
+            # ext は writers だけ (他のキー・writers の欠けは 422 で、何も変えない)
+            for bad_ext in (
+                {"write": "members", "writers": ["member1", "reader1"]},
+                {"write": "listed"},
+                {},
+                {"writers": "member1"},
+            ):
+                r = self.fast_api_client.post(
+                    self.create_url(f"/id/{g.id}/update"),
+                    json={**body, "ext": bad_ext},
+                )
+                assert r.status_code == 422, bad_ext
+            assert _group("EMR").data == {"ext": {"writers": ["member1"]}}
+
+    def test_api_members_added_without_ext_are_read_only(self):
+        """ext を送らずに user_ids でメンバーを足す API 呼び出し: 足した人は読むだけ、既存の writers は残る。"""
+        from test.util.mock_user import mock_webui_user_strict
+        from nucllei.models.users import Users
+        from nucllei.utils.ext_acl import ext_access
+
+        for uid in ("member1", "new1"):
+            Users.insert_new_user(uid, uid, f"{uid}@x.local", role="user")
+        g = _group("EMR")
+        with mock_webui_user_strict(id="admin1", role="admin"):
             r = self.fast_api_client.post(
-                self.create_url(f"/id/{g.id}/update"), json=bad
+                self.create_url(f"/id/{g.id}/update"),
+                json={
+                    "name": "EMR",
+                    "description": "",
+                    "user_ids": ["member1", "new1"],
+                },
             )
-            assert r.status_code == 422
+        assert r.status_code == 200, r.text
+        assert r.json()["data"] == {"ext": {"writers": ["member1"]}}
+        assert ext_access("member1", "groups/EMR/x") == "rw"
+        assert ext_access("new1", "groups/EMR/x") == "ro"
+
+    # ---- OAuth のグループ同期 ----------------------------------------------------
+    def _oauth_sync(self, user_id, groups):
+        from types import SimpleNamespace
+
+        from nucllei.utils import oauth
+
+        mgr = oauth.OAuthManager.__new__(oauth.OAuthManager)
+        cfg = SimpleNamespace(OAUTH_GROUPS_CLAIM="groups")
+        orig = oauth.auth_manager_config
+        oauth.auth_manager_config = cfg
+        try:
+            mgr.update_user_groups(
+                SimpleNamespace(id=user_id), {"groups": groups}, default_permissions={}
+            )
+        finally:
+            oauth.auth_manager_config = orig
+
+    def test_oauth_sync_adds_members_read_only(self):
+        from nucllei.utils.ext_acl import ext_access
+
+        # 同期で入ったメンバーは読むだけ。既存の writers は残る
+        self._oauth_sync("new1", ["CHART"])
+        g = _group("CHART")
+        assert "new1" in g.user_ids
+        assert g.data["ext"] == {"writers": ["writer1"]}
+        assert ext_access("new1", "groups/CHART/a") == "ro"
+        assert ext_access(WRITER, "groups/CHART/a") == "rw"
+
+    def test_oauth_sync_readded_writer_comes_back_read_only(self):
+        from nucllei.utils.ext_acl import ext_access
+
+        # 外れたら writers からも落ち、入れ直しても読むだけ
+        self._oauth_sync("writer1", ["EMR"])
+        g = _group("CHART")
+        assert "writer1" not in g.user_ids
+        assert g.data["ext"] == {"writers": []}
+        assert ext_access(WRITER, "groups/CHART/a") == "none"
+        self._oauth_sync("writer1", ["CHART"])
+        g = _group("CHART")
+        assert "writer1" in g.user_ids
+        assert g.data["ext"] == {"writers": []}
+        assert ext_access(WRITER, "groups/CHART/a") == "ro"
+
+
+# ---------------------------------------------------------------------------
+# migration 31221e5f4d38 (既存グループの data.ext を {"writers": …} に揃える)
+# ---------------------------------------------------------------------------
+def _writers_migration():
+    import importlib.util
+    import pathlib
+
+    versions = pathlib.Path(__file__).resolve().parents[4] / "migrations" / "versions"
+    path = next(versions.glob("*_31221e5f4d38_*.py"))
+    spec = importlib.util.spec_from_file_location("migration_31221e5f4d38", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    "data, user_ids, want",
+    [
+        # ext の無いグループ (メンバー全員が書けた) — 全員を writers に
+        (None, ["a", "b"], {"ext": {"writers": ["a", "b"]}}),
+        ({}, ["a"], {"ext": {"writers": ["a"]}}),
+        ({"other": 1}, ["a"], {"other": 1, "ext": {"writers": ["a"]}}),
+        ({"ext": None}, ["a"], {"ext": {"writers": ["a"]}}),
+        ({"ext": "x"}, ["a"], {"ext": {"writers": ["a"]}}),
+        ({"ext": {}}, ["a"], {"ext": {"writers": ["a"]}}),
+        # members (メンバー全員が書けた) — 保存されていた writers は見ない
+        (
+            {"ext": {"write": "members", "writers": []}, "k": 1},
+            ["a", "b"],
+            {"ext": {"writers": ["a", "b"]}, "k": 1},
+        ),
+        (
+            {"ext": {"write": None, "writers": ["a"]}},
+            ["a", "b"],
+            {"ext": {"writers": ["a", "b"]}},
+        ),
+        # listed (指定されたメンバーだけ書けた) — writers ∩ user_ids
+        (
+            {"ext": {"write": "listed", "writers": ["b", "ghost", "b", 3]}},
+            ["a", "b"],
+            {"ext": {"writers": ["b"]}},
+        ),
+        ({"ext": {"write": "listed", "writers": []}}, ["a"], {"ext": {"writers": []}}),
+        ({"ext": {"write": "listed"}}, ["a"], {"ext": {"writers": []}}),
+        # 知らない値は listed と同じ扱いだった
+        (
+            {"ext": {"write": "everyone", "writers": ["a"]}},
+            ["a", "b"],
+            {"ext": {"writers": ["a"]}},
+        ),
+        # user_ids の欠け・重複
+        (None, None, {"ext": {"writers": []}}),
+        (None, ["a", "a", 1, ""], {"ext": {"writers": ["a"]}}),
+        ("junk", ["a"], {"ext": {"writers": ["a"]}}),
+    ],
+)
+def test_migration_writers_keep_who_could_write(data, user_ids, want):
+    m = _writers_migration()
+    assert m.migrate_data(data, user_ids) == want
+
+
+def test_migration_upgrade_rewrites_every_group():
+    """sqlite に migration 直前の group 表を作って upgrade を当てる (JSON は文字列で持つ)。"""
+    import json
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    m = _writers_migration()
+    rows = [
+        ("g1", None, ["a", "b"]),
+        ("g2", {"ext": {"write": "members", "writers": []}}, ["a"]),
+        ("g3", {"ext": {"write": "listed", "writers": ["b", "x"]}, "k": 1}, ["a", "b"]),
+        ("g4", None, None),
+    ]
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                'CREATE TABLE "group" (id TEXT PRIMARY KEY, data JSON, user_ids JSON)'
+            )
+        )
+        for gid, data, ids in rows:
+            conn.execute(
+                sa.text(
+                    'INSERT INTO "group" (id, data, user_ids) VALUES (:id, :d, :u)'
+                ),
+                {
+                    "id": gid,
+                    "d": None if data is None else json.dumps(data),
+                    "u": None if ids is None else json.dumps(ids),
+                },
+            )
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            m.upgrade()
+        got = {
+            gid: json.loads(d)
+            for gid, d in conn.execute(sa.text('SELECT id, data FROM "group"')).all()
+        }
+    assert got == {
+        "g1": {"ext": {"writers": ["a", "b"]}},
+        "g2": {"ext": {"writers": ["a"]}},
+        "g3": {"ext": {"writers": ["b"]}, "k": 1},
+        "g4": {"ext": {"writers": []}},
+    }
+
+
+class TestWritersMigrationOnPostgres(AbstractPostgresTest):
+    """実 DB (PostgreSQL の JSON 列) で upgrade を当て、判定が前と同じになること。"""
+
+    BASE_PATH = "/api/v1/groups"
+
+    def test_upgrade_keeps_who_can_write(self):
+        from alembic.migration import MigrationContext
+        from alembic.operations import Operations
+
+        from nucllei.internal.db import engine
+        from nucllei.models.groups import GroupForm, Groups
+        from nucllei.utils.ext_acl import ext_access
+
+        def make(name, ids, data):
+            g = Groups.insert_new_group("admin1", GroupForm(name=name, description=""))
+            _set_data(name, data)
+            from nucllei.internal.db import get_db
+            from nucllei.models.groups import Group
+
+            with get_db() as db:
+                db.query(Group).filter_by(id=g.id).update({"user_ids": ids})
+                db.commit()
+
+        make("PLAIN", ["u1", "u2"], None)
+        make("MEMBERS", ["u1", "u2"], {"ext": {"write": "members", "writers": []}})
+        make(
+            "LISTED", ["u1", "u2"], {"ext": {"write": "listed", "writers": ["u2", "x"]}}
+        )
+        with engine.begin() as conn:
+            ctx = MigrationContext.configure(conn)
+            with Operations.context(ctx):
+                _writers_migration().upgrade()
+        assert _group("PLAIN").data == {"ext": {"writers": ["u1", "u2"]}}
+        assert _group("MEMBERS").data == {"ext": {"writers": ["u1", "u2"]}}
+        assert _group("LISTED").data == {"ext": {"writers": ["u2"]}}
+        assert ext_access("u1", "groups/PLAIN/a") == "rw"
+        assert ext_access("u2", "groups/MEMBERS/a") == "rw"
+        assert ext_access("u1", "groups/LISTED/a") == "ro"
+        assert ext_access("u2", "groups/LISTED/a") == "rw"
+
+
+@pytest.mark.parametrize(
+    "data, want",
+    [
+        (
+            {"ext": {"writers": ["a", "b"]}, "k": 1},
+            {"ext": {"write": "listed", "writers": ["a", "b"]}, "k": 1},
+        ),
+        ({"ext": {"writers": []}}, {"ext": {"write": "listed", "writers": []}}),
+        # ext の無いグループ (誰も書けない) も listed の空にする — ひとつ前のコードの「無い = 全員」にしない
+        (None, {"ext": {"write": "listed", "writers": []}}),
+        ({"k": 1}, {"k": 1, "ext": {"write": "listed", "writers": []}}),
+        ({"ext": {"writers": "a"}}, {"ext": {"write": "listed", "writers": []}}),
+    ],
+)
+def test_migration_downgrade_keeps_who_can_write(data, want):
+    m = _writers_migration()
+    assert m.migrate_down_data(data) == want
+    # 上げ直すと元の writers (メンバーとの積)
+    if want["ext"]["writers"]:
+        assert m.migrate_data(want, ["a", "b"])["ext"] == {"writers": ["a", "b"]}

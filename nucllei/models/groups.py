@@ -11,9 +11,7 @@ from nucllei.utils.group_names import (
     normalize_group_name_key,
 )
 
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text, JSON, func
 from sqlalchemy.exc import IntegrityError
 
@@ -90,17 +88,18 @@ class GroupForm(BaseModel):
 
 
 class GroupExtForm(BaseModel):
-    """グループの `/ext/groups/<名前>/` の書き込み (`utils/ext_acl`)。
-    `members` = メンバー全員が書ける (無いときと同じ)、`listed` = `writers` のメンバーだけ書ける
-    (他のメンバーは読むだけ)。`writers` は保存時に `user_ids` との積に揃える。"""
+    """グループの `/ext/groups/<名前>/` の書き込み (`utils/ext_acl`)。書けるのは `writers` の
+    メンバーだけ (他のメンバーは読むだけ)。`writers` は保存時に `user_ids` との積に揃える。"""
 
-    write: Literal["members", "listed"] = "members"
-    writers: list[str] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+
+    writers: list[str]
 
 
 class GroupUpdateForm(GroupForm):
     user_ids: Optional[list[str]] = None
-    # 省略 (None) は今の設定を保つ。保存先は `data.ext` (`data` の他のキーは触らない)
+    # 省略 (None) は今の `writers` を保つ (`user_ids` で足したメンバーは書けない)。
+    # 保存先は `data.ext` (`data` の他のキーは触らない)
     ext: Optional[GroupExtForm] = None
 
 
@@ -202,7 +201,8 @@ class GroupTable:
                 if "name" in values:
                     values["name_key"] = normalize_group_name_key(values["name"])
                 # /ext の書き込み (data.ext)。writers は保存のたびに user_ids との積に揃える —
-                # メンバーから外した人 (OAuth の同期も含む) はここで writers からも落ちる
+                # メンバーから外した人 (OAuth の同期も含む) はここで writers からも落ち、
+                # 入れ直しても書けない。ext を送らずに足したメンバーも writers に入らない
                 ext = values.pop("ext", None)
                 if ext is not None or "user_ids" in values:
                     # 読んでから書くまでに他の更新で user_ids が変わらないよう行を押さえる

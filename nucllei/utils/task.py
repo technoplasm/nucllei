@@ -114,10 +114,33 @@ def user_group_names(user_id: Optional[str]) -> list[str]:
     return sorted(names, key=_group_name_sort_key)
 
 
+def user_writable_group_names(
+    user_id: Optional[str], user_role: Optional[str] = None
+) -> list[str]:
+    """{{USER_WRITABLE_GROUPS}} の元: user が所属しているグループのうち、置き場
+    (`/ext/groups/<名前>/`) に書けるものの名前。並びは _group_name_sort_key、重複なし。
+
+    一般の利用者は `writers` にいるグループ (utils/ext_acl.member_group_access が rw のもの)。
+    admin は全グループに書けるので、所属しているグループ全部 (所属していないグループは入れない —
+    {{USER_GROUPS}} と同じ)。どちらもディレクトリ名にできる名前 (`ext_acl.is_group_dir_name`) だけ
+    — 置き場になれない名前には誰も書けない。user_id が無ければ []。
+    """
+    if not user_id:
+        return []
+    from nucllei.utils.ext_acl import is_group_dir_name, member_group_access
+
+    if user_role == "admin":
+        names = {n for n in user_group_names(user_id) if is_group_dir_name(n)}
+    else:
+        names = {n for n, a in member_group_access(user_id).items() if a == "rw"}
+    return sorted(names, key=_group_name_sort_key)
+
+
 def user_prompt_params(user) -> dict:
     """prompt_template に渡すユーザー由来の引数(UserModel / {"name", …} の dict / None)。
 
-    {{USER_NAME}} / {{USER_LOCATION}} / {{USER_ROLE}} / {{USER_GROUPS}} の出どころを
+    {{USER_NAME}} / {{USER_LOCATION}} / {{USER_ROLE}} / {{USER_GROUPS}} /
+    {{USER_WRITABLE_GROUPS}} の出どころを
     展開箇所(preset の system prompt・skill・続きターンの wire・タイトル生成)で揃える。
     location は UserModel なら info.location、dict なら "location" キー。
     """
@@ -168,6 +191,7 @@ PROMPT_VARIABLE_SCOPES = {
     "{{USER_LOCATION}}": "user",
     "{{USER_ROLE}}": "user",
     "{{USER_GROUPS}}": "user",
+    "{{USER_WRITABLE_GROUPS}}": "user",
     SKILLS_TOKEN: "user",
     USER_RECIPES_TOKEN: "user",
     USER_MEMORY_INDEX_TOKEN: "user",
@@ -355,6 +379,8 @@ def prompt_template(
     {{USER_ROLE}} は role の値そのまま(不明なら "Unknown")。{{USER_GROUPS}} は
     user_group_names(user_id) を ", " でつないだもの(所属なし・user 不明なら空文字列)。
     グループの DB 照会は {{USER_GROUPS}} が本文にあるときだけ、1 呼び出しにつき 1 回。
+    {{USER_WRITABLE_GROUPS}} は user_writable_group_names(user_id, user_role) を ", " でつないだもの
+    (置き場に書ける所属グループ。admin は所属グループ全部。無ければ空文字列)。
     {{SKILLS}} は model (preset) で load_skill できる skill の一覧 (見出し + `- <id>: <説明>` —
     load_skill の説明に入れていたものと同じ。能力「スキル」OFF・0 件・model 無しなら空)。
     {{USER_RECIPES}} は見えるレシピの一覧 (見出し + 行頭の印付きの行。0 件はその 1 文。能力「レシピ」
@@ -422,6 +448,11 @@ def prompt_template(
     if "{{USER_GROUPS}}" in template:
         template = template.replace(
             "{{USER_GROUPS}}", ", ".join(user_group_names(user_id))
+        )
+    if "{{USER_WRITABLE_GROUPS}}" in template:
+        template = template.replace(
+            "{{USER_WRITABLE_GROUPS}}",
+            ", ".join(user_writable_group_names(user_id, user_role)),
         )
     if SKILLS_TOKEN in template:
         from nucllei.utils.skills import skills_block

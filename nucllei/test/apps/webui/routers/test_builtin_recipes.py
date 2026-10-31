@@ -30,7 +30,7 @@ ADMIN = {"id": "a1", "role": "admin", "name": "管理"}
 TODAY = dt.date.today().isoformat()
 
 MEMBERS = {"u1": ["EMR"], "u2": ["EMR"], "a1": []}
-# 書き込みを「指定した人だけ」にしたグループで指定されていない (uid, グループ)。
+# グループの書き込みを許されていない (uid, グループ)。
 # 既定は空 = 全員が書ける。テストが足す
 READ_ONLY: set = set()
 
@@ -1616,11 +1616,9 @@ def test_bad_yaml_date_marks_broken_instead_of_failing_the_list(sbx):
 
 
 # ---------------------------------------------------------------------------
-# グループの書き込みを「指定した人だけ」にしたとき
+# グループの書き込みを許されていないメンバー
 # ---------------------------------------------------------------------------
-GROUP_RO = (
-    "この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許した人だけ)"
-)
+GROUP_RO = "この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許したメンバーだけ)"
 
 
 def test_group_recipes_for_a_non_writer_member_are_read_only(sbx):
@@ -1669,7 +1667,7 @@ def test_group_recipes_for_a_non_writer_member_are_read_only(sbx):
     # 保存・直しは断る (書き込みの ERROR と同じ文)。可否は置き場だけで決まる
     ro_error = (
         "はこの利用者には読み取り専用 (グループ「EMR」の置き場に書けるのは、"
-        "管理者が書き込みを許した人だけ)。次の手: この置き場には書けないとユーザーに伝える"
+        "管理者が書き込みを許したメンバーだけ)。次の手: この置き場には書けないとユーザーに伝える"
     )
     out = _save("/ext/groups/EMR/recipes/新", title="t", description="d", body="b")
     assert out.startswith("ERROR: /ext/groups/EMR/recipes/新/RECIPE.md ") and (
@@ -1685,16 +1683,9 @@ def test_group_recipes_for_a_non_writer_member_are_read_only(sbx):
     assert "置き換えた" in out
 
 
-def test_group_recipe_audience_in_listed_mode(sbx, monkeypatch):
-    import nucllei.utils.ext_acl as ext_acl
-
+def test_group_recipe_audience(sbx):
     out = _save("/ext/groups/EMR/recipes/共有", title="共有", description="d", body="b")
-    assert "グループ「EMR」のメンバー全員が見て直せる" in out
-    monkeypatch.setattr(ext_acl, "group_write_mode_by_name", lambda name: "listed")
-    out = _save(
-        "/ext/groups/EMR/recipes/共有2", title="共有", description="d", body="b"
-    )
     assert (
-        "グループ「EMR」のメンバー全員が見られる。直せるのは管理者が書き込みを許した人だけ"
-        in out
+        "グループ「EMR」のメンバー全員が見られる。"
+        "直せるのは管理者が書き込みを許したメンバーだけ" in out
     )

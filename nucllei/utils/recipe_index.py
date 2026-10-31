@@ -72,7 +72,7 @@ def _uid_role(user) -> tuple[Optional[str], Optional[str]]:
 def recipe_writable(folder: str, user) -> bool:
     """読む人 `user` がレシピのフォルダ `folder` の層に書けるか (直す案内を出すか)。個人の層は書ける、
     `/ext/…` は ACL (`ext_acl.ext_path_access`) が rw のときだけ — 全体は管理者だけ、グループは
-    書き込みの形と `writers` 次第。案内の文にだけ使う — 書けるかの最後の
+    `writers` 次第。案内の文にだけ使う — 書けるかの最後の
     判定は save_recipe / edit_recipe の書き先の検査 (`sandbox._write_target`)。"""
     from nucllei.utils.ext_acl import ext_path_access
 

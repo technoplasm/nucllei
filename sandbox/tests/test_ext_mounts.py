@@ -322,8 +322,7 @@ def test_files_ro_is_403_and_unbound_is_404(monkeypatch, tmp_path):
 
 
 def test_read_only_group_is_ro_bind_and_403(monkeypatch, tmp_path):
-    """グループも ro で渡せる (nucllei 側で書き込みを「指定した人だけ」にしたグループの、指定されて
-    いないメンバー)。jail は --bindmount_ro、`/files/*` の書き込みは 403、読みは通る。
+    """グループも ro で渡せる (nucllei 側で書き込みを許されていないメンバー)。jail は --bindmount_ro、`/files/*` の書き込みは 403、読みは通る。
     ro で置き場がまだ無ければ作らずに飛ばす (書ける人が最初に書いたときに作られる)。"""
     mod, ext = _load(monkeypatch, tmp_path)
     (ext / "groups" / "EMR" / "a.md").write_text("emr")

@@ -7,7 +7,7 @@
 |---|---|---|
 | `/workspace/…` | 本人の workspace を rw | 本人の workspace を rw(他人のは見ない) |
 | `/ext/public/…` | ro | rw |
-| `/ext/groups/<g>/…` | メンバーは rw(書き込みが「指定した人だけ」のグループでは指定された人だけ rw・他のメンバーは ro)、それ以外は不在(404) | 全グループ rw |
+| `/ext/groups/<g>/…` | 書き込みを許されたメンバー(`writers`)は rw・他のメンバーは ro、それ以外は不在(404) | 全グループ rw |
 
 - パスは jail の絶対パス(`/workspace/notes.md`・`/ext/groups/EMR/a.md`)で受け、返す。
   モデルの tool と同じ文字列なので、画面で見たパスをそのままチャットで言える

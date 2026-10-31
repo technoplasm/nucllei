@@ -33,12 +33,16 @@ ADMIN = {"id": "admin1", "role": "admin"}
 
 
 def _make_groups():
-    from nucllei.models.groups import GroupForm, GroupUpdateForm, Groups
+    """メンバー全員に書き込みを許したグループ。"""
+    from nucllei.models.groups import GroupExtForm, GroupForm, GroupUpdateForm, Groups
 
     for name, ids in (("EMR", ["member1"]), ("OTHER", ["other1"])):
         g = Groups.insert_new_group("admin1", GroupForm(name=name, description=""))
         Groups.update_group_by_id(
-            g.id, GroupUpdateForm(name=name, description="", user_ids=ids)
+            g.id,
+            GroupUpdateForm(
+                name=name, description="", user_ids=ids, ext=GroupExtForm(writers=ids)
+            ),
         )
 
 
@@ -262,9 +266,8 @@ class TestSandboxFiles(AbstractPostgresTest):
         assert {"path": "/ext/public", "rw": True} in fake.calls[0][1]["mounts"]
 
     def test_group_read_only_for_non_writer(self, monkeypatch):
-        """書き込みを「指定した人だけ」にしたグループ: 指定されていないメンバーには
-        読み取り専用 — places / 一覧 / 読みの `rw` は False、書き換えは sandbox を呼ばずに 403、
-        sandbox にも ro の bind で渡る。指定された人は書ける。"""
+        """書き込みを許されていないメンバーには読み取り専用 — places / 一覧 / 読みの `rw` は False、
+        書き換えは sandbox を呼ばずに 403、sandbox にも ro の bind で渡る。writers のメンバーは書ける。"""
         from nucllei.models.groups import GroupExtForm, GroupUpdateForm, Groups
 
         g = next(x for x in Groups.get_groups() if x.name == "EMR")
@@ -274,7 +277,7 @@ class TestSandboxFiles(AbstractPostgresTest):
                 name="EMR",
                 description="",
                 user_ids=["member1", "writer1"],
-                ext=GroupExtForm(write="listed", writers=["writer1"]),
+                ext=GroupExtForm(writers=["writer1"]),
             ),
         )
         writer = {"id": "writer1", "role": "user"}

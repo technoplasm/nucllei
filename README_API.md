@@ -472,28 +472,28 @@ into the sandbox at `/ext/groups` and `/ext/public`. The decision lives in one
 place, `nucllei/utils/ext_acl.py`, and the gate, the reference resolver, the
 sandbox tool and the file browser all call it:
 
-| Path                        | Regular user                                                                                                         | Admin (`role == "admin"`) |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| `/ext/groups/<group>/…`     | members: rw (ro for members not listed as writers when the group's write mode is `listed`); everyone else: invisible | rw (all groups)           |
-| `/ext/groups` (the listing) | only the groups they belong to                                                                                       | all groups                |
-| `/ext/public/…`             | ro                                                                                                                   | rw                        |
-| `/ext/<other>/…` (doc, …)   | ro                                                                                                                   | ro                        |
+| Path                        | Regular user                                                                      | Admin (`role == "admin"`) |
+| --------------------------- | --------------------------------------------------------------------------------- | ------------------------- |
+| `/ext/groups/<group>/…`     | members in the group's `writers`: rw; other members: ro; everyone else: invisible | rw (all groups)           |
+| `/ext/groups` (the listing) | only the groups they belong to                                                    | all groups                |
+| `/ext/public/…`             | ro                                                                                | rw                        |
+| `/ext/<other>/…` (doc, …)   | ro                                                                                | ro                        |
 
 - **Who may write a group's folder** is a group attribute, not a
-  user permission: `data.ext = {"write": "members" | "listed", "writers":
-[user_id, …]}`. Absent or `members` = every member is rw (a group without
-  the setting needs no migration). `listed` = only
-  members in `writers` are rw; the other members are ro (they still see and read
-  the folder). Admins are rw on every group by role, whatever the setting.
-  Membership (`user_ids`) keeps its meaning everywhere (permissions, model
-  access, which `/ext/groups/<g>` a user sees). `writers` is normalised to
-  `writers ∩ user_ids` on every save (removing a member — from the editor,
-  OAuth group sync or user deletion — drops them from `writers`; adding them back
-  does not restore it), and the decision also checks membership at read time, so
-  a stale non-member id grants nothing. An unknown `write` value read from the DB
-  is treated as `listed` (fail closed). The jail binds such a group read-only for
-  non-writers (`mounts[].rw = false`), so `run_python` / `run_shell` writes fail
-  with the OS's "Read-only file system".
+  user permission: `data.ext = {"writers": [user_id, …]}`. Only members in
+  `writers` are rw; the other members are ro (they still see and read the
+  folder). A group without `ext` or `writers` has no member writers. Admins are
+  rw on every group by role, whatever the setting. Membership (`user_ids`) keeps
+  its meaning everywhere (permissions, model access, which `/ext/groups/<g>` a
+  user sees). `writers` is normalised to `writers ∩ user_ids` on every save
+  (removing a member — from the editor or OAuth group sync —
+  drops them from `writers`; adding them back does not restore it), and the
+  decision also checks membership at read time, so a stale non-member id grants
+  nothing. Members added without `ext` (OAuth group sync, an API update that
+  only sends `user_ids`) join read-only; the admin group editor checks "Write"
+  for a member it adds and sends `writers` with the save. The jail binds a group
+  read-only for non-writers (`mounts[].rw = false`), so `run_python` /
+  `run_shell` writes fail with the OS's "Read-only file system".
 - The directory name **is** the group name (membership from
   `Groups.get_groups_by_member_id`). Names that fail
   `utils/group_names.validate_group_name` (#151; e.g. an older `rank:部長`) are
@@ -1405,12 +1405,12 @@ Paths are the **jail paths** the model's tools use (`/workspace/notes.md`,
 `/ext/groups/EMR/recipes/a.md`), in requests and responses alike. Which places a
 user can open is the `/ext` ACL of §3.8 (`utils/ext_acl.py`, nothing separate):
 
-| Place                | User                                                                        | Admin         |
-| -------------------- | --------------------------------------------------------------------------- | ------------- |
-| `/workspace/…`       | own workspace, rw                                                           | own, rw       |
-| `/ext/public/…`      | ro                                                                          | rw            |
-| `/ext/groups/<g>/…`  | members rw (non-writers ro in `listed` groups), others 404 (does not exist) | all groups rw |
-| other `/ext/<name>/` | 404 (not part of the browser)                                               | 404           |
+| Place                | User                                                                   | Admin         |
+| -------------------- | ---------------------------------------------------------------------- | ------------- |
+| `/workspace/…`       | own workspace, rw                                                      | own, rw       |
+| `/ext/public/…`      | ro                                                                     | rw            |
+| `/ext/groups/<g>/…`  | members in `writers` rw, other members ro, others 404 (does not exist) | all groups rw |
+| other `/ext/<name>/` | 404 (not part of the browser)                                          | 404           |
 
 Writes to a ro place are 403 (and the sandbox gets the place as a ro bind, so it
 is refused twice). Any `.`-prefixed segment, `..`, or a relative path is 400 —
@@ -1489,13 +1489,13 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
   return its updated row (idempotent — already-terminal rows are unchanged).
 - Users & groups (admin): `/api/v1/users/*`, `/api/v1/groups/*`.
   `POST /api/v1/groups/id/{id}/update` takes an optional
-  `ext: {"write": "members" | "listed", "writers": [user_id, …]}` (admin only;
-  any other `write` value is 422). Omitted = the current setting is kept; the
-  other keys of `data` are never touched. It is stored as `data.ext` and every
-  group response (`GET /api/v1/groups/`, `/id/{id}`, the update) returns it there,
-  with `writers` already normalised to `writers ∩ user_ids` (in the stored
-  order). Groups never given a setting have no `data.ext` (= `members`). See
-  §3.8 "Group ACL" for what it means.
+  `ext: {"writers": [user_id, …]}` (admin only; `writers` is required and any
+  other key is 422). Omitted = the current `writers` are kept (members added by
+  `user_ids` in the same request join read-only); the other keys of `data` are
+  never touched. It is stored as `data.ext` and every group response
+  (`GET /api/v1/groups/`, `/id/{id}`, the update) returns it there, with
+  `writers` already normalised to `writers ∩ user_ids` (in the stored order).
+  See §3.8 "Group ACL" for what it means.
 - Config import/export (admin): `POST /api/v1/configs/import`, `GET /api/v1/configs/export`.
 - External OpenAPI tool servers (admin): `GET/POST /api/v1/configs/tool_servers`.
 
@@ -2909,7 +2909,11 @@ POST /api/v1/skills/create
   stored: `admin` / `user` / …), `{{USER_GROUPS}}` (names of the groups the user
   **is a member of**, as stored, joined with `", "`; sorted by
   `(name.casefold(), name)`; empty string if none — admins get only their own
-  memberships, not every group), `{{BASE_MODEL_ID}}` (id of the base model
+  memberships, not every group), `{{USER_WRITABLE_GROUPS}}` (the user's member
+  groups whose folder `/ext/groups/<group>/` they can write — the groups where
+  they are in `writers`, §3.8; admins get all their member groups, not every
+  group; same join, order and empty value as `{{USER_GROUPS}}`; only names that
+  are valid folder names), `{{BASE_MODEL_ID}}` (id of the base model
   that actually runs inference — the selected preset's `base_model_id`; `Unknown`
   if the server cannot resolve it), `{{SKILLS}}` (the skills the user can load
   with `load_skill` in this preset — `使える skill (load_skill の skill_id にそのまま渡す):`
@@ -2954,13 +2958,13 @@ POST /api/v1/skills/create
   of the user who started the parent chat. There is no call-time parameter mechanism.
   **Which side is the source**:
 
-  | Variable                                                                           | Source  | Note                                                                                                                                                                                                                                                                                                                                                                 |
-  | ---------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `{{CURRENT_DATE}}` `{{CURRENT_TIME}}` `{{CURRENT_DATETIME}}` `{{CURRENT_WEEKDAY}}` | server  | made by the server in the **user's time zone** — the browser's `{{CURRENT_TIMEZONE}}` (an IANA name) for the request; without one (API, continuation turns) or with an invalid one, the server process's TZ (the container's `TZ` env — llens sets `Asia/Tokyo`; the image default is UTC). `{{CURRENT_TIME}}` is 24-hour `HH:MM:SS`, `{{CURRENT_WEEKDAY}}` Japanese |
-  | `{{USER_NAME}}` `{{USER_LOCATION}}` `{{USER_ROLE}}` `{{USER_GROUPS}}`              | server  | the signed-in user                                                                                                                                                                                                                                                                                                                                                   |
-  | `{{BASE_MODEL_ID}}` `{{SKILLS}}` `{{USER_RECIPES}}`                                | server  | need the preset                                                                                                                                                                                                                                                                                                                                                      |
-  | `{{USER_MEMORY_INDEX}}`                                                            | server  | the user's memory index file (sandbox); system prompt only — empty in skill bodies and subagent child turns                                                                                                                                                                                                                                                          |
-  | `{{CURRENT_TIMEZONE}}` `{{USER_LANGUAGE}}`                                         | browser | only the browser knows them: the chat sends them as `variables` (`getPromptVariables`); they are expanded in the preset's system prompt and the chat's system prompt, and stay literal where no browser is involved (API, skills)                                                                                                                                    |
+  | Variable                                                                                         | Source  | Note                                                                                                                                                                                                                                                                                                                                                                 |
+  | ------------------------------------------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `{{CURRENT_DATE}}` `{{CURRENT_TIME}}` `{{CURRENT_DATETIME}}` `{{CURRENT_WEEKDAY}}`               | server  | made by the server in the **user's time zone** — the browser's `{{CURRENT_TIMEZONE}}` (an IANA name) for the request; without one (API, continuation turns) or with an invalid one, the server process's TZ (the container's `TZ` env — llens sets `Asia/Tokyo`; the image default is UTC). `{{CURRENT_TIME}}` is 24-hour `HH:MM:SS`, `{{CURRENT_WEEKDAY}}` Japanese |
+  | `{{USER_NAME}}` `{{USER_LOCATION}}` `{{USER_ROLE}}` `{{USER_GROUPS}}` `{{USER_WRITABLE_GROUPS}}` | server  | the signed-in user                                                                                                                                                                                                                                                                                                                                                   |
+  | `{{BASE_MODEL_ID}}` `{{SKILLS}}` `{{USER_RECIPES}}`                                              | server  | need the preset                                                                                                                                                                                                                                                                                                                                                      |
+  | `{{USER_MEMORY_INDEX}}`                                                                          | server  | the user's memory index file (sandbox); system prompt only — empty in skill bodies and subagent child turns                                                                                                                                                                                                                                                          |
+  | `{{CURRENT_TIMEZONE}}` `{{USER_LANGUAGE}}`                                                       | browser | only the browser knows them: the chat sends them as `variables` (`getPromptVariables`); they are expanded in the preset's system prompt and the chat's system prompt, and stay literal where no browser is involved (API, skills)                                                                                                                                    |
 
   **Server-made values are fixed to `ja`**, whatever the browser's language
   (`{{USER_LANGUAGE}}`) or the server process's locale: weekday `月曜日` … `日曜日`,
@@ -3185,11 +3189,11 @@ is not on the turn. A model whose preset turns the capability
 off and calls one of them anyway (history replay) gets the usual "not in this
 turn's tool list" error.
 
-| layer                   | place                             | who can write                                                                                                              |
-| ----------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| personal `/workspace`   | `/workspace/recipes/<name>/`      | the user                                                                                                                   |
-| group `/ext/groups/<g>` | `/ext/groups/<g>/recipes/<name>/` | members, or only the group's writers when its write mode is `listed` (§3.8; admins: every group). Invisible to non-members |
-| everyone `/ext/public`  | `/ext/public/recipes/<name>/`     | admins (everyone reads)                                                                                                    |
+| layer                   | place                             | who can write                                                                                                   |
+| ----------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| personal `/workspace`   | `/workspace/recipes/<name>/`      | the user                                                                                                        |
+| group `/ext/groups/<g>` | `/ext/groups/<g>/recipes/<name>/` | members in the group's `writers` (§3.8; admins: every group). Other members read only; invisible to non-members |
+| everyone `/ext/public`  | `/ext/public/recipes/<name>/`     | admins (everyone reads)                                                                                         |
 
 Read / write access is exactly `read_file` / `write_file`'s (§5.7). Deleting is
 `remove_file` on the folder (→ that layer's `trash/`, §5.7) — there is no

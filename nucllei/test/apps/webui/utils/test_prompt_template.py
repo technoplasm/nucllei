@@ -1,5 +1,5 @@
 """プロンプト変数の展開(utils/task.py prompt_template)と {{BASE_MODEL_ID}} /
-{{USER_ROLE}} / {{USER_GROUPS}}。
+{{USER_ROLE}} / {{USER_GROUPS}} / {{USER_WRITABLE_GROUPS}}。
 
 {{BASE_MODEL_ID}}(実際に推論する base model の id)を、preset のシステムプロンプト
 (utils/payload.py apply_model_system_prompt_to_body)に差し込めることを固定する。
@@ -7,6 +7,7 @@ CORE(OpenAI 互換接続)に乗る経路の回帰。
 
 {{USER_ROLE}} は role の値そのまま、{{USER_GROUPS}} は所属グループ名(casefold → 元の名前
 の順)を ", " でつないだもの。グループ照会は変数があるときだけ・1 呼び出し 1 回。
+{{USER_WRITABLE_GROUPS}} は置き場に書ける所属グループ (writers にいるもの。admin は所属グループ全部)。
 """
 
 import re
@@ -20,6 +21,7 @@ from nucllei.utils.task import (
     resolve_base_model_id,
     title_generation_template,
     user_group_names,
+    user_writable_group_names,
 )
 from test.util.abstract_integration_test import AbstractPostgresTest
 
@@ -249,3 +251,73 @@ class TestUserGroupsDb(AbstractPostgresTest):
             {"system": "{{USER_ROLE}}: {{USER_GROUPS}}"}, {"messages": []}, None, admin
         )
         assert _system_of(form_data) == "admin: Alpha, zeta"
+
+
+class TestUserWritableGroupsDb(AbstractPostgresTest):
+    """{{USER_WRITABLE_GROUPS}}: 書ける所属グループだけ (ext_access の rw と同じ)、admin は所属グループ全部。"""
+
+    BASE_PATH = "/api/v1/groups"
+
+    def _group(self, name, user_ids, writers=None):
+        from nucllei.models.groups import (
+            GroupExtForm,
+            GroupForm,
+            GroupUpdateForm,
+            Groups,
+        )
+
+        group = Groups.insert_new_group("1", GroupForm(name=name, description=""))
+        Groups.update_group_by_id(
+            group.id,
+            GroupUpdateForm(
+                name=name,
+                description="",
+                user_ids=user_ids,
+                ext=None if writers is None else GroupExtForm(writers=writers),
+            ),
+        )
+
+    def _expand(self, uid, role):
+        user = types.SimpleNamespace(id=uid, name="N", role=role, info=None)
+        form_data = apply_model_system_prompt_to_body(
+            {"system": "[{{USER_GROUPS}}] [{{USER_WRITABLE_GROUPS}}]"},
+            {"messages": []},
+            None,
+            user,
+        )
+        return _system_of(form_data)
+
+    def test_writer_reader_admin_and_none(self):
+        from nucllei.utils.ext_acl import ext_access
+
+        self._group("zeta", ["w1", "r1", "admin1"], writers=["w1"])
+        self._group("Alpha", ["w1", "r1"], writers=["w1", "r1"])
+        self._group("noext", ["w1", "admin1"])  # ext 無し = 誰も書けない
+        self._group("others", ["x1"], writers=["x1"])
+        # ディレクトリ名にできない名前は置き場にならない (誰も書けない)
+        self._group("rank:部長", ["w1", "admin1"], writers=["w1", "admin1"])
+
+        assert self._expand("w1", "user") == (
+            "[Alpha, noext, rank:部長, zeta] [Alpha, zeta]"
+        )
+        assert self._expand("r1", "user") == "[Alpha, zeta] [Alpha]"
+        # admin は所属グループ全部 (writers・ext に依らない)。所属していないグループは入れない
+        assert self._expand("admin1", "admin") == (
+            "[noext, rank:部長, zeta] [noext, zeta]"
+        )
+        assert self._expand("nobody", "user") == "[] []"
+        assert user_writable_group_names(None) == []
+        # 所属グループについて ext_access の rw と一致する
+        for uid, role in (("w1", "user"), ("r1", "user"), ("admin1", "admin")):
+            user = {"id": uid, "role": role}
+            writable = set(user_writable_group_names(uid, role))
+            for name in user_group_names(uid):
+                if name == "rank:部長":
+                    continue  # ext_access は見せない (none)
+                rw = ext_access(user, f"groups/{name}/a") == "rw"
+                assert (name in writable) == rw, (uid, name)
+
+    def test_preview_marks_it_user_scoped(self):
+        from nucllei.utils.task import PROMPT_VARIABLE_SCOPES
+
+        assert PROMPT_VARIABLE_SCOPES["{{USER_WRITABLE_GROUPS}}"] == "user"

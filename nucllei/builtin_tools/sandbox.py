@@ -544,7 +544,7 @@ def _read_only(abs_path: str) -> ToolError:
     admin_only = abs_path == public or abs_path.startswith(public + "/")
     group = _group_of(abs_path)
     if group is not None:
-        # 書き込みが「指定した人だけ」のグループで、指定されていないメンバー
+        # 書き込みを許されていないメンバー
         return ToolCallError(
             f"{abs_path} はこの利用者には読み取り専用 ({_group_ro_why(group)})",
             "この置き場には書けないとユーザーに伝える (書けるようにするのは管理者。"
@@ -565,7 +565,9 @@ def _group_of(abs_path: str) -> Optional[str]:
 
 def _group_ro_why(group: str) -> str:
     """グループの置き場が読み取り専用の理由 (ERROR・list_workspace で同じ文)。"""
-    return f"グループ「{group}」の置き場に書けるのは、管理者が書き込みを許した人だけ"
+    return (
+        f"グループ「{group}」の置き場に書けるのは、管理者が書き込みを許したメンバーだけ"
+    )
 
 
 def _files_error(e: Exception, abs_path: str) -> ToolError:
@@ -1250,7 +1252,8 @@ class Tools:
     write_file 等で共有し、会話・実行を跨いで残る (imports/ と trash/ は最後に触ってから一定期間で
     消える)。ユーザーには見えない — 渡すのは fetch_from_workspace。
     `/ext/groups/<グループ名>/` は所属グループの共有の置き場
-    (書けるかはグループごと — list_workspace で分かる)、`/ext/public/` は全員の共有の置き場 (読むだけ)。
+    (書けるのは書き込みを許されたメンバーだけ。list_workspace で分かる)、
+    `/ext/public/` は全員の共有の置き場 (読むだけ)。
     管理者はすべてのグループの置き場と `/ext/public/` に書ける。run_* の中でも同じパスで扱える。
     実行は直列 — run_python は同じ会話内で、run_python_once / run_shell は同一ユーザー内で順番待ちになり、
     background にしても並列にならない (長い background 実行の裏で同系統を呼ぶと終わるまで待たされ、
@@ -1957,8 +1960,8 @@ class Tools:
             path,
             WORKSPACE_PATH_ARG_FORM,
             "書き込めるのは `/workspace/` 配下と、所属グループの `/ext/groups/<グループ名>/` だけ"
-            " (書ける人を絞ったグループは許された人だけ。管理者はすべてのグループの置き場と"
-            " `/ext/public/` にも書ける)。",
+            " (グループの置き場は管理者が書き込みを許したメンバーだけ。管理者はすべてのグループの"
+            "置き場と `/ext/public/` にも書ける)。",
         )
         if allow_dir:
             if rel == ".":
@@ -2543,7 +2546,7 @@ class Tools:
         NUCLLEI_USER_GROUPS と同じ (ディレクトリ名にできる所属グループ)。"""
         try:
             admin = user.get("role") == "admin"
-            # 所属グループごとの rw / ro (書き込みを「指定した人だけ」にしたグループは ro がある)。
+            # 所属グループごとの rw / ro (書き込みを許されていないグループは ro)。
             # 管理者は全グループ rw — 所属は「所属していない」の注記にだけ使う
             access = member_group_access(user["id"])
             names = ext_visible_groups(user) if admin else list(access)
