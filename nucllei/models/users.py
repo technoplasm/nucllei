@@ -1,11 +1,16 @@
+import logging
 import time
 from typing import Optional
 
+from nucllei.env import SRC_LOG_LEVELS
 from nucllei.internal.db import Base, JSONField, get_db
-
+from nucllei.models.groups import Groups
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, String, Text
+
+log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 ####################
 # User DB Schema
@@ -243,14 +248,23 @@ class UsersTable:
             return None
 
     def update_user_role_by_id(self, id: str, role: str) -> Optional[UserModel]:
+        """role を変える。admin から外れた人は全グループの `writers` からも外す
+        (`Groups.remove_user_from_all_writers`)。role を変える経路 (管理画面・OAuth の
+        role 管理) はすべてここを通る。"""
         try:
             with get_db() as db:
+                previous = db.query(User.role).filter_by(id=id).scalar()
                 db.query(User).filter_by(id=id).update({"role": role})
                 db.commit()
-                user = db.query(User).filter_by(id=id).first()
-                return UserModel.model_validate(user)
+                user = UserModel.model_validate(db.query(User).filter_by(id=id).first())
         except Exception:
             return None
+        if previous == "admin" and role != "admin":
+            if not Groups.remove_user_from_all_writers(id):
+                log.error(
+                    f"user {id}: admin から外したが、グループの writers から外せなかった"
+                )
+        return user
 
     def update_user_profile_image_url_by_id(
         self, id: str, profile_image_url: str

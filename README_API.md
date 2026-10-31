@@ -486,7 +486,10 @@ sandbox tool and the file browser all call it:
   user permission: `data.ext = {"writers": [user_id, …]}`. Only members in
   `writers` are rw; the other members are ro (they still see and read the
   folder). A group without `ext` or `writers` has no member writers. Admins are
-  rw on every group by role, whatever the setting. Membership (`user_ids`) keeps
+  rw on every group by role, whatever the setting. Changing a user's role from
+  `admin` to anything else (admin UI or OAuth role management) removes them from
+  every group's `writers`; they stay members, and write access comes back only
+  when an admin checks "Write" again. Membership (`user_ids`) keeps
   its meaning everywhere (permissions, model access, which `/ext/groups/<g>` a
   user sees). `writers` is normalised to `writers ∩ user_ids` on every save
   (removing a member — from the editor or OAuth group sync —

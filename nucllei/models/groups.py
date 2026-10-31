@@ -5,7 +5,11 @@ import uuid
 
 from nucllei.internal.db import Base, get_db
 from nucllei.env import SRC_LOG_LEVELS
-from nucllei.utils.ext_acl import EXT_DATA_KEY, normalize_group_data
+from nucllei.utils.ext_acl import (
+    EXT_DATA_KEY,
+    group_writers,
+    normalize_group_data,
+)
 from nucllei.utils.group_names import (
     GroupNameConflictError,
     normalize_group_name_key,
@@ -269,6 +273,43 @@ class GroupTable:
                 return True
             except Exception:
                 return False
+
+    def remove_user_from_all_writers(self, user_id: str) -> bool:
+        """`user_id` をすべてのグループの `data.ext.writers` から外す (所属はそのまま)。
+
+        admin から外れたときに呼ぶ。グループの編集画面は admin の行の「書き込み」を外せない
+        印で出してそのまま `writers` に保存するので、外さないと降格後も書ける。書かせるなら
+        管理者が改めて印を付ける。"""
+        try:
+            with get_db() as db:
+                for group in self.get_groups_by_member_id(user_id):
+                    # 読んでから書くまでに他の更新で data / user_ids が変わらないよう行を押さえる
+                    # (PostgreSQL。SQLite は書き込みが直列)
+                    current = (
+                        db.query(Group).filter_by(id=group.id).with_for_update().first()
+                    )
+                    if current is not None and user_id in group_writers(current):
+                        data = {
+                            **current.data,
+                            EXT_DATA_KEY: {
+                                "writers": [
+                                    uid
+                                    for uid in group_writers(current)
+                                    if uid != user_id
+                                ]
+                            },
+                        }
+                        db.query(Group).filter_by(id=group.id).update(
+                            {
+                                "data": normalize_group_data(data, current.user_ids),
+                                "updated_at": int(time.time()),
+                            }
+                        )
+                    db.commit()
+                return True
+        except Exception as e:
+            log.exception(e)
+            return False
 
 
 Groups = GroupTable()
