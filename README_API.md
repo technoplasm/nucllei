@@ -3253,7 +3253,7 @@ marks, both **computed every time** and never stored, and both shared with
   any time): `RECIPE.md` missing, not a regular file or not text; not closed, not
   YAML, not a mapping; an **unknown key** (only `title` `description` `author`
   `updated` `requires`; the message names the key, the allowed keys and either
-  the retired-key hint — `on_load は requires に変わった`, `tools は廃止 (使える人が
+  the retired-key hint — `on_load は requires で書く`, `tools は書かない (使える人が
 限られる関数は本文の関数名で判定する)` — or a close spelling, so a typo like
   `require:` is never silently ignored); a required key empty; a wrong type
   (`title` / `description` / `author` one-line strings, `updated` `YYYY-MM-DD`);
@@ -3263,7 +3263,7 @@ marks, both **computed every time** and never stored, and both shared with
   description as the tool's own words): it says
   what and where — a line number, the n-th `requires` entry, a key name only
   when it matches `[A-Za-z0-9_-]{1,32}` (otherwise 「知らないキー (名前は原文で)」),
-  a retired key's short hint (`on_load (requires に変わった)`, `tools (廃止)`) —
+  a retired key's short hint (`on_load (requires で書く)`, `tools (書かない)`) —
   never a value, a line's content or body text, and ends with `次の手:` (the
   same label as other tool results; a broken line has no description and ends
   with the mark, so the next step runs to the end of the line) followed by
