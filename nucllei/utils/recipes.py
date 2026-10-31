@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import datetime as dt
 import difflib
+import functools
 import io
 import json
 import logging
@@ -197,12 +198,16 @@ def bad_segment(n: str) -> Optional[str]:
 
 def name_problem(n: str) -> Optional[str]:
     """レシピのフォルダ名の規則に合わない理由。`trash` はゴミ箱 (`<層>/trash/`) と紛れるので断る。
-    バッククォートは断る (一覧・返答への指示はフォルダをコード表記で示す — 名前で囲みを閉じさせない)。"""
+    バッククォートは断る (一覧・返答への指示はフォルダをコード表記で示す — 名前で囲みを閉じさせない)。
+    指示・印の語とコロン (`次の手:` 等。見た目の似た形も — `has_label`) も断る (フォルダ名はコード表記の外 — load_recipe の
+    前置き・警告・ERROR にもそのまま出る)。"""
     why = bad_segment(n)
     if why:
         return why
     if "`" in n:
         return "バッククォート (`) を含む"
+    if has_label(n):
+        return "指示・印の語にコロンが続くもの (「次の手」+ コロン など) を含む"
     if unicodedata.normalize("NFC", n) != n:
         return "NFC でない"
     if n == TRASH:
@@ -255,25 +260,31 @@ def parse_recipe_path(path: str) -> RecipeRef:
         raise RecipePathError("path が空", PATH_FORM + "。")
     p = unicodedata.normalize("NFC", path.strip())
     if not p.startswith("/"):
-        raise RecipePathError(f"{path!r} は絶対パスでない", PATH_FORM + "。")
+        raise RecipePathError(
+            f"{neutral(repr(path))} は絶対パスでない", PATH_FORM + "。"
+        )
     p = p.rstrip("/")
     if p.endswith("/" + RECIPE_MD):
         p = p[: -len(RECIPE_MD) - 1]
     if any(seg in (".", "..") for seg in p.split("/")):
-        raise RecipePathError(f"{path!r} に . や .. がある", PATH_FORM + "。")
+        raise RecipePathError(
+            f"{neutral(repr(path))} に . や .. がある", PATH_FORM + "。"
+        )
     parent, _, name = p.rpartition("/")
     if not parent.endswith("/" + RECIPES):
         raise RecipePathError(
-            f"{path!r} はレシピのフォルダ (`<層>/recipes/<名前>`) の形でない",
+            f"{neutral(repr(path))} はレシピのフォルダ (`<層>/recipes/<名前>`) の形でない",
             PATH_FORM + "。",
         )
     layer = layer_of_place(parent[: -len(RECIPES) - 1])
     if layer is None:
-        raise RecipePathError(f"{path!r} の層が分からない", PATH_FORM + "。")
+        raise RecipePathError(
+            f"{neutral(repr(path))} の層が分からない", PATH_FORM + "。"
+        )
     why = name_problem(name)
     if why:
         raise RecipePathError(
-            f"レシピの名前に使えない ({why}): {name!r}",
+            f"レシピの名前に使えない ({why}): {neutral(repr(name))}",
             "内容が分かる短い語 (日本語可) の名前にする。",
         )
     return RecipeRef(layer, name)
@@ -592,17 +603,76 @@ def set_updated(text: str, d: dt.date) -> str:
 def plain(v) -> str:
     """利用者が書いた frontmatter の値を一覧の 1 行に出す形にする。改行を潰し、tool の文が
     モデルへの指示・印に使う語 (`返答への指示:` `次の手:` `中止:` `ERROR:` `警告:` `壊れている:`) は区切りを
-    変える。角括弧 `[` `]` は全角にする (印と紛れる括弧書きを見た目でも作らせない — 一覧の印は path の
+    変える (`defuse_labels`)。角括弧 `[` `]` は全角にする (印と紛れる括弧書きを見た目でも作らせない — 一覧の印は path の
     直後にしか付かず、description は `—` の後)。`|` も全角にする (一覧を表にして示したとき列を割らない)。"""
     t = " ".join(str(v).split()) if v else ""
     t = t.replace("[", "［").replace("]", "］").replace("|", "｜")
-    return _RE_SHOWN_WORDS.sub(r"\1 -", t)
+    return defuse_labels(t)
 
 
-# tool の文がモデルへの指示・印に使う語 (全角・縦書き・比の記号のコロンも)。plain と _shown が区切りを変える
+# tool の文がモデルへの指示・印に使う語 (全角・縦書き・比の記号のコロンも)。defuse_labels (plain・_shown・
+# neutral) が区切りを変え、name_problem がフォルダ名に断る
 _RE_SHOWN_WORDS = re.compile(
     r"(返答への指示|次の手|中止|ERROR|警告|壊れている)\s*[:：︓﹕∶꞉]"
 )
+# 見た目の似た形 (互換文字・全角の英字・大小文字・語の中の空白やゼロ幅の文字・ほかのコロン) も拾うための、
+# 正規化した形の語 (`_folded` の後で照合する)
+_SHOWN_WORDS_FOLDED = tuple(
+    w.casefold()
+    for w in ("返答への指示", "次の手", "中止", "ERROR", "警告", "壊れている")
+)
+
+
+# 名前に COLON を含まず互換分解でも `:` にならないが、コロンに見える文字 (比の記号・縦書きの二点リーダー・
+# 二点の句読点・ヘブライ文字の句点・ルーン文字の句読点)
+_COLON_LIKE = frozenset("∶︰⁚׃᛬")
+
+
+@functools.lru_cache(maxsize=4096)
+def _is_colon(c: str) -> bool:
+    """コロンの仲間 (互換分解で `:` になる文字、Unicode の名前に COLON を含む文字、`_COLON_LIKE`)。"""
+    return (
+        c in _COLON_LIKE
+        or unicodedata.normalize("NFKC", c) == ":"
+        or "COLON" in unicodedata.name(c, "")
+    )
+
+
+def _folded(t: str) -> str:
+    """照合用の形: 文字ごとに NFKC、書式文字 (ゼロ幅等) と空白を落とし、コロンの仲間は `:`、casefold。"""
+    out = []
+    for c in t:
+        if unicodedata.category(c) == "Cf" or c.isspace():
+            continue
+        out.append(":" if _is_colon(c) else unicodedata.normalize("NFKC", c))
+    return "".join(out).casefold()
+
+
+def has_label(t: str) -> bool:
+    """`t` に指示・印の語 + コロンがあるか (見た目の似た形も)。"""
+    f = _folded(t)
+    return any(f"{w}:" in f for w in _SHOWN_WORDS_FOLDED)
+
+
+def defuse_labels(t: str) -> str:
+    """指示・印の語 + コロンの区切りを変える (`次の手:` → `次の手 -`)。正規表現で拾えない似た形が残って
+    いれば、値の中のコロンの仲間をすべて ` -` にする (どの語にもコロンが続かなくなる)。"""
+    t = _RE_SHOWN_WORDS.sub(r"\1 -", t)
+    if has_label(t):
+        t = "".join(" -" if _is_colon(c) else c for c in t)
+    return t
+
+
+# 行の区切りとして扱われる文字 (str.splitlines と同じ)
+_RE_LINE_BREAKS = re.compile(r"[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]+")
+
+
+def neutral(v) -> str:
+    """書いた人の値 (パス・付属の名前・それを含む理由や検査の行) を tool の文 (警告・ERROR・返答) に埋める形。
+    パスは直す人が見るのでそのまま残し、行の区切りを空白にして、指示・印の語の区切りを plain と同じく変える
+    (書いた値の中の `次の手:` が、その後ろの tool の本物の `次の手:` より先に出ないように)。tool の文
+    そのもの (本物の `次の手:`) には使わない — 埋める値だけに掛ける。"""
+    return defuse_labels(_RE_LINE_BREAKS.sub(" ", str(v)))
 
 
 # ---------------------------------------------------------------------------
@@ -955,12 +1025,12 @@ def broken_next(
         return BROKEN_READONLY_NEXT
     if not folder:
         return BROKEN_REWRITE_NEXT if md_unusable(reasons) else BROKEN_NEXT
-    # フォルダ名は書いた人の文 (`"` `)` や「次の手:」も名前の規則を通る) — JSON の文字列で埋め、
-    # 引用符の外へ出られないようにする
-    q = json.dumps(folder, ensure_ascii=False)
+    # フォルダ名は書いた人の文 (`"` `)` は名前の規則を通る) — JSON の文字列で埋めて引用符の外へ出さず、
+    # 指示・印の語 (層のグループ名に入りうる) は neutral で区切りを変える
+    q = neutral(json.dumps(folder, ensure_ascii=False))
     if md_unusable(reasons):
         return f"save_recipe(path={q}) で作り直す"
-    md = json.dumps(f"{folder}/{RECIPE_MD}", ensure_ascii=False)
+    md = neutral(json.dumps(f"{folder}/{RECIPE_MD}", ensure_ascii=False))
     return (
         f"edit_recipe(path={q}) で直す (原文は read_file で {md} を見る。"
         "丸ごと書き直すなら save_recipe で上書き)"
@@ -1246,7 +1316,7 @@ def _shown(reasons: list[str]) -> str:
     shown = "、".join(reasons[:2]) + (
         f" ほか {len(reasons) - 2} 件" if len(reasons) > 2 else ""
     )
-    return _RE_SHOWN_WORDS.sub(r"\1 -", " ".join(shown.split()).translate(_SHOWN_WIDE))
+    return defuse_labels(" ".join(shown.split()).translate(_SHOWN_WIDE))
 
 
 _SHOWN_WIDE = str.maketrans(
@@ -1500,7 +1570,7 @@ def check_folder(
 
 def unchecked_marks(unchecked: list[str]) -> list[str]:
     return [
-        f"※ {rel}: バイナリなので中身を検査していない。患者データが写っていないか、ユーザーに確かめてもらう"
+        f"※ {neutral(rel)}: バイナリなので中身を検査していない。患者データが写っていないか、ユーザーに確かめてもらう"
         for rel in unchecked
     ]
 

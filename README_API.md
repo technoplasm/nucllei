@@ -3462,8 +3462,9 @@ inline code ends at its one closing backtick. Inside a reason, `(` `)` `[` `]`, 
 like the description's (full-width and vertical colons too) — the half-width
 parentheses that close a mark are always the tool's. Folders that break the
 name rule (below), `trash`, and names starting with `.` are not listed — a
-folder whose name contains a backtick is therefore not listed until it is
-renamed without one (e.g. `mv` in `run_shell`). Two
+folder whose name contains a backtick, or an instruction / mark word followed by
+a colon (`次の手:` `警告：` …), is therefore not listed until it is renamed
+without one (e.g. `mv` in `run_shell`). Two
 marks, both **computed every time** and never stored, and both shared with
 `load_recipe`:
 
@@ -3784,10 +3785,25 @@ judged, and `/ext` references are checked against the host directory).
 
 Binary attachments that cannot be inspected are listed as `※ … バイナリなので中身を検査していない` lines.
 
+Author-written values that the tools embed in their own warnings, errors and
+replies — reference paths, attachment names, folder names, unknown keys, the
+broken reasons, failed `requires` reads and check lines that quote them,
+`updated` — are folded to one line and get the same defusing of instruction /
+mark words as the description (`次の手 -`; `utils/recipes.neutral`), so a value
+never puts a `次の手:` before the tool's own. The paths stay readable for whoever
+fixes the recipe; the tool's own `次の手:` is never touched. The defusing (also in
+the list's description and reasons, and the folder-name rule below) also catches
+look-alikes: the words are matched after NFKC, with format characters (zero
+width …) and spaces removed, case-folded, against any colon character (one whose
+NFKC is `:` or whose Unicode name contains COLON); when such a look-alike is
+left, every colon character in the value becomes ` -`.
+
 Folder names: not empty, no leading/trailing space, no `/` `\`, not starting
 with `.`, no control / format characters, no backtick (the list and the
-replies write the folder as inline code), NFC, at most 200 UTF-8 bytes, not
-`trash`.
+replies write the folder as inline code), no instruction / mark word followed by
+a colon (`次の手:` `返答への指示:` `警告:` … including the look-alikes above — the
+name is printed outside inline code in `load_recipe`'s preface and in warnings),
+NFC, at most 200 UTF-8 bytes, not `trash`.
 
 **Bypasses.** `write_file` / `edit_file` refuse `<layer>/recipes/<name>/RECIPE.md`
 (`… はレシピの本体 (RECIPE.md) で、write_file / edit_file では書かない` → use

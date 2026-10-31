@@ -237,12 +237,14 @@ def _part_key(item, folder: str) -> str:
 
 
 def _part_heading(item) -> str:
-    # 対象のパス・引数は利用者が書いた値
+    # 対象のパス・引数は利用者が書いた値 (指示・印の語の区切りは neutral が変える)
+    from nucllei.utils.recipes import neutral
+
     if item.kind == "read":
-        return _defuse(f"### read {item.ref_path}")
+        return _defuse(f"### read {neutral(item.ref_path)}")
     if item.kind == "recipe":
-        return _defuse(f"### recipe {item.args['path']}")
-    return _defuse(f"### {item.kind} {item.raw} の出力")
+        return _defuse(f"### recipe {neutral(item.args['path'])}")
+    return _defuse(f"### {item.kind} {neutral(item.raw)} の出力")
 
 
 # 結果のカードに見せる木(results[i].chain — tool_output.set_chain)の 1 つの出力の上限。モデルに
@@ -443,7 +445,7 @@ class RecipeTools:
         # (_expand_recipe)、読み込み済みは LOADED_RECIPE_RESULT、壊れている・警告は ERROR と各要素の
         # 警告、直した後に新しい版を返すことは save / edit の結果の <recipe-reset>
         from nucllei.utils.recipe_index import recipe_writable
-        from nucllei.utils.recipes import broken_next
+        from nucllei.utils.recipes import broken_next, neutral
 
         sb = _sb()
         if not __user__ or not __user__.get("id"):
@@ -466,7 +468,8 @@ class RecipeTools:
         )
         if sections is None:  # 壊れている (理由は marks に積んだ)
             raise sb.ToolCallError(
-                f"レシピ {ref.folder} は壊れている: " + "、".join(marks.broken),
+                f"レシピ {ref.folder} は壊れている: "
+                + neutral("、".join(marks.broken)),
                 broken_next(
                     marks.broken,
                     ref.folder,
@@ -507,6 +510,7 @@ class RecipeTools:
         from nucllei.utils.recipes import (
             RECIPE_MD,
             decode_text,
+            neutral,
             plain,
             read_frontmatter,
             recipe_items,
@@ -528,6 +532,7 @@ class RecipeTools:
             head = _part_heading(item)
             if n in warns.items:
                 reason, next_step = warns.items[n]
+                reason = neutral(reason)  # 参照先のパス・付属の名前は書いた人の値
                 node["children"].append(
                     _chain_node(item, "warning", f"{reason}。次の手: {next_step}。")
                 )
@@ -572,12 +577,13 @@ class RecipeTools:
             out.append(_Section("\n</recipe-part>", start=False))
 
         author = plain(fm.get("author")) or "不明"
-        updated = fm.get("updated")
+        updated = neutral(fm.get("updated"))
         title = plain(fm.get("title")) or ref.name
         node["body"] = fm.body.strip("\n")
         if warns.recipe:
             node["notes"] = [
-                f"{reason}。次の手: {next_step}。" for reason, next_step in warns.recipe
+                f"{neutral(reason)}。次の手: {next_step}。"
+                for reason, next_step in warns.recipe
             ]
         body = _defuse(fm.body.strip("\n"))
         attachments = sorted(rel for rel in files if rel != RECIPE_MD)
@@ -591,7 +597,7 @@ class RecipeTools:
         if attachments:
             lead += (
                 " 付属 (このフォルダの中): "
-                + ", ".join(attachments[:20])
+                + ", ".join(neutral(a) for a in attachments[:20])
                 + (" …" if len(attachments) > 20 else "")
                 + f"。付属のパスは {ref.folder}/<ファイル名>。"
             )
@@ -606,7 +612,7 @@ class RecipeTools:
             warning = (
                 "<recipe-warning>\n"
                 + "\n".join(
-                    _defuse(f"警告: {reason}。次の手: {next_step}。")
+                    _defuse(f"警告: {neutral(reason)}。次の手: {next_step}。")
                     for reason, next_step in warns.recipe
                 )
                 + "\n</recipe-warning>\n\n"
@@ -630,6 +636,7 @@ class RecipeTools:
             WARN_NEXT_MISSING,
             RefWarnings,
             broken_next,
+            neutral,
             parse_recipe_path,
             readonly_warnings,
         )
@@ -661,7 +668,7 @@ class RecipeTools:
             exists, files, skipped = await self._read_recipe_folder(target, user)
         except ToolError as e:
             return line(
-                f"警告: {e.fact} — 読まなかった。次の手: {e.next or '飛ばして続ける'}"
+                f"警告: {neutral(e.fact)} — 読まなかった。次の手: {e.next or '飛ばして続ける'}"
             )
         if not exists:
             # 直す手は requires を持つレシピ (owner) の層に書ける人にだけ勧める
@@ -673,7 +680,7 @@ class RecipeTools:
                 ).recipe[0][1]
             )
             return line(
-                f"警告: requires の recipe {target.folder} が無い — 読まなかった。"
+                f"警告: requires の recipe {neutral(target.folder)} が無い — 読まなかった。"
                 f"次の手: {nxt}。"
             )
         before = getattr(marks, "broken", None)
@@ -684,8 +691,8 @@ class RecipeTools:
         if inner is None:
             reasons, marks.broken = marks.broken, before
             return line(
-                f"警告: requires の recipe {target.folder} は壊れている: "
-                + "、".join(reasons)
+                f"警告: requires の recipe {neutral(target.folder)} は壊れている: "
+                + neutral("、".join(reasons))
                 + " — 読まなかった。次の手: "
                 + broken_next(
                     reasons,
@@ -711,7 +718,8 @@ class RecipeTools:
         """read / shell / python を中で実行する。(結果の文, 実行できたか, 切ったときの続きの取り方)。
         失敗 (ToolError) はその位置のエラー 1 行で、他の要素は続ける。中の tool の表示・失敗の旗は
         load_recipe の結果に混ぜない (sink を外して呼ぶ)。"""
-        from nucllei.utils.tool_errors import ToolError
+        from nucllei.utils.recipes import neutral
+        from nucllei.utils.tool_errors import ToolError, format_tool_error
         from nucllei.utils.tool_output import current_sink
 
         token = current_sink.set(None)
@@ -721,7 +729,9 @@ class RecipeTools:
                     item.ref_path, __user__=user, __metadata__=metadata
                 )
                 text = getattr(res, "text", res)
-                note = f"続きは read_file({item.ref_path!r}, offset=…) で読む"
+                note = (
+                    f"続きは read_file({neutral(repr(item.ref_path))}, offset=…) で読む"
+                )
             else:
                 text = await self._sb_tools().run_shell(
                     item.args["command"], __user__=user
@@ -729,7 +739,8 @@ class RecipeTools:
                 note = "出力を絞って (head・grep 等) run_shell で実行し直す"
             return str(text), True, note
         except ToolError as e:
-            return e.text, False, ""
+            # 事実の文には書いた人のパス・コマンドが入る — tool の次の手より先に偽の次の手を出させない
+            return format_tool_error(neutral(e.fact), e.next), False, ""
         finally:
             current_sink.reset(token)
 
@@ -769,6 +780,7 @@ class RecipeTools:
             check_folder,
             code_span,
             decode_text,
+            neutral,
             plain,
             read_frontmatter,
             unchecked_marks,
@@ -815,7 +827,7 @@ class RecipeTools:
                         [
                             f"写し元 {src.folder}/RECIPE.md の frontmatter が壊れている (何も書いていない):"
                         ]
-                        + [f"  - {unknown_key_problem(k)}" for k in unknown]
+                        + [f"  - {neutral(unknown_key_problem(k))}" for k in unknown]
                     ),
                     "写し元を edit_recipe で直してから save_recipe を呼び直す。",
                 )
@@ -883,8 +895,8 @@ class RecipeTools:
             raise sb.ToolCallError(
                 "\n".join(
                     ["書く前の検査で止めた (何も書いていない):"]
-                    + [f"  - {p}" for p in res.stops]
-                    + [f"  注意: {n}" for n in res.notes]
+                    + [f"  - {neutral(p)}" for p in res.stops]
+                    + [f"  注意: {neutral(n)}" for n in res.notes]
                 ),
                 "。".join(res.fixes + ["そのあと save_recipe を呼び直す"]) + "。",
             )
@@ -936,7 +948,9 @@ class RecipeTools:
             if src_skipped:
                 lines.append(
                     "※ 写さなかったもの: "
-                    + "、".join(f"{r} ({w})" for r, w in sorted(src_skipped.items()))
+                    + "、".join(
+                        f"{neutral(r)} ({w})" for r, w in sorted(src_skipped.items())
+                    )
                 )
         if trashed:
             lines.append(f"前の版はゴミ箱へ: {trashed} (既定で 30 日を過ぎると消える)")
@@ -950,7 +964,7 @@ class RecipeTools:
                     f"戻し方: 今の版を remove_file(path={shlex.quote(ref.folder)}) でゴミ箱へ移してから"
                     f" run_shell で `mv {shlex.quote(trashed)} {shlex.quote(ref.folder)}`"
                 )
-        lines += [f"注意: {n}" for n in res.notes]
+        lines += [f"注意: {neutral(n)}" for n in res.notes]
         lines += _warning_lines(warns)
         lines += unchecked_marks(res.unchecked)
         tell = (
@@ -990,6 +1004,7 @@ class RecipeTools:
             check_folder,
             code_span,
             decode_text,
+            neutral,
             plain,
             read_frontmatter,
             set_updated,
@@ -1079,8 +1094,8 @@ class RecipeTools:
             raise sb.ToolCallError(
                 "\n".join(
                     ["直した後の検査で止めた (何も書いていない):"]
-                    + [f"  - {p}" for p in res.stops]
-                    + [f"  注意: {n}" for n in res.notes]
+                    + [f"  - {neutral(p)}" for p in res.stops]
+                    + [f"  注意: {neutral(n)}" for n in res.notes]
                 ),
                 "。".join(res.fixes + ["そのあと edit_recipe を呼び直す"]) + "。",
             )
@@ -1107,7 +1122,7 @@ class RecipeTools:
             lines.append(
                 f"author: {plain(author) or '不明'} ({ref.layer.label}のレシピ)"
             )
-        lines += [f"注意: {n}" for n in res.notes]
+        lines += [f"注意: {neutral(n)}" for n in res.notes]
         lines += _warning_lines(warns)
         lines += unchecked_marks(res.unchecked)
         tell = (
@@ -1133,13 +1148,17 @@ def _written_reply(lines: list, tell: str, metadata, folder: str) -> str:
 
 
 def _warning_lines(warns) -> list[str]:
-    """save_recipe / edit_recipe の返答に添える警告 (書いたが、今は引けない参照)。"""
+    """save_recipe / edit_recipe の返答に添える警告 (書いたが、今は引けない参照)。理由の中のパス・付属の
+    名前は書いた人の値 — neutral で指示・印の語の区切りを変える (次の手は tool の文)。"""
+    from nucllei.utils.recipes import neutral
+
     lines = [
-        f"警告: {reason} (読み込み時はこの要素を読まない)。次の手: {next_step}。"
+        f"警告: {neutral(reason)} (読み込み時はこの要素を読まない)。次の手: {next_step}。"
         for reason, next_step in warns.items.values()
     ]
     lines += [
-        f"警告: {reason}。次の手: {next_step}。" for reason, next_step in warns.recipe
+        f"警告: {neutral(reason)}。次の手: {next_step}。"
+        for reason, next_step in warns.recipe
     ]
     return lines
 
