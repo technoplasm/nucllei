@@ -380,58 +380,58 @@ def test_capability_tools_run_without_builtin_sandbox(sbx, shell):
 
 
 def test_user_recipes_variable_expands_the_same_list(sbx):
-    """{{USER_RECIPES}} はレシピの一覧のまとまり (見出し + path の直後に印の付く行)。能力「レシピ」OFF・sandbox 無し・model 無し
-    なら空。取得はリクエストに 1 回 (get_user_recipes を ensure / build_recipe_tools が共有)。"""
+    """{{USER_RECIPES}} (会話の前置き) はレシピの一覧のまとまり (見出し + path の直後に印の付く行)。能力「レシピ」OFF・
+    sandbox 無し・model 無しなら空で、sandbox に聞かない。一覧が前置きにあれば load_recipe の説明は 1 文だけで、
+    build_recipe_tools は一覧を取りに行かない。system prompt では空。"""
     from nucllei.builtin_tools.recipe_tools import build_recipe_tools
     from nucllei.utils.recipe_index import RECIPE_INDEX_HEADING
     from nucllei.utils.task import (
-        RECIPES_NOT_FETCHED,
         _user_recipes,
-        ensure_user_recipes,
+        expand_context_template,
+        fetch_context_sections,
         prompt_template,
     )
 
     _put(sbx["ws"], "集計", _md())
     tpl = "前\n{{USER_RECIPES}}\n後"
 
+    async def expand(model):
+        return expand_context_template(
+            tpl, await fetch_context_sections(USER, model, tpl), model
+        )
+
     async def go():
         token = _user_recipes.set(None)
         try:
-            before = prompt_template(tpl, user_id="u1", model=_model())
             sbx["calls"].clear()
-            await ensure_user_recipes(USER, _model(), "変数なし")
-            await ensure_user_recipes(USER, _model({"recipes": False}), tpl)
-            assert sbx["calls"] == []  # 変数が無い・能力 OFF なら聞かない
-            await ensure_user_recipes(USER, _model(), tpl)
-            await ensure_user_recipes(USER, _model(), tpl)
+            off = await expand(_model({"recipes": False}))
+            no_model = await expand(None)
+            assert sbx["calls"] == []  # 能力 OFF・model 無しなら聞かない
             tools = await build_recipe_tools(
                 _model(), USER, {"__user__": USER}, listing_in_prompt=True
             )
-            assert sbx["calls"] == ["/recipes/index"]  # 1 リクエスト 1 回 (共有)
-            return (
-                before,
-                prompt_template(tpl, user_id="u1", model=_model()),
-                prompt_template(tpl, user_id="u1", model=_model({"recipes": False})),
-                prompt_template(tpl, user_id="u1"),
-                tools,
-            )
+            assert sbx["calls"] == []  # 一覧が前置きにあれば tool の組み立ては聞かない
+            on = await expand(_model())
+            await expand(_model())
+            assert sbx["calls"] == ["/recipes/index"]  # 1 リクエスト 1 回
+            return on, off, no_model, tools
         finally:
             _user_recipes.reset(token)
 
-    before, on, off, no_model, tools = asyncio.run(go())
-    assert before == f"前\n{RECIPES_NOT_FETCHED}\n後"
+    on, off, no_model, tools = asyncio.run(go())
     assert (
         on
         == f"前\n{RECIPE_INDEX_HEADING}\n- `/workspace/recipes/集計` — 月次の集計\n後"
     )
     assert off == "前\n\n後" and no_model == "前\n\n後"
+    assert prompt_template(tpl, user_id="u1", model=_model()) == "前\n\n後"
     assert tools["load_recipe"]["spec"]["description"].endswith(
-        "\n\n見えるレシピの一覧は system prompt の「見えるレシピ (`…` の中を path にそのまま渡す。…)」にある。"
+        "\n\n見えるレシピの一覧は会話の最初の発言の先頭 (途中で変わったら更新の枠) の「見えるレシピ (`…` の中を path にそのまま渡す。…)」にある。"
     )
 
 
 def test_load_recipe_spec_is_the_same_for_every_user_when_listed_in_prompt(sbx):
-    """system prompt に {{USER_RECIPES}} がある preset では、load_recipe の spec は利用者・レシピ・所属に
+    """会話の前置きに {{USER_RECIPES}} がある preset では、load_recipe の spec は利用者・レシピ・所属に
     よらず同じ文字列 (tool の宣言を preset ごとに固定 — prefix cache が利用者をまたげるように)。"""
     _put(sbx["ws"], "集計", _md())
     _put(sbx["ext"] / "groups" / "EMR", "抽出", _md(description="EMR の抽出"))

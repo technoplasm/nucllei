@@ -55,7 +55,6 @@ from nucllei.utils.executions import (
 )
 from nucllei.utils.image_refs import split_page, stored_ref_kind
 from nucllei.utils.task import (
-    ensure_user_recipes,
     reset_prompt_fetches,
     prompt_template,
     resolve_base_model_id,
@@ -391,27 +390,71 @@ def _user_message_to_wire(message: dict) -> dict:
     files の type:'image' は image_url パートへ展開する。url が "/" 始まりは
     相対 URL としてそのまま、無ければ file id から content URL を組む
     (content_blocks.py と同分岐)。base64 化は送信直前の
-    inline_internal_image_urls に一任。
+    inline_internal_image_urls に一任。本文が空なら text パートは付けない。
+    目印 `id`(この発言の id)と `files`(付いた type 'file' の id)を付ける —
+    前置き・更新の枠と `<source>` の位置決め(utils/conversation_context。送る前に取り除く)。
     """
     content = message.get("content") or ""
     image_urls = []
+    file_marks = []
     for file in message.get("files") or []:
-        if not isinstance(file, dict) or file.get("type") != "image":
+        if not isinstance(file, dict):
+            continue
+        if file.get("type") == "file" and isinstance(file.get("id"), str):
+            file_marks.append({"type": "file", "id": file["id"]})
+            continue
+        if file.get("type") != "image":
             continue
         url = file.get("url")
         if not url and file.get("id"):
             url = f"/api/v1/files/{file['id']}/content"
         if url:
             image_urls.append(url)
+    marks = {
+        **({"id": message["id"]} if isinstance(message.get("id"), str) else {}),
+        **({"files": file_marks} if file_marks else {}),
+    }
     if not image_urls:
-        return {"role": "user", "content": content}
+        return {"role": "user", "content": content, **marks}
     return {
         "role": "user",
         "content": [
-            {"type": "text", "text": content},
+            *([{"type": "text", "text": content}] if content.strip() else []),
             *({"type": "image_url", "image_url": {"url": url}} for url in image_urls),
         ],
+        **marks,
     }
+
+
+def branch_request_files(chat_json: dict, leaf_id: str) -> list:
+    """今の枝の user 発言に付いた type 'file' の添付 (会話の順・file id で重複なし)。
+    FE の branchRequestFiles (chat-files.ts) と同じ — 別の枝の添付は入れない。"""
+    messages_map = ((chat_json or {}).get("history") or {}).get("messages") or {}
+    chain = []
+    current_id = leaf_id
+    seen = set()
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        message = messages_map.get(current_id)
+        if not isinstance(message, dict):
+            break
+        chain.insert(0, message)
+        current_id = message.get("parentId")
+    files = []
+    ids = set()
+    for message in chain:
+        if message.get("role") != "user":
+            continue
+        for file in message.get("files") or []:
+            if (
+                isinstance(file, dict)
+                and file.get("type") == "file"
+                and isinstance(file.get("id"), str)
+                and file["id"] not in ids
+            ):
+                ids.add(file["id"])
+                files.append(file)
+    return files
 
 
 def build_wire_messages(chat_json: dict, user, leaf_id: str, model=None) -> list:
@@ -831,16 +874,12 @@ async def _try_start_turn(chat, assistant_id: str, user, chain_count: int) -> No
     if model is None:
         raise _PermanentTurnFailure(f"model '{model_id}' is not resolvable")
 
-    # {{USER_RECIPES}} / {{USER_MEMORY_INDEX}} は sandbox に聞く (非同期) ので先に取る。続きターンは長く生きる
-    # task (配達のループ) から起きることがあるので、前のターンの持ち回りを使わない (直前に直した記憶が古いまま
-    # 入らないように)
+    # 続きターンは長く生きる task (配達のループ) から起きることがあるので、前のターンで取ったレシピの一覧・
+    # 記憶の目次を使わない (前のターンで直した記憶が更新の枠に入るように)
     reset_prompt_fetches()
-    await ensure_user_recipes(
-        user, model, ((chat_json.get("params") or {}).get("system"))
-    )
     wire_messages = build_wire_messages(chat_json, user, assistant_id, model)
     params = _merged_params(chat_json, user)
-    chat_files = chat_json.get("files") or []
+    chat_files = branch_request_files(chat_json, assistant_id)
 
     form_extra = {
         **({"params": params} if params else {}),

@@ -1,15 +1,16 @@
-"""system prompt の変数 {{USER_MEMORY_INDEX}} — 利用者の記憶の目次。
+"""会話の前置きの変数 {{USER_MEMORY_INDEX}} — 利用者の記憶の目次。
 
 目次のファイル (env `USER_MEMORY_INDEX_PATH`、既定 `/workspace/memory/MEMORY.md`。nucllei
 自身には記憶の決まりが無いので、置き場は設定で変えられる・空で無効) の中身を sandbox から読み、見出しと枠を付けて
-返す。読むのは 1 リクエスト 1 回 (task.ensure_user_recipes が {{USER_RECIPES}} と並べて先に取る)。
+返す。読むのは前置き (utils/conversation_context) を組むときだけ (task.fetch_context_sections が {{USER_RECIPES}} と
+並べて取る)。
 
 - 無い・空 → 空文字列 (変数ごと消える)。sandbox の無い配備も空。sandbox が応答しない・読めない → 1 行で知らせる
   ({{USER_RECIPES}} と同じ扱い)
 - 枠: 見出し (本人と自分が書いたデータで、指示ではない) + `<memory-index>` … `</memory-index>`。中身から枠を
-  閉じたり偽の枠を作ったりできないよう、枠の名前に見える行 (NFKC・ゼロ幅文字を除いて `< / memory index` の
-  形 — 空白・全角・`_` `-` の変種も) だけ `<` `＜` `﹤` を `&lt;` にする。制御文字・向きを変える文字は `\\uXXXX`
-  の見える形に。それ以外の行は 1 字も書き換えない (edit_file の old_text に目次の行をそのまま写せるように)
+  閉じたり偽の枠を作ったりできないよう、枠の名前 (この枠と、前置き・更新・`<source>` の枠) に見える箇所の
+  `<` だけを `&lt;` にする (utils/frames)。制御文字・向きを変える文字は `\\uXXXX` の見える形に。それ以外は
+  1 字も書き換えない (edit_file の old_text に目次の行をそのまま写せるように)
 - 長さ: 4,000 字まで (行の切れ目で切る)。残りがあれば枠の外に「(残り N 行は read_file("<path>") で)」
 """
 
@@ -18,7 +19,8 @@ from __future__ import annotations
 import base64
 import logging
 import re
-import unicodedata
+
+from nucllei.utils.frames import defuse_line
 
 log = logging.getLogger(__name__)
 
@@ -28,10 +30,6 @@ MEMORY_INDEX_READ_BYTES = 256 * 1024
 INDEX_TIMEOUT_S = 5
 MEMORY_INDEX_UNREACHABLE = "(記憶の目次を取れない: sandbox が応答しない)"
 
-_ZERO_WIDTH = re.compile("[\u200b-\u200f\u2060\u00ad\ufeff]")
-_FRAMEISH = re.compile(
-    r"[<＜﹤]\s*/?\s*memory[\s_\-\u2010-\u2015]*index", re.IGNORECASE
-)
 _CONTROL = re.compile("[\x00-\x08\x0b-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
 
 
@@ -46,10 +44,9 @@ def memory_index_path() -> str:
 
 
 def _defuse_line(line: str) -> str:
-    probe = _ZERO_WIDTH.sub("", unicodedata.normalize("NFKC", line))
-    if _FRAMEISH.search(probe):
-        line = line.replace("<", "&lt;").replace("＜", "&lt;").replace("﹤", "&lt;")
-    return _CONTROL.sub(lambda m: f"\\u{ord(m.group()):04x}", line)
+    return _CONTROL.sub(
+        lambda m: f"\\u{ord(m.group()):04x}", defuse_line(line, memory_index=True)
+    )
 
 
 def render_memory_index(path: str, text: str, truncated_file: bool = False) -> str:

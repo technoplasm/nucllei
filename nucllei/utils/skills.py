@@ -68,15 +68,14 @@ def activate_skill(skill, user, model=None) -> str:
 
 def expand_skill_content(content: str, user, model=None) -> str:
     """skill の本文の変数を展開する (activate_skill と skill のプレビュー — utils/prompt_preview が通る)。
-    {{USER_MEMORY_INDEX}} は system prompt 専用 — skill の本文では空 (先に取る経路が無く、子ターンでは親の
-    目次が入りうる)。"""
-    from nucllei.utils.task import USER_MEMORY_INDEX_TOKEN
-
+    {{USER_RECIPES}} / {{USER_MEMORY_INDEX}} は会話の前置き専用 — skill の本文では空 (prompt_template)。
+    """
     return prompt_template(
-        content.replace(USER_MEMORY_INDEX_TOKEN, ""),
+        content,
         **user_prompt_params(user),
         base_model_id=resolve_base_model_id(model),
         model=model,
+        where="skill",
     )
 
 
@@ -421,10 +420,9 @@ def _readable_content_type(file_id, user, cache) -> str:
 
 
 def _chat_level_attachments(form_data, user, cache) -> list[tuple[str, str]]:
-    """リクエスト直下の `files`(チャットの添付一覧)を [(file_id, content_type)] にする。
+    """リクエスト直下の `files`(今の枝の添付一覧)を [(file_id, content_type)] にする。
 
-    チャット wire では画像以外の添付はメッセージに載らず、チャット全体の一覧として
-    毎リクエスト届く(どの発言に付いたかは wire からは分からない)。
+    チャット wire では画像以外の添付の中身はメッセージに載らず、一覧として毎リクエスト届く。
     """
     attachments = []
     for entry in form_data.get("files") or []:
@@ -489,9 +487,9 @@ def apply_skill_auto_load(form_data, user, model):
       残る(次のリクエストからは履歴。tool は replay_skill_tool_ids が載せ直す)。
     - **二重発火しない**: 履歴に同じ skill の load_skill(`/command`・自動ロードの発火・
       モデル自律の呼び出し)が既にあれば足さない。条件に合う添付が複数でも 1 回。
-    - **位置**: 画像は「最初に条件に合った user メッセージ」の直後。チャットの添付一覧は
-      どの発言に付いたかを運ばないので、最初の user メッセージの直後(チャット全体に
-      効く添付として扱う — `<source>` が system メッセージに載るのと同じ扱い)。
+    - **位置**: 画像は「最初に条件に合った user メッセージ」の直後。添付一覧のファイルは
+      最後の user メッセージ(今の発言)の直後 — 発火の記録はこのターンの応答の先頭に残るので、
+      次のリクエストでも同じ位置になる(ファイルを前の発言で付けていても途中には差し込まない)。
       同じ位置に `/command` の exchange があればその後ろ。複数 skill は meta.skillIds の順。
 
     戻り値は (form_data, 発火リスト)。発火リストの形は apply_skill_command と同じ。
@@ -536,7 +534,7 @@ def apply_skill_auto_load(form_data, user, model):
         chat_hits = [fid for fid, ct in chat_attachments if ct.startswith(prefixes)]
         message_hits = [i for i, ct in message_attachments if ct.startswith(prefixes)]
         if chat_hits:
-            anchor = user_idxs[0]
+            anchor = user_idxs[-1]
         elif message_hits:
             anchor = min(message_hits)
         else:

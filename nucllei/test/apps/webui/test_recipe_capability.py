@@ -15,7 +15,13 @@ from test.util.abstract_integration_test import AbstractPostgresTest
 RECIPE_TOOLS = {"load_recipe", "save_recipe", "edit_recipe"}
 
 
-def _run_payload(model, monkeypatch, sandbox_url="http://sandbox.test", index="- x"):
+def _run_payload(
+    model,
+    monkeypatch,
+    sandbox_url="http://sandbox.test",
+    index="- x",
+    agent_session=False,
+):
     from starlette.requests import Request
 
     import nucllei.env
@@ -51,6 +57,8 @@ def _run_payload(model, monkeypatch, sandbox_url="http://sandbox.test", index="-
         "messages": [{"role": "user", "content": "集計して"}],
     }
     metadata = {"user_id": "1", "model": model}
+    if agent_session:
+        metadata["agent_session"] = True
     form_data, metadata, _ = asyncio.run(
         middleware.process_chat_payload(request, form_data, user, metadata, model, None)
     )
@@ -116,10 +124,10 @@ class TestRecipeCapability(AbstractPostgresTest):
             monkeypatch.setattr(middleware, "get_tools", real_get_tools)
         assert metadata["tools"]["load_recipe"]["tool_id"] == "recipes"
 
-    def test_variable_in_preset_system_keeps_the_description_fixed(self, monkeypatch):
-        """preset の system prompt (DB の行 — subagent の子 preset も id で同じく引く) に {{USER_RECIPES}}
-        があれば、load_recipe の説明に一覧を入れない (1 文だけ)。一覧の取得はそれでも 1 回 (変数の展開用)。
-        変数が無ければ説明に一覧が入る。"""
+    def test_variable_in_preset_context_keeps_the_description_fixed(self, monkeypatch):
+        """preset の会話の前置き (params.context。DB の行 — subagent の子 preset も id で同じく引く) に
+        {{USER_RECIPES}} があれば、load_recipe の説明に一覧を入れず (1 文だけ)、一覧は最初の発言の先頭に入る。
+        一覧の取得は 1 回。system prompt に書いた {{USER_RECIPES}} は空で、説明に一覧が入る。"""
         from nucllei.builtin_tools.recipe_tools import RECIPE_INDEX_IN_PROMPT
         from nucllei.models.models import ModelForm, ModelMeta, ModelParams, Models
 
@@ -129,7 +137,9 @@ class TestRecipeCapability(AbstractPostgresTest):
                 base_model_id="base",
                 name="rp",
                 meta=ModelMeta(),
-                params=ModelParams(system="前\n{{SKILLS}}\n{{USER_RECIPES}}\n後"),
+                params=ModelParams(
+                    system="前\n{{SKILLS}}\n後", context="{{USER_RECIPES}}"
+                ),
             ),
             "1",
         )
@@ -139,12 +149,27 @@ class TestRecipeCapability(AbstractPostgresTest):
             assert desc.endswith("\n\n" + RECIPE_INDEX_IN_PROMPT)
             assert "- x" not in desc
             assert asked == ["1"]
+            first = form_data["messages"][0]["content"]
+            assert first.startswith("<conversation-context>\n見えるレシピ")
+            assert "\n- x\n</conversation-context>\n\n集計して" in first
         finally:
             Models.delete_model_by_id("rp")
-        # 行が無ければ MODELS の info の params.system を見る
+        # 行が無ければ MODELS の info の params.context を見る
         model = _model()
-        model["info"]["params"] = {"system": "{{USER_RECIPES}}"}
+        model["info"]["params"] = {"context": "{{USER_RECIPES}}"}
         _, metadata, _ = _run_payload(model, monkeypatch)
         assert metadata["tools"]["load_recipe"]["spec"]["description"].endswith(
             RECIPE_INDEX_IN_PROMPT
         )
+        # system prompt の {{USER_RECIPES}} は空 — 一覧は説明に入る
+        model["info"]["params"] = {"system": "{{USER_RECIPES}}"}
+        _, metadata, _ = _run_payload(model, monkeypatch)
+        assert metadata["tools"]["load_recipe"]["spec"]["description"].endswith("- x")
+
+    def test_subagent_child_turn_lists_in_the_description(self, monkeypatch):
+        """サブエージェントの子ターンは前置きを入れないので、前置きに変数があっても一覧は説明に入る。"""
+        model = _model()
+        model["info"]["params"] = {"context": "{{USER_RECIPES}}"}
+        form_data, metadata, _ = _run_payload(model, monkeypatch, agent_session=True)
+        assert metadata["tools"]["load_recipe"]["spec"]["description"].endswith("- x")
+        assert form_data["messages"][0]["content"] == "集計して"

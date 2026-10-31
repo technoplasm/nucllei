@@ -256,14 +256,14 @@ class TestFileDictation(AbstractPostgresTest):
         finally:
             app.state.MODELS = saved_models
 
-        system = form_data["messages"][0]
-        assert system["role"] == "system"
-        assert (
+        # <source> は system でなく user 発言の先頭 (目印の無い添付は最後の user)
+        assert [m["role"] for m in form_data["messages"]] == ["user"]
+        first = form_data["messages"][0]
+        assert first["content"] == (
             f'<source file_id="{plain}" name="memo.webm" extraction="none">'
             "(文字が抜き出されていない — 本文はこの会話に入っていない。次の手: 中身が要るなら、"
-            "PDF のページは feed_image で見る)</source>"
-        ) in system["content"]
-        assert "send_to_workspace" not in system["content"]
+            "PDF のページは feed_image で見る)</source>\n\n読んで"
+        )
 
     def test_source_tag_of_a_split_recording_carries_part(self):
         # 長い録音が 2 本に分かれたとき: どれを読み直すか決められるよう、全ファイルに

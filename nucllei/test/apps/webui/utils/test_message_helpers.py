@@ -15,7 +15,6 @@ from nucllei.utils.misc import (
     add_or_update_user_message,
     append_or_update_assistant_message,
     get_message_list,
-    prepend_to_first_user_message_content,
 )
 
 
@@ -78,23 +77,6 @@ def test_user_and_assistant_helpers_do_not_mutate():
         "content": "X",
     }
     assert messages == before
-
-
-def test_prepend_to_first_user_message_content_does_not_mutate():
-    messages = _conversation()
-    before = copy.deepcopy(messages)
-
-    result = prepend_to_first_user_message_content("CTX", messages)
-
-    assert result[1]["content"] == [{"type": "text", "text": "CTX\nQ"}]
-    assert result[3] == before[3]  # 2 つ目以降の user は触らない
-    assert messages == before
-
-    plain = [{"role": "user", "content": "Q"}]
-    assert prepend_to_first_user_message_content("CTX", plain)[0]["content"] == (
-        "CTX\nQ"
-    )
-    assert plain == [{"role": "user", "content": "Q"}]
 
 
 def test_o1_o3_handler_swaps_system_role_without_mutating_shared_dict():

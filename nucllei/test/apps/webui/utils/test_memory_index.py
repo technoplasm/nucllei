@@ -1,4 +1,4 @@
-"""system prompt の変数 {{USER_MEMORY_INDEX}} — 利用者の記憶の目次。"""
+"""会話の前置きの変数 {{USER_MEMORY_INDEX}} — 利用者の記憶の目次。"""
 
 import asyncio
 import base64
@@ -40,17 +40,12 @@ def sandbox(monkeypatch):
     return state
 
 
-def _expand(template, user_id="u1", agent_session=False, model=None):
+def _expand(template, user_id="u1", model=None):
+    """会話の前置きとして展開する (conversation_context と同じ 2 段)。"""
+
     async def main():
-        await task.ensure_user_recipes(
-            {"id": user_id},
-            model,
-            template,
-            metadata={"agent_session": True} if agent_session else None,
-        )
-        return task.prompt_template(
-            template, user_id=user_id, model=model, agent_session=agent_session
-        )
+        sections = await task.fetch_context_sections({"id": user_id}, model, template)
+        return task.expand_context_template(template, sections, model)
 
     return asyncio.run(main())
 
@@ -122,14 +117,14 @@ def test_no_sandbox_or_no_path_is_empty_and_asks_nothing(sandbox, monkeypatch):
 
 def test_not_fetched_unless_the_variable_is_used(sandbox):
     sandbox["data"] = b"x\n"
-    assert _expand("{{USER_NAME}} だけ") == "Unknown だけ"
+    assert _expand("地の文だけ") == "地の文だけ"
     assert sandbox["calls"] == []
 
 
-def test_subagent_child_turns_get_nothing(sandbox):
-    """子ターン (metadata の agent_session) は取らず、展開も空 (子は記憶を読まない)。"""
+def test_system_prompt_gets_nothing(sandbox):
+    """system prompt・チャットの system では空 (会話の前置き専用)。sandbox にも聞かない。"""
     sandbox["data"] = b"secret\n"
-    assert _expand("a{{USER_MEMORY_INDEX}}b", agent_session=True) == "ab"
+    assert task.prompt_template("a{{USER_MEMORY_INDEX}}b", user_id="u1") == "ab"
     assert sandbox["calls"] == []
 
 
@@ -198,28 +193,25 @@ def test_cp932_index_is_decoded(sandbox):
     )
 
 
-def test_other_values_cannot_pull_the_index_in(sandbox):
-    """目次は最後につなぐ — ほかの変数の値に {{USER_MEMORY_INDEX}} が書かれていても展開しない。"""
-    sandbox["data"] = b"secret\n"
-    out = asyncio.run(_expand_named("{{USER_NAME}} / {{USER_MEMORY_INDEX}}"))
-    assert out.startswith("{{USER_MEMORY_INDEX}} / ")
-    assert out.count("secret") == 1
-
-
-async def _expand_named(template):
-    await task.ensure_user_recipes({"id": "u1"}, None, template)
-    return task.prompt_template(
-        template, user_name="{{USER_MEMORY_INDEX}}", user_id="u1"
+def test_other_values_cannot_pull_the_index_in():
+    """展開は 1 回の走査 — ほかの節の値に {{USER_MEMORY_INDEX}} が書かれていても展開しない。"""
+    out = task.expand_context_template(
+        "{{USER_RECIPES}} / {{USER_MEMORY_INDEX}}",
+        {
+            "{{USER_RECIPES}}": "{{USER_MEMORY_INDEX}}",
+            "{{USER_MEMORY_INDEX}}": "secret",
+        },
     )
+    assert out == "{{USER_MEMORY_INDEX}} / secret"
 
 
 def test_skill_bodies_get_nothing(sandbox):
-    """skill の本文では空 (system prompt 専用 — 先に取る経路が無く、子ターンでは親の目次が入りうる)。"""
+    """skill の本文では空 (会話の前置き専用)。"""
     from nucllei.utils.skills import expand_skill_content
 
     sandbox["data"] = b"secret\n"
-    asyncio.run(task.ensure_user_recipes({"id": "u1"}, None, "{{USER_MEMORY_INDEX}}"))
     assert expand_skill_content("a{{USER_MEMORY_INDEX}}b", {"id": "u1"}) == "ab"
+    assert sandbox["calls"] == []
 
 
 def test_resume_turns_fetch_again():

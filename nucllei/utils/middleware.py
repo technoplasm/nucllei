@@ -45,19 +45,18 @@ from nucllei.retrieval.utils import dedupe_files_by_id, get_sources_from_files
 
 from nucllei.utils.chat import generate_chat_completion
 from nucllei.utils.payload import expand_chat_system_message
+from nucllei.utils.conversation_context import apply_conversation_side
+from nucllei.utils.frames import defuse
 from nucllei.utils.task import (
     SKILLS_TOKEN,
     USER_RECIPES_TOKEN,
-    ensure_user_recipes,
     get_task_model_id,
+    preset_context_template,
     preset_system_prompt,
     set_request_timezone,
 )
 from nucllei.utils.misc import (
     get_message_list,
-    add_or_update_system_message,
-    get_last_user_message,
-    prepend_to_first_user_message_content,
     convert_logit_bias_input_to_json,
 )
 from nucllei.utils.skills import (
@@ -308,7 +307,8 @@ def _no_text_note(file_id=None, text_readable: bool = False) -> str:
 
 
 def build_source_context(sources: list[dict]) -> str:
-    """添付の sources をモデルへ注入する `<source …>` タグ列に組む。
+    """添付の sources をモデルへ注入する `<source …>` タグ列に組む (置き場所は utils/conversation_context —
+    そのファイルを付けた user 発言の先頭)。本文は utils/frames で無害化する。
 
     llens(#52): file_id と抽出状態(成功/失敗/未抽出)をタグに載せ、モデルが状態を
     理解し file_id を tool で扱えるようにする。音声入力の通し録音(meta.dictation)は
@@ -357,7 +357,8 @@ def build_source_context(sources: list[dict]) -> str:
                         text_readable=_source_is_text(doc_meta, file_id),
                     )
                 else:
-                    body = doc_context
+                    # 本文から `</source>`・前置きや記憶の目次の枠を作れないように (utils/frames)
+                    body = defuse(doc_context, memory_index=True)
                 context_string += f"<source {attrs.strip()}>{body}</source>\n"
 
     return context_string.strip()
@@ -462,7 +463,9 @@ async def build_capability_tools(
     user,
     tools_extra_params: dict,
     preset_system: str,
+    preset_context: str = "",
     *,
+    agent_session: bool = False,
     messages=None,
     load_tools=None,
     run_hooks=None,
@@ -473,9 +476,11 @@ async def build_capability_tools(
     (プレビューの tool の宣言が実際とずれないように)。
     戻り値は {名前: エントリ} を差し込む順に。呼び手が tools_dict に重ねる (同名は合成側が勝つ)。
 
-    preset の system prompt に {{SKILLS}} / {{USER_RECIPES}} があれば、一覧は system prompt に入るので
-    load_skill / load_recipe の説明には入れない (tool の宣言を利用者によらず preset ごとに同じにする —
-    chat template は tool を system より前に出すので、prefix cache が利用者をまたげるように)。
+    preset の system prompt に {{SKILLS}} があれば skill の一覧は system prompt に、会話の前置き (params.context) に
+    {{USER_RECIPES}} があればレシピの一覧は前置き (会話の最初の発言の先頭) に入るので、load_skill / load_recipe の
+    説明には入れない (tool の宣言を利用者によらず preset ごとに同じにする — chat template は tool を system より
+    前に出すので、prefix cache が利用者をまたげるように)。サブエージェントの子ターン (`agent_session`) は前置きを
+    入れないので、レシピの一覧は load_recipe の説明に入れる。
     messages: `/command` の合成 exchange・過去ターンの load_skill を見て、読み込み済みの skill は
     本文を再注入しない(46b5ff9ed)。load_tools / run_hooks は load_skill の呼び出し時のフック
     (プレビューでは渡さない — 呼ばないので)。
@@ -505,7 +510,9 @@ async def build_capability_tools(
             model,
             user,
             tools_extra_params,
-            listing_in_prompt=USER_RECIPES_TOKEN in preset_system,
+            listing_in_prompt=(
+                USER_RECIPES_TOKEN in (preset_context or "") and not agent_session
+            ),
         )
     )
     return entries
@@ -612,13 +619,10 @@ async def process_chat_payload(
 
     # 日時の変数はこのリクエストの利用者の TZ で作る (ブラウザが送った {{CURRENT_TIMEZONE}}。
     # 値そのものはサーバが正 — task.BROWSER_PROMPT_VARIABLES)。チャットの system prompt (先頭の
-    # system メッセージ) の変数もここでサーバが展開する ({{USER_RECIPES}} は先に取る)
+    # system メッセージ) の変数もここでサーバが展開する
     set_request_timezone(metadata.get("variables"))
     messages = form_data.get("messages") or []
     if messages and messages[0].get("role") == "system":
-        await ensure_user_recipes(
-            user, model, messages[0].get("content"), metadata=metadata
-        )
         form_data["messages"] = expand_chat_system_message(
             messages, user, model, metadata.get("variables")
         )
@@ -900,15 +904,15 @@ async def process_chat_payload(
 
     # 能力の合成 tool (load_skill・レシピ)。プレビューと同じ関数 (build_capability_tools)
     preset_system = await asyncio.to_thread(preset_system_prompt, model)
-    # system prompt の変数で sandbox に聞くもの ({{USER_RECIPES}} と {{USER_MEMORY_INDEX}}) をここで並べて取る —
-    # build_recipe_tools はレシピの一覧を、routers の展開は両方を、この持ち回りから引く (直列に増やさない)
-    await ensure_user_recipes(user, model, preset_system, metadata=metadata)
+    preset_context = await asyncio.to_thread(preset_context_template, model)
     for name, entry in (
         await build_capability_tools(
             model,
             user,
             tools_extra_params,
             preset_system,
+            preset_context,
+            agent_session=bool(metadata.get("agent_session")),
             messages=form_data["messages"],
             load_tools=inject_skill_tools,
             run_hooks=run_hooks,
@@ -943,30 +947,19 @@ async def process_chat_payload(
     except Exception as e:
         log.exception(e)
 
-    # If context is not empty, insert it into the messages
-    if len(sources) > 0:
-        # 本文の無い添付の次の手は、このターンに出している tool だけを名指しする
-        with turn_tools(tools_dict.keys()):
-            context_string = build_source_context(sources)
-        prompt = get_last_user_message(form_data["messages"])
-
-        if prompt is None:
-            raise Exception("No user message found")
-
-        # llens(#52): RAG_TEMPLATE の「包む機構」は廃止。抽出内容(<source> タグ)は
-        # Attachment が完全に制御するため、指示スキャフォールドで包まず context_string を
-        # そのまま注入する。参照の扱い(引用ルール等)が要れば preset system prompt(prism)が持つ。
-        # Workaround for Ollama 2.0+ system prompt issue
-        if model.get("owned_by") == "ollama":
-            form_data["messages"] = prepend_to_first_user_message_content(
-                context_string,
-                form_data["messages"],
-            )
-        else:
-            form_data["messages"] = add_or_update_system_message(
-                context_string,
-                form_data["messages"],
-            )
+    # 会話の側 (前置き・更新の枠・添付の <source>) を user 発言の先頭に置き、wire の目印を取り除く
+    # (utils/conversation_context)。system には入れない — 全モデル同じ。<source> は 1 ファイル 1 つ
+    # (本文の無い添付の次の手は、このターンに出している tool だけを名指しする)
+    source_tags = []
+    with turn_tools(tools_dict.keys()):
+        for source in sources:
+            tag = build_source_context([source])
+            if tag:
+                file_id = (source.get("source") or {}).get("id")
+                source_tags.append((file_id if isinstance(file_id, str) else None, tag))
+    await apply_conversation_side(
+        form_data, user=user, model=model, metadata=metadata, sources=source_tags
+    )
 
     # llens(#69): 画像添付は files 経由に統一。内部 file URL("/api/v1/files/{id}/content")
     # の image_url は推論エンジン側から到達・認証できる保証がない — モデルへ出る直前の

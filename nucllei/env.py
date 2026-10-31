@@ -383,7 +383,7 @@ SANDBOX_URL = os.environ.get("SANDBOX_URL", "").strip()
 # 同名・同値を持ち合うこと。
 SANDBOX_TOKEN = os.environ.get("SANDBOX_TOKEN", "").strip()
 
-# system prompt の変数 {{USER_MEMORY_INDEX}} が入れる、利用者の記憶の目次のファイル (sandbox の `/workspace/…`。
+# 会話の前置きの変数 {{USER_MEMORY_INDEX}} が入れる、利用者の記憶の目次のファイル (sandbox の `/workspace/…`。
 # 空・`/workspace/` の外は無効 = 変数は空)。既定は `/workspace/memory/MEMORY.md` (nucllei 自身に記憶の
 # 決まりは無いので、置き場は設定で変えられる。utils/memory_index)
 USER_MEMORY_INDEX_PATH = os.environ.get(

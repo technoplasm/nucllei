@@ -135,31 +135,6 @@ def pop_system_message(messages: list[dict]) -> tuple[Optional[dict], list[dict]
 # 呼び出し側は必ず戻り値を代入する(`form_data["messages"] = ...`)。
 
 
-def prepend_to_first_user_message_content(
-    content: str, messages: list[dict]
-) -> list[dict]:
-    messages = list(messages)
-    for index, message in enumerate(messages):
-        if message["role"] == "user":
-            if isinstance(message["content"], list):
-                parts = [
-                    (
-                        {**item, "text": f"{content}\n{item['text']}"}
-                        if item["type"] == "text"
-                        else item
-                    )
-                    for item in message["content"]
-                ]
-                messages[index] = {**message, "content": parts}
-            else:
-                messages[index] = {
-                    **message,
-                    "content": f"{content}\n{message['content']}",
-                }
-            break
-    return messages
-
-
 def add_or_update_system_message(content: str, messages: list[dict]):
     """
     Adds a new system message at the beginning of the messages list

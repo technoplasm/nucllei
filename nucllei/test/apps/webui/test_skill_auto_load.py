@@ -9,7 +9,8 @@ skill が `auto_load_content_types`(content_type の前方一致リスト)を宣
 - 発火する / 条件に合わなければしない(content_type は DB の値で判定)
 - 認可は `/command` と同じ AND(機能有効 ∧ モデル紐づき ∧ read 可視)+ 読めない添付は無視
 - 発火は 1 回: 応答に残った発火(load_skill 往復)が履歴にあれば足さない。履歴に無ければ
-  添付の無い発言のターンでも発火する(位置は最初の user メッセージの直後)
+  添付の無い発言のターンでも発火する(位置は最後の user メッセージ = 今の発言の直後。発火の記録が
+  残る応答の先頭と同じ位置)
 - 二重発火しない(`/command`・モデル自律 load_skill が既にあれば足さない / 添付複数でも 1 回)
 - `/command`・load_skill との併用(位置と tool_ids の再導出)
 - 画像(user メッセージの image_url パート)は付いたメッセージの直後
@@ -265,14 +266,15 @@ class TestSkillAutoLoad(AbstractPostgresTest):
     # ── 持続 ────────────────────────────────────────────────────
 
     def test_fires_on_later_turn_when_not_in_history(self):
-        """添付はチャットの一覧として毎リクエスト届く — 発火がまだ履歴に無ければ、添付の無い
-        発言のターンでも発火する。"""
+        """添付は今の枝の一覧として毎リクエスト届く — 発火がまだ履歴に無ければ、添付の無い
+        発言のターンでも発火する。位置は今の発言の直後 (前の発言に付けたファイルでも途中に差し込まない
+        — 発火の記録は応答の先頭に残り、次のリクエストでもその位置になる)。"""
         skill = self._skill(tool_ids=["audio-tools"])
         files = [self._file("rec", "audio/webm")]
 
         form_data = {
             "messages": [
-                {"role": "user", "content": "これ聞いて"},
+                {"role": "user", "content": "これ聞いて", "files": list(files)},
                 {"role": "assistant", "content": "聞きました"},
                 {"role": "user", "content": "もう一度読み直して"},
             ],
@@ -280,15 +282,35 @@ class TestSkillAutoLoad(AbstractPostgresTest):
         }
         result, activations = self._apply(form_data, _model_with_skills(skill.id))
 
-        # 位置は最初の user メッセージの直後で固定(ターンが進んでも動かない)
         assert [m["role"] for m in result["messages"]] == [
             "user",
             "assistant",
-            "tool",
-            "assistant",
             "user",
+            "assistant",
+            "tool",
         ]
         assert activations[0]["tool_ids"] == ["audio-tools"]
+
+    def test_unmarked_attachment_fires_after_the_last_user_message(self):
+        """目印の無い添付 (headless 等) も最後の user メッセージの直後。"""
+        skill = self._skill()
+        files = [self._file("rec", "audio/webm")]
+        form_data = {
+            "messages": [
+                {"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"},
+                {"role": "user", "content": "c"},
+            ],
+            "files": files,
+        }
+        result, _ = self._apply(form_data, _model_with_skills(skill.id))
+        assert [m["role"] for m in result["messages"]] == [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+            "tool",
+        ]
 
     def test_not_refired_once_in_history(self):
         """発火したターンの応答に残った load_skill 往復(`skill:<id>:auto`)が履歴にあれば、
@@ -377,30 +399,30 @@ class TestSkillAutoLoad(AbstractPostgresTest):
 
         form_data = {
             "messages": [
-                {"role": "user", "content": "/notes 議事録にして"},
+                {"role": "user", "content": "これ聞いて"},
                 _load_skill_call("doc"),
                 {"role": "tool", "tool_call_id": "functions.load_skill:0"},
                 {"role": "assistant", "content": "はい"},
-                {"role": "user", "content": "続けて"},
+                {"role": "user", "content": "/notes 議事録にして"},
             ],
             "files": [self._file("rec", "audio/webm")],
         }
         form_data, commands = apply_skill_command(form_data, self.user, model)
         result, activations = self._apply(form_data, model)
 
-        # 同じ user メッセージの `/command` exchange の後ろに自動ロード分が並ぶ
+        # 同じ user メッセージ (今の発言) の `/command` exchange の後ろに自動ロード分が並ぶ
         assert [m["role"] for m in result["messages"]] == [
+            "user",
+            "assistant",  # doc(モデル自律)
+            "tool",
+            "assistant",
             "user",
             "assistant",  # /notes(合成)
             "tool",
             "assistant",  # audio(自動ロード)
             "tool",
-            "assistant",  # doc(モデル自律)
-            "tool",
-            "assistant",
-            "user",
         ]
-        assert _called_skill_ids(result["messages"]) == ["notes", "audio", "doc"]
+        assert _called_skill_ids(result["messages"]) == ["doc", "notes", "audio"]
         assert [a["id"] for a in commands] == ["notes"]
         assert [a["id"] for a in activations] == ["audio"]
         # モデル自律分の tool は履歴から再導出される(自動ロードを足しても変わらない)

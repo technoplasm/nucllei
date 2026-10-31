@@ -743,9 +743,50 @@ class TestExecutionResume(AbstractPostgresTest):
                     },
                     {"type": "image_url", "image_url": {"url": "/ext/x/y.png"}},
                 ],
+                # 目印 (前置き・<source> の位置決め — middleware が送る前に取り除く)
+                "id": "u1",
+                "files": [{"type": "file", "id": "doc-1"}],
             }
             # 空 assistant(応答先)は落ちる
         ]
+
+    def test_branch_request_files_are_the_current_branch_only(self):
+        """続きターンの files は今の枝の user 発言に付いた type 'file' だけ (会話の順・重複なし)。"""
+        chat_json = {
+            "files": [{"type": "file", "id": "other-branch"}],
+            "history": {
+                "messages": {
+                    "u1": {
+                        "id": "u1",
+                        "parentId": None,
+                        "role": "user",
+                        "files": [
+                            {"type": "file", "id": "d1"},
+                            {"type": "image", "id": "img"},
+                        ],
+                    },
+                    "a1": {"id": "a1", "parentId": "u1", "role": "assistant"},
+                    "u2": {
+                        "id": "u2",
+                        "parentId": "a1",
+                        "role": "user",
+                        "files": [
+                            {"type": "file", "id": "d1"},
+                            {"type": "file", "id": "d2"},
+                        ],
+                    },
+                    "u2b": {
+                        "id": "u2b",
+                        "parentId": "a1",
+                        "role": "user",
+                        "files": [{"type": "file", "id": "other-branch"}],
+                    },
+                    "a2": {"id": "a2", "parentId": "u2", "role": "assistant"},
+                }
+            },
+        }
+        files = self.resume.branch_request_files(chat_json, "a2")
+        assert [f["id"] for f in files] == ["d1", "d2"]
 
     def test_build_wire_messages_drops_reasoning(self):
         """続きターンの履歴(ターンをまたぐ)には reasoning を載せない — 追撃だけが

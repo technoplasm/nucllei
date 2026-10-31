@@ -164,19 +164,20 @@ def user_prompt_params(user) -> dict:
     }
 
 
-# {{SKILLS}} / {{USER_RECIPES}}: 利用者ごとに変わる一覧を、tool の説明 (chat template で system より
-# 前に出る) でなく system prompt に入れられるようにする。
-# preset の system prompt に変数があれば load_skill / load_recipe の説明には一覧を入れない
-# (middleware — preset_system_prompt)。展開には preset (model) が要る: どの skill が載るか
-# (meta.skillIds・能力「スキル」)、能力「レシピ」が有効か。model を渡さない呼び出し (タイトル生成等)
-# では空。
+# {{SKILLS}}: 利用者ごとに変わる skill の一覧を、tool の説明 (chat template で system より前に出る) でなく
+# system prompt に入れられるようにする。preset の system prompt に変数があれば load_skill の説明には一覧を
+# 入れない (middleware — preset_system_prompt)。展開には preset (model) が要る (どの skill が載るか・
+# 能力「スキル」)。model を渡さない呼び出し (タイトル生成等) では空。
 SKILLS_TOKEN = "{{SKILLS}}"
+# 会話の前置き (preset の params.context — utils/conversation_context) でだけ展開する 2 つ。
+# {{USER_RECIPES}} = 見えるレシピの一覧 (能力「レシピ」が ON で sandbox のある配備)。前置きにあれば load_recipe の
+# 説明には一覧を入れない。{{USER_MEMORY_INDEX}} = 利用者の記憶の目次 (utils/memory_index)。
+# どちらもサブエージェントの子ターンでは前置きごと入らない
 USER_RECIPES_TOKEN = "{{USER_RECIPES}}"
-# 利用者の記憶の目次 (utils/memory_index)。
-# 能力「レシピ」に依らない (変数が system prompt にあるときだけ取る)。サブエージェントの子ターンでは空
 USER_MEMORY_INDEX_TOKEN = "{{USER_MEMORY_INDEX}}"
+CONTEXT_VARIABLES = (USER_RECIPES_TOKEN, USER_MEMORY_INDEX_TOKEN)
 
-# 変数ごとの「何で変わるか」: system prompt の
+# 変数ごとの「何で変わるか」: system prompt・会話の前置きの
 # プレビュー (utils/prompt_preview) が、prefix cache の観点でどこが利用者ごと・日時ごとかの印を付ける。
 # prompt_template とブラウザの getPromptVariables (src/lib/utils、チャットの metadata.variables) が
 # 展開する変数を全部載せる。user = 利用者ごと、time = 日時で変わる、preset = preset ごとに固定
@@ -197,15 +198,51 @@ PROMPT_VARIABLE_SCOPES = {
     USER_MEMORY_INDEX_TOKEN: "user",
     "{{BASE_MODEL_ID}}": "preset",
 }
-# レシピの一覧は sandbox に聞く (非同期) ので、同期の prompt_template は自分では取らない —
-# 能力「レシピ」が ON のリクエストで一度取ったもの (get_user_recipes: process_chat_payload の
-# build_recipe_tools・preset の system prompt を当てる直前の ensure_user_recipes・続きターンの wire の前)
-# をリクエストの間だけ ContextVar に持つ (1 リクエスト 1 回。念のため古い値は使わない)。
-RECIPES_NOT_FETCHED = "(レシピの一覧はここでは取れない)"
-_USER_RECIPES_TTL_S = 60
+# system prompt・チャットの system・skill の本文で展開する変数 (会話の前置きでは空)
+SYSTEM_VARIABLES = tuple(
+    v for v in PROMPT_VARIABLE_SCOPES if v not in CONTEXT_VARIABLES
+)
+
+
+def misplaced_variables(where: str) -> tuple[str, ...]:
+    """`where` ("system" | "skill" | "context") で展開しない (空にする) 変数。"""
+    return SYSTEM_VARIABLES if where == "context" else CONTEXT_VARIABLES
+
+
+# 置き場所違いの変数の WARN は preset・場所・変数ごとにプロセスで 1 回
+_warned_misplaced: set = set()
+
+
+def warn_misplaced(where: str, variable: str, model=None) -> None:
+    model_id = as_model_dict(model).get("id") if model is not None else None
+    key = (where, model_id, variable)
+    if key in _warned_misplaced:
+        return
+    _warned_misplaced.add(key)
+    place = {
+        "system": "system prompt",
+        "skill": "skill の本文",
+        "context": "会話の前置き",
+    }
+    hint = (
+        "system prompt に書く"
+        if where == "context"
+        else "会話の前置き (params.context) に書く"
+    )
+    log.warning(
+        f"{variable} は {place.get(where, where)} では展開しない (空にした。preset={model_id}): {hint}"
+    )
+
+
 _user_recipes: ContextVar[Optional[dict]] = ContextVar(
     "nucllei_user_recipes", default=None
 )
+_user_memory: ContextVar[Optional[dict]] = ContextVar(
+    "nucllei_user_memory_index", default=None
+)
+# 一覧・目次はリクエストの間だけ持ち回る (前置きを組むときと load_recipe の説明で 2 回聞かない)。
+# 念のため古い値は使わない
+_PROMPT_FETCH_TTL_S = 60
 
 
 def _user_id_of(user) -> Optional[str]:
@@ -229,8 +266,8 @@ def as_model_dict(model) -> dict:
     return {"id": dump.get("id"), "info": dump}
 
 
-def preset_system_prompt(model) -> str:
-    """preset の system prompt (params.system)。routers が当てるのと同じく DB の行から読む (MODELS の
+def _preset_param(model, key: str) -> str:
+    """preset の params の文字列 (`system` / `context`)。routers が当てるのと同じく DB の行から読む (MODELS の
     キャッシュは古いことがある)。無ければ MODELS の info、どちらも無ければ空。"""
     model = as_model_dict(model)
     model_id = model.get("id")
@@ -240,13 +277,23 @@ def preset_system_prompt(model) -> str:
 
             row = Models.get_model_by_id(model_id)
         except Exception as e:
-            log.warning(f"preset {model_id} の system prompt を読めない: {e!r}")
+            log.warning(f"preset {model_id} の params.{key} を読めない: {e!r}")
             row = None
         if row is not None:
-            return ((row.params.model_dump() if row.params else {}) or {}).get(
-                "system"
-            ) or ""
-    return ((model.get("info") or {}).get("params") or {}).get("system") or ""
+            value = ((row.params.model_dump() if row.params else {}) or {}).get(key)
+            return value if isinstance(value, str) else ""
+    value = ((model.get("info") or {}).get("params") or {}).get(key)
+    return value if isinstance(value, str) else ""
+
+
+def preset_system_prompt(model) -> str:
+    """preset の system prompt (params.system)。"""
+    return _preset_param(model, "system")
+
+
+def preset_context_template(model) -> str:
+    """preset の会話の前置き (params.context)。"""
+    return _preset_param(model, "context")
 
 
 def recipes_available(model) -> bool:
@@ -257,107 +304,115 @@ def recipes_available(model) -> bool:
     return bool(SANDBOX_URL) and is_recipes_feature_enabled(as_model_dict(model))
 
 
-async def get_user_recipes(user) -> str:
-    """見えるレシピの一覧 (user_recipes_text の結果)。このリクエストで取ってあればそれを、無ければ
-    取って持つ (1 リクエスト 1 回)。呼ぶのは能力「レシピ」が ON のときだけ。"""
+async def _cached_fetch(var: ContextVar, user, fetch) -> str:
     uid = _user_id_of(user)
-    cache = _user_recipes.get()
+    cache = var.get()
     if cache is None:
         cache = {}
-        _user_recipes.set(cache)
+        var.set(cache)
     hit = cache.get(uid)
-    if hit is not None and time.monotonic() - hit[0] < _USER_RECIPES_TTL_S:
+    if hit is not None and time.monotonic() - hit[0] < _PROMPT_FETCH_TTL_S:
         return hit[1]
-    from nucllei.utils.recipe_index import user_recipes_text
-
-    text = await user_recipes_text(user)
+    text = await fetch(user)
     cache[uid] = (time.monotonic(), text)
     return text
 
 
-async def ensure_user_recipes(user, model, *templates, metadata=None) -> None:
-    """system prompt の展開の前に sandbox に聞く変数を取っておく (このリクエストで取ってあれば何もしない):
-    `templates` のどれかに {{USER_RECIPES}} があり能力「レシピ」が ON ならレシピの一覧、
-    {{USER_MEMORY_INDEX}} があれば記憶の目次 (サブエージェントの子ターン = metadata の agent_session では
-    取らない — 展開も空)。両方なら並べて聞く。無ければ sandbox に聞かない。"""
-    texts = [t for t in templates if isinstance(t, str)]
-    if not _user_id_of(user):
-        return
-    fetches = []
-    if any(USER_RECIPES_TOKEN in t for t in texts) and recipes_available(model):
-        fetches.append(get_user_recipes(user))
-    if any(USER_MEMORY_INDEX_TOKEN in t for t in texts) and not (metadata or {}).get(
-        "agent_session"
-    ):
-        fetches.append(get_user_memory_index(user))
-    if fetches:
-        # 持ち回りの dict はここ (呼び手の context) で作っておく — gather は別の task で走らせるので、
-        # その中で ContextVar に set した dict は呼び手に戻らない
-        for var in (_user_recipes, _user_memory):
-            if var.get() is None:
-                var.set({})
-        await asyncio.gather(*fetches)
+async def get_user_recipes(user) -> str:
+    """見えるレシピの一覧 (user_recipes_text の結果)。このリクエストで取ってあればそれを、無ければ
+    取って持つ (1 リクエスト 1 回)。呼ぶのは能力「レシピ」が ON のときだけ。"""
+    from nucllei.utils.recipe_index import user_recipes_text
 
-
-# 記憶の目次 (ensure_user_recipes が先に取る — レシピの一覧と同じく 1 リクエスト 1 回)
-MEMORY_INDEX_NOT_FETCHED = "(記憶の目次はここでは取れない)"
-_user_memory: ContextVar[Optional[dict]] = ContextVar(
-    "nucllei_user_memory_index", default=None
-)
-
-
-def reset_prompt_fetches() -> None:
-    """このリクエストで取ったレシピの一覧・記憶の目次を捨てる (次の ensure_user_recipes で取り直す)。"""
-    _user_recipes.set(None)
-    _user_memory.set(None)
+    return await _cached_fetch(_user_recipes, user, user_recipes_text)
 
 
 async def get_user_memory_index(user) -> str:
     """{{USER_MEMORY_INDEX}} の中身 (utils/memory_index)。このリクエストで取ってあればそれを。"""
-    uid = _user_id_of(user)
-    cache = _user_memory.get()
-    if cache is None:
-        cache = {}
-        _user_memory.set(cache)
-    hit = cache.get(uid)
-    if hit is not None and time.monotonic() - hit[0] < _USER_RECIPES_TTL_S:
-        return hit[1]
     from nucllei.utils.memory_index import user_memory_index_text
 
-    text = await user_memory_index_text(user)
-    cache[uid] = (time.monotonic(), text)
-    return text
+    return await _cached_fetch(_user_memory, user, user_memory_index_text)
 
 
-def _user_memory_block(user_id: Optional[str], agent_session: bool) -> str:
-    if agent_session or not user_id:
-        return ""
-    hit = (_user_memory.get() or {}).get(user_id)
-    if hit is None or time.monotonic() - hit[0] >= _USER_RECIPES_TTL_S:
-        from nucllei.utils.memory_index import memory_index_path
-        from nucllei.env import SANDBOX_URL
-
-        if not SANDBOX_URL or not memory_index_path():
-            return ""
-        log.warning(
-            "{{USER_MEMORY_INDEX}} を先に取っていない経路で展開した (ensure_user_recipes の呼び漏れ)"
-        )
-        return MEMORY_INDEX_NOT_FETCHED
-    return hit[1]
+def reset_prompt_fetches() -> None:
+    """このリクエストで取ったレシピの一覧・記憶の目次を捨てる (次に要るとき取り直す)。"""
+    _user_recipes.set(None)
+    _user_memory.set(None)
 
 
-def _user_recipes_block(model, user_id: Optional[str]) -> str:
-    if not model or not user_id or not recipes_available(model):
-        return ""
-    hit = (_user_recipes.get() or {}).get(user_id)
-    if hit is None or time.monotonic() - hit[0] >= _USER_RECIPES_TTL_S:
-        log.warning(
-            "{{USER_RECIPES}} を先に取っていない経路で展開した (ensure_user_recipes の呼び漏れ)"
-        )
-        return RECIPES_NOT_FETCHED
+async def fetch_context_sections(user, model, template: str) -> dict[str, str]:
+    """会話の前置きの変数のうち `template` にあるものの今の展開 ({変数: 文字列})。sandbox に聞くものは並べて聞く。
+
+    {{USER_RECIPES}} = 見出し + 一覧 (recipe_index_block。能力「レシピ」OFF・sandbox 無しは空、0 件・不通・古い
+    sandbox はその 1 行)。{{USER_MEMORY_INDEX}} = 記憶の目次 (無い・sandbox 無しは空、不通はその 1 行)。
+    user 不明なら両方空。"""
+    from nucllei.utils.frames import defuse
     from nucllei.utils.recipe_index import recipe_index_block
 
-    return recipe_index_block(hit[1])
+    sections: dict[str, str] = {}
+    if not isinstance(template, str):
+        return sections
+    uid = _user_id_of(user)
+    want_recipes = USER_RECIPES_TOKEN in template
+    want_memory = USER_MEMORY_INDEX_TOKEN in template
+    if want_recipes:
+        sections[USER_RECIPES_TOKEN] = ""
+    if want_memory:
+        sections[USER_MEMORY_INDEX_TOKEN] = ""
+    if not uid:
+        return sections
+    jobs = {}
+    if want_recipes and recipes_available(model):
+        jobs[USER_RECIPES_TOKEN] = get_user_recipes(user)
+    if want_memory:
+        jobs[USER_MEMORY_INDEX_TOKEN] = get_user_memory_index(user)
+    if not jobs:
+        return sections
+    # 持ち回りの dict はここ (呼び手の context) で作っておく — gather は別の task で走らせるので、
+    # その中で ContextVar に set した dict は呼び手に戻らない
+    for var in (_user_recipes, _user_memory):
+        if var.get() is None:
+            var.set({})
+    results = await asyncio.gather(*jobs.values())
+    for token, text in zip(jobs.keys(), results):
+        if token == USER_RECIPES_TOKEN:
+            # 書いた人の説明から記憶の目次の枠を閉じたり偽ったりできないように (前置きの枠と `<source>` は
+            # 前置き全体に掛ける — conversation_context.frame_initial)
+            text = defuse(recipe_index_block(text), memory_index=True)
+        sections[token] = text
+    return sections
+
+
+def section_is_known(token: str, text: str) -> bool:
+    """前置きの節が「取れた」値か (sandbox 不通・古い sandbox の 1 行の注記は False)。"""
+    from nucllei.utils.memory_index import MEMORY_INDEX_UNREACHABLE
+    from nucllei.utils.recipe_index import RECIPES_OLD_SANDBOX, RECIPES_UNREACHABLE
+
+    if token == USER_MEMORY_INDEX_TOKEN:
+        return text != MEMORY_INDEX_UNREACHABLE
+    if token == USER_RECIPES_TOKEN:
+        return text not in (RECIPES_OLD_SANDBOX, RECIPES_UNREACHABLE)
+    return True
+
+
+_VARIABLE_TOKEN = re.compile(r"\{\{[A-Z_]+\}\}")
+
+
+def expand_context_template(template: str, sections: dict, model=None) -> str:
+    """会話の前置きのテンプレートを展開する (1 回の走査 — 値の中の `{{…}}` は展開しない)。
+
+    {{USER_RECIPES}} / {{USER_MEMORY_INDEX}} は `sections` (fetch_context_sections) の値、ほかのサーバ変数
+    (日時・利用者・{{SKILLS}} 等) は空 (WARN — system prompt に書くもの)。知らない `{{…}}` は字のまま。"""
+
+    def replace(match):
+        token = match.group(0)
+        if token in CONTEXT_VARIABLES:
+            return sections.get(token) or ""
+        if token in SYSTEM_VARIABLES:
+            warn_misplaced("context", token, model)
+            return ""
+        return token
+
+    return _VARIABLE_TOKEN.sub(replace, template or "")
 
 
 # datetime.weekday() の順(月曜 = 0)
@@ -372,9 +427,9 @@ def prompt_template(
     user_role: Optional[str] = None,
     user_id: Optional[str] = None,
     model=None,
-    agent_session: bool = False,
+    where: str = "system",
 ) -> str:
-    """サーバー既知のプロンプト変数を展開する(変数の一覧はここが単一情報源)。
+    """サーバー既知のプロンプト変数を展開する(system prompt・チャットの system・skill の本文・タイトル生成)。
 
     {{USER_ROLE}} は role の値そのまま(不明なら "Unknown")。{{USER_GROUPS}} は
     user_group_names(user_id) を ", " でつないだもの(所属なし・user 不明なら空文字列)。
@@ -383,28 +438,13 @@ def prompt_template(
     (置き場に書ける所属グループ。admin は所属グループ全部。無ければ空文字列)。
     {{SKILLS}} は model (preset) で load_skill できる skill の一覧 (見出し + `- <id>: <説明>` —
     load_skill の説明に入れていたものと同じ。能力「スキル」OFF・0 件・model 無しなら空)。
-    {{USER_RECIPES}} は見えるレシピの一覧 (見出し + path の直後に印の付く行。0 件はその 1 文。能力「レシピ」
-    OFF・sandbox 無し・model 無しなら空) で、非同期の入口が先に取ったものを入れる。
-    {{USER_MEMORY_INDEX}} は利用者の記憶の目次 (utils/memory_index — 無ければ空。`agent_session` (サブエージェントの
-    子ターン) では空)。中身は利用者が書いたものなので最後に展開する (中の `{{…}}` を展開しない)。
+    {{USER_RECIPES}} / {{USER_MEMORY_INDEX}} は会話の前置きでだけ展開する変数 — ここでは空にし、log に WARN
+    (`where` は WARN の文に使う場所: "system" / "skill")。先に空にするので、ほかの変数の値に書かれた字面は残る。
     """
-    if USER_MEMORY_INDEX_TOKEN in template:
-        # 記憶の目次は利用者が書いたもの — 先に分けて残りを展開し、最後につなぐ (目次の中の {{…}} を展開
-        # しない・ほかの変数の値 (レシピの説明等) に書かれた {{USER_MEMORY_INDEX}} も展開しない)
-        block = _user_memory_block(user_id, agent_session)
-        return block.join(
-            prompt_template(
-                part,
-                user_name=user_name,
-                user_location=user_location,
-                base_model_id=base_model_id,
-                user_role=user_role,
-                user_id=user_id,
-                model=model,
-                agent_session=agent_session,
-            )
-            for part in template.split(USER_MEMORY_INDEX_TOKEN)
-        )
+    for token in CONTEXT_VARIABLES:
+        if token in template:
+            warn_misplaced(where, token, model)
+            template = template.replace(token, "")
 
     # 今の日時。TZ はこのリクエストの利用者の TZ (ブラウザの {{CURRENT_TIMEZONE}})、無ければサーバの TZ
     current_date = datetime.now(_request_timezone.get())
@@ -460,10 +500,6 @@ def prompt_template(
         template = template.replace(
             SKILLS_TOKEN,
             skills_block(as_model_dict(model), user_id) if model and user_id else "",
-        )
-    if USER_RECIPES_TOKEN in template:
-        template = template.replace(
-            USER_RECIPES_TOKEN, _user_recipes_block(model, user_id)
         )
     return template
 
