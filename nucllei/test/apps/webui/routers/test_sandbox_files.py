@@ -13,6 +13,7 @@ sandbox サービスは偽物(`builtin_tools.sandbox.sandbox_post` を差し替�
   全体を bytes にしない)。上限は sandbox の上限(読めていれば送る前に 413)、権限 `chat.file_upload`
   が無ければ 403
 - SANDBOX_URL の無い配備では全部 404
+- `places` の `memory_dir` は記憶の目次のあるフォルダ(無効なら null)
 - sandbox tool の容量切れの文面: 自分では消さず、ユーザーに伝えて画面の「ワークスペース」→
   「サンドボックス」タブで整理してもらう (2026-10-19 llens 監査 (1) — 旧文は rm を勧めていた)
 """
@@ -149,6 +150,25 @@ class TestSandboxFiles(AbstractPostgresTest):
         places = self._get(ADMIN, "/places").json()["places"]
         assert {"path": "/ext/public", "kind": "public", "rw": True} in places
         assert {"path": "/ext/groups/OTHER", "kind": "group", "rw": True} in places
+
+    def test_places_memory_dir(self, monkeypatch):
+        """記憶の目次のあるフォルダ(画面の「記憶」の近道)。無効(空・/workspace の外)なら null。"""
+        import nucllei.env
+
+        FakeSandbox(monkeypatch)
+        monkeypatch.setattr(
+            nucllei.env, "USER_MEMORY_INDEX_PATH", "/workspace/memory/MEMORY.md"
+        )
+        assert self._get(MEMBER, "/places").json()["memory_dir"] == "/workspace/memory"
+        monkeypatch.setattr(
+            nucllei.env, "USER_MEMORY_INDEX_PATH", "/workspace/notes/mem/INDEX.md"
+        )
+        assert (
+            self._get(MEMBER, "/places").json()["memory_dir"] == "/workspace/notes/mem"
+        )
+        for off in ("", "/etc/passwd"):
+            monkeypatch.setattr(nucllei.env, "USER_MEMORY_INDEX_PATH", off)
+            assert self._get(MEMBER, "/places").json()["memory_dir"] is None
 
     def test_list_workspace(self, monkeypatch):
         fake = FakeSandbox(

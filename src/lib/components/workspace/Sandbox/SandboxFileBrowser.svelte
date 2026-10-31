@@ -59,6 +59,8 @@
 	let textLimit = $state(0);
 	let uploadLimit = $state<number | null>(null);
 	let canUpload = $state(false);
+	// 記憶の目次のあるフォルダ(サーバーの設定 USER_MEMORY_INDEX_PATH。無効なら null で近道を出さない)
+	let memoryDir = $state<string | null>(null);
 
 	let dir = $state(WORKSPACE);
 	let openFile = $state<string | null>(null);
@@ -83,6 +85,26 @@
 	// workspace の root の lost+found は ext4 の産物なので一覧に出さない
 	const entries = $derived(
 		(listing?.entries ?? []).filter((e) => !(dir === WORKSPACE && e.name === 'lost+found'))
+	);
+
+	// 近道: 「記憶」は memoryDir、「レシピ」は今の場所の recipes/(レシピの置き場は /workspace・
+	// /ext/groups/<g>・/ext/public — nucllei/utils/recipes.py の層)。フォルダが無くても開いて、
+	// 一覧の「このフォルダはありません。」を出す(作らない)
+	const RECIPE_PLACE_KINDS: SandboxPlace['kind'][] = ['workspace', 'group', 'public'];
+	const shortcuts = $derived(
+		[
+			memoryDir
+				? { key: 'memory', label: $i18n.t('Memory'), icon: 'i-lucide-brain', path: memoryDir }
+				: null,
+			place && RECIPE_PLACE_KINDS.includes(place.kind)
+				? {
+						key: 'recipes',
+						label: $i18n.t('Recipes'),
+						icon: 'i-lucide-scroll-text',
+						path: `${place.path}/recipes`
+					}
+				: null
+		].filter((s) => s !== null)
 	);
 
 	const placeIcon = (p: SandboxPlace | null) =>
@@ -261,6 +283,7 @@
 			textLimit = res.text_limit_bytes;
 			uploadLimit = res.upload_limit_bytes;
 			canUpload = res.can_upload;
+			memoryDir = res.memory_dir;
 		} catch (err) {
 			placesError =
 				err instanceof SandboxFilesError && err.status === 404
@@ -619,6 +642,26 @@
 						</DropdownContent>
 					{/snippet}
 				</Dropdown>
+				{#if shortcuts.length > 0}
+					<div class="flex items-center gap-1">
+						{#each shortcuts as s (s.key)}
+							{@const here = inside(dir, s.path)}
+							<Tooltip content={s.path}>
+								<button
+									class="flex items-center gap-1 px-2 py-1 rounded-lg text-sm whitespace-nowrap {here
+										? 'bg-surface-hover text-content'
+										: 'text-content-muted hover:bg-surface-hover hover:text-content'}"
+									type="button"
+									aria-current={here ? 'location' : undefined}
+									onclick={() => navigate(s.path)}
+								>
+									<span class="{s.icon} size-4 block shrink-0"></span>
+									{s.label}
+								</button>
+							</Tooltip>
+						{/each}
+					</div>
+				{/if}
 				<div class="flex items-center gap-0.5 ml-auto">
 					{#if rw}
 						{#if canUpload}

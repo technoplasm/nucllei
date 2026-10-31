@@ -41,6 +41,7 @@
 import base64
 import json
 import logging
+import posixpath
 import re
 from typing import Optional
 from urllib.parse import quote
@@ -53,6 +54,7 @@ from nucllei.env import SRC_LOG_LEVELS
 from nucllei.utils.access_control import has_permission
 from nucllei.utils.auth import get_verified_user
 from nucllei.utils.file_limit import sandbox_file_limit_probed
+from nucllei.utils.memory_index import memory_index_path
 from nucllei.utils.ext_acl import (
     ext_path_access,
     is_acl_rel,
@@ -219,14 +221,17 @@ async def get_places(request: Request, user=Depends(get_verified_user)):
     """開ける場所の一覧(先頭が本人の workspace)。`/ext` は ACL で見える物だけ。
     `text_limit_bytes` はテキストの上限、`upload_limit_bytes` は sandbox の上限(`/healthz` から
     読めていなければ null — 画面は事前チェックをせず sandbox の 413 で知る)、`can_upload` は
-    アップロードの権限。"""
+    アップロードの権限。`memory_dir` は記憶の目次 (env `USER_MEMORY_INDEX_PATH`) のあるフォルダ
+    (無効なら null — 画面は「記憶」の近道を出さない)。"""
     _require_sandbox()
     places = [{"path": WORKSPACE_ROOT, "kind": "workspace", "rw": True}]
     for m in sandbox_ext_mounts(user):
         kind = "public" if m["path"] == f"{EXT_ROOT}/public" else "group"
         places.append({"path": m["path"], "kind": kind, "rw": bool(m["rw"])})
+    memory_index = memory_index_path()
     return {
         "places": places,
+        "memory_dir": posixpath.dirname(memory_index) if memory_index else None,
         "text_limit_bytes": _text_limit(),
         "upload_limit_bytes": sandbox_file_limit_probed(),
         "can_upload": _can_upload(request, user),

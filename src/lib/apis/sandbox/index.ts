@@ -99,6 +99,8 @@ export type SandboxPlaces = {
 	upload_limit_bytes: number | null;
 	// アップロードの権限(グループの「ファイルアップロードを許可」= chat.file_upload)
 	can_upload: boolean;
+	// 記憶の目次(env USER_MEMORY_INDEX_PATH)のあるフォルダ。無効なら null(「記憶」の近道を出さない)
+	memory_dir: string | null;
 };
 
 export const getSandboxPlaces = () => request<SandboxPlaces>('/places');
