@@ -281,28 +281,28 @@ separate reasoning block.
 
 ### 3.6 Tool calling & tasks
 
-| Var                                                            | Kind | Default               | Effect                                                                                                                                                                    |
-| -------------------------------------------------------------- | ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TOOL_CALL_MAX_ITERATIONS`                                     | env  | `30` (`-1` unlimited) | native tool-loop cap; hitting it surfaces an in-chat error                                                                                                                |
-| `TOOL_EXEC_TIMEOUT_S`                                          | env  | `300` s (`-1` off)    | authoritative per-tool-call timeout; expiry is returned to the model as a tool result                                                                                     |
-| `TOOL_RESULT_MAX_CHARS`                                        | env  | `65536`               | tool results longer than this are truncated once at the producer (sync and background alike), flagged `truncated` / `original_chars` (§5.5)                               |
-| `SUBAGENT_TURN_TIMEOUT_S`                                      | env  | `1800` s (`-1` off)   | timeout of one `run_subagent` child turn (§5.8)                                                                                                                           |
-| `SUBAGENT_MAX_DEPTH`                                           | env  | `2`                   | nesting limit of agent sessions (user chat = depth 0); `run_subagent` is not offered beyond it (§5.8)                                                                     |
-| `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                   | per-process cap on simultaneously running subagents; excess calls wait for a slot in arrival order (since 2026-10-30; before, they failed immediately) (§5.8)           |
+| Var                                                            | Kind | Default                                     | Effect                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------- | ---- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TOOL_CALL_MAX_ITERATIONS`                                     | env  | `30` (`-1` unlimited)                       | native tool-loop cap; hitting it surfaces an in-chat error                                                                                                                                                                                                            |
+| `TOOL_EXEC_TIMEOUT_S`                                          | env  | `300` s (`-1` off)                          | authoritative per-tool-call timeout; expiry is returned to the model as a tool result                                                                                                                                                                                 |
+| `TOOL_RESULT_MAX_CHARS`                                        | env  | `65536`                                     | tool results longer than this are truncated once at the producer (sync and background alike), flagged `truncated` / `original_chars` (§5.5)                                                                                                                           |
+| `SUBAGENT_TURN_TIMEOUT_S`                                      | env  | `1800` s (`-1` off)                         | timeout of one `run_subagent` child turn (§5.8)                                                                                                                                                                                                                       |
+| `SUBAGENT_MAX_DEPTH`                                           | env  | `2`                                         | nesting limit of agent sessions (user chat = depth 0); `run_subagent` is not offered beyond it (§5.8)                                                                                                                                                                 |
+| `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                                         | per-process cap on simultaneously running subagents; excess calls wait for a slot in arrival order (since 2026-10-30; before, they failed immediately) (§5.8)                                                                                                         |
 | `SUBAGENT_QUEUE_TIMEOUT_S`                                     | env  | `SUBAGENT_TURN_TIMEOUT_S` + 30 s (`-1` off) | how long an excess `run_subagent` call waits for a slot before failing — unset, it follows the child-turn limit (+30 s to stop a child), so the first N waiters outlast the children holding the slots; added to its per-tool timeout; nested calls never wait (§5.8) |
-| `ASYNC_EXEC_TIMEOUT_S`                                         | env  | `1800` s (`-1` off)   | timeout of one background execution unless the tool declares its own (§5.9)                                                                                               |
-| `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`            | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                            |
-| `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                   | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                             |
-| `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)            | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                              |
-| `SANDBOX_TEXT_MAX_SIZE_MB`                                     | env  | `1` (MB, integer)     | text cap: body of `write_file` (guard against a looping model), the file `edit_file` edits (before and after the edit) and the file browser's text editor (open / save, §4.4.1). `read_file` reads by range and has no cap (§5.7) |
-| `RECIPE_RESTRICTED_TOOLS`                                      | env  | empty                 | recipes (§6.5): functions only some users can use, as a JSON object `{"<function>": "<group>" | null}` (`null` = personal layer only). A recipe in a shared layer whose files name such a function is refused unless the layer is that group; a reader outside the group gets a warning when the `RECIPE.md` names it. Read by `save_recipe` / `edit_recipe` / `load_recipe` (and the recipe list in its description) and `nucllei recipe-check` |
-| `RECIPE_MEMO_KEYS`                                             | env  | empty                 | recipes (§6.5): keys of provenance-memo lines (`-- <key>:`) that a tool leaves at the top of saved files (comma-separated, e.g. `executed_at,csv,params`). Such a line is refused as patient data |
-| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                  | model used for background tasks (title generation)                                                                                                                        |
-| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in     | auto chat titles                                                                                                                                                          |
-| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`           | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                          |
-| `SELF_ADDRESSES`                                               | env  | `""`                  | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8). Was `EXT_SELF_ADDRESSES` until 2026-10-03          |
-| `FETCH_MAX_BYTES`                                              | env  | `26214400` (25 MB)    | default size cap when a reference (URL or sandbox path) is read by the resolver (§3.8); tools override it per call. Was `EXT_INLINE_MAX_BYTES` until 2026-10-03           |
-| `EXT_MOUNTS` / `EXT_PROXY_TIMEOUT_S`                           | env  | `""` / `30`           | `/ext/<name>` table — `name=http(s)://base` (proxy) or `name=/abs/dir` (static); empty = `/ext/**` all 404 / proxy read timeout (§3.8)                                    |
+| `ASYNC_EXEC_TIMEOUT_S`                                         | env  | `1800` s (`-1` off)                         | timeout of one background execution unless the tool declares its own (§5.9)                                                                                                                                                                                           |
+| `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`                                  | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                                                                                                                        |
+| `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                                         | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                                                                                                                         |
+| `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)                                  | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                                                                                                                          |
+| `SANDBOX_TEXT_MAX_SIZE_MB`                                     | env  | `1` (MB, integer)                           | text cap: body of `write_file` (guard against a looping model), the file `edit_file` edits (before and after the edit) and the file browser's text editor (open / save, §4.4.1). `read_file` reads by range and has no cap (§5.7)                                     |
+| `RECIPE_RESTRICTED_TOOLS`                                      | env  | empty                                       | recipes (§6.5): functions only some users can use, as a JSON object `{"<function>": "<group>"                                                                                                                                                                         | null}` (`null`= personal layer only). A recipe in a shared layer whose files name such a function is refused unless the layer is that group; a reader outside the group gets a warning when the`RECIPE.md`names it. Read by`save_recipe`/`edit_recipe`/`load_recipe`(and the recipe list in its description) and`nucllei recipe-check` |
+| `RECIPE_MEMO_KEYS`                                             | env  | empty                                       | recipes (§6.5): keys of provenance-memo lines (`-- <key>:`) that a tool leaves at the top of saved files (comma-separated, e.g. `executed_at,csv,params`). Such a line is refused as patient data                                                                     |
+| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                                        | model used for background tasks (title generation)                                                                                                                                                                                                                    |
+| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in                           | auto chat titles                                                                                                                                                                                                                                                      |
+| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`                                 | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                                                                                                                      |
+| `SELF_ADDRESSES`                                               | env  | `""`                                        | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8). Was `EXT_SELF_ADDRESSES` until 2026-10-03                                                                                                      |
+| `FETCH_MAX_BYTES`                                              | env  | `26214400` (25 MB)                          | default size cap when a reference (URL or sandbox path) is read by the resolver (§3.8); tools override it per call. Was `EXT_INLINE_MAX_BYTES` until 2026-10-03                                                                                                       |
+| `EXT_MOUNTS` / `EXT_PROXY_TIMEOUT_S`                           | env  | `""` / `30`                                 | `/ext/<name>` table — `name=http(s)://base` (proxy) or `name=/abs/dir` (static); empty = `/ext/**` all 404 / proxy read timeout (§3.8)                                                                                                                                |
 
 ### 3.7 Attachments / files / storage
 
@@ -472,16 +472,16 @@ into the sandbox at `/ext/groups` and `/ext/public`. The decision lives in one
 place, `nucllei/utils/ext_acl.py`, and the gate, the reference resolver, the
 sandbox tool and the file browser all call it:
 
-| Path                        | Regular user                          | Admin (`role == "admin"`) |
-| --------------------------- | ------------------------------------- | ------------------------- |
+| Path                        | Regular user                                                                                                         | Admin (`role == "admin"`) |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | `/ext/groups/<group>/…`     | members: rw (ro for members not listed as writers when the group's write mode is `listed`); everyone else: invisible | rw (all groups)           |
-| `/ext/groups` (the listing) | only the groups they belong to        | all groups                |
-| `/ext/public/…`             | ro                                    | rw                        |
-| `/ext/<other>/…` (doc, …)   | ro                                    | ro                        |
+| `/ext/groups` (the listing) | only the groups they belong to                                                                                       | all groups                |
+| `/ext/public/…`             | ro                                                                                                                   | rw                        |
+| `/ext/<other>/…` (doc, …)   | ro                                                                                                                   | ro                        |
 
 - **Who may write a group's folder** (2026-10-31) is a group attribute, not a
   user permission: `data.ext = {"write": "members" | "listed", "writers":
-  [user_id, …]}`. Absent or `members` = every member is rw (a group without
+[user_id, …]}`. Absent or `members` = every member is rw (a group without
   the setting needs no migration). `listed` = only
   members in `writers` are rw; the other members are ro (they still see and read
   the folder). Admins are rw on every group by role, whatever the setting.
@@ -1406,12 +1406,12 @@ Paths are the **jail paths** the model's tools use (`/workspace/notes.md`,
 `/ext/groups/EMR/recipes/a.md`), in requests and responses alike. Which places a
 user can open is the `/ext` ACL of §3.8 (`utils/ext_acl.py`, nothing separate):
 
-| Place                | User                                    | Admin         |
-| -------------------- | --------------------------------------- | ------------- |
-| `/workspace/…`       | own workspace, rw                       | own, rw       |
-| `/ext/public/…`      | ro                                      | rw            |
+| Place                | User                                                                        | Admin         |
+| -------------------- | --------------------------------------------------------------------------- | ------------- |
+| `/workspace/…`       | own workspace, rw                                                           | own, rw       |
+| `/ext/public/…`      | ro                                                                          | rw            |
 | `/ext/groups/<g>/…`  | members rw (non-writers ro in `listed` groups), others 404 (does not exist) | all groups rw |
-| other `/ext/<name>/` | 404 (not part of the browser)           | 404           |
+| other `/ext/<name>/` | 404 (not part of the browser)                                               | 404           |
 
 Writes to a ro place are 403 (and the sandbox gets the place as a ro bind, so it
 is refused twice). Any `.`-prefixed segment, `..`, or a relative path is 400 —
@@ -2156,315 +2156,315 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       the stored names unchanged. Commas are already forbidden in new names.
     - `NUCLLEI_USER_ROLE` — `admin`, `user` or `pending` (the role string as
       stored). Any other role is not sent, so the variable is undefined.
-    The stateful kernel is recreated (`session_reset`) when either value
-    changes, as it is for a change in the `/ext` mounts. A subagent runs as the
-    same user, so it sees the same values. Old sandboxes ignore the two fields.
-    `SANDBOX_TOKEN` is the **optional** shared bearer token of the sandbox API
-    and is _not_ part of that gate: sandbox-side authentication is opt-in, so a
-    URL-only deployment still works (unauthenticated). When set, it must carry
-    the same value on both sides — the backend then sends
-    `Authorization: Bearer` on every sandbox call and the sandbox rejects
-    everything else with 401; a URL-without-token deployment logs a warning at
-    boot. On a 401 the model only gets 「ERROR: sandbox との認証に失敗した
-    (サーバの設定の問題)。次の手: 呼び直さない。…」 — the token-mismatch
-    explanation (with the env name) goes to the log, as do the exception text
-    and `detail` of every other sandbox failure (the model gets 「sandbox に
-    接続できない」 / 「使えない path」 / 「大きすぎて取り出せない」 / 「HTTP <status>」). **Both are read from the environment only — never a valve or a DB
-    row.** The sandbox ships with the server (same git tag) and compose brings
-    it up alongside, so there is no legitimate reason to repoint it at runtime;
-    keeping the destination out of the DB also means an admin account cannot
-    aim it at an outside host and harvest the bearer token.
-    The `path` argument of `write_file(path, content)` / `list_workspace(path?)`
-    / `fetch_from_workspace(path)` is an **absolute path on the sandbox
-    filesystem under `/workspace/`** — the same form `send_to_workspace`
-    returns (`/workspace/imports/<name>`) and that code sees inside
-    `run_python` / `run_shell` — and everything these tools return is absolute
-    too, so one tool's result can be passed straight to another. **Relative
-    paths are refused** (`path` has one form; `list_workspace()` without an
-    argument lists `/workspace`). Anything that is not a sandbox path the tool
-    handles — relative, empty, a URL, outside `/workspace` — gets the common
-    fixed-sentence error (§3.8: `… は sandbox のパスの形でない。` +
-    `次の手: ` + `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM`, + `REF_ARGS_RULE` only
-    for a URL / id); `/ext/…`
-    (read-only reference data) is refused by `write_file` and `list_workspace`
-    with a pointer to `run_shell` (a distinction inside the same `path`
-    argument, based on what the path resolves to).
-    `read_file(path, offset=0, max_chars=40000)` (#153) is `write_file`'s
-    counterpart: it reads a text file under `/workspace/`, a visible
-    `/ext/groups/<g>/` or `/ext/public/` (same ACL, `/files/stat` then
-    `/files/read` with `nofollow`, symlinks refused) of **any size**: it takes the
-    byte size from the stat and reads only one page by range (`/files/read`
-    `offset` / `length`) plus the first 64 KiB, where the encoding is decided
-    (BOM-UTF-8 → UTF-8 → cp932, strict; named on the first line together with
-    `全 N バイトのうち a〜b バイト目`). A page holds at most `max_chars` (default
-    40000, max 60000) characters and is **cut back to a line break** (`0x0A`
-    never occurs inside a UTF-8 or cp932 multi-byte character, so pages never
-    split one); only a single line longer than the page is cut mid-line, and the
-    result says so. `offset` / `next_offset=` are **byte** positions — pass the
-    previous `next_offset` as is (another offset reads from mid-line; one inside a
-    UTF-8 character is refused). `.csv` / `.tsv` are cut only at record ends
-    (newlines outside quotes, counted from the page start — which is a record end
-    when it is a previous `next_offset`), and pages after the first get the first
-    record (header) prepended, noted on the first line. Images
-    / PDF, Office and other binaries (by extension, or undecodable / NUL) and
-    `/ext` proxy mounts get one fixed sentence per category; the "next step"
-    of each comes from the valves `image_hint` / `binary_hint` /
-    `proxy_mount_hint`, so a deployment can point at its own tools. The result
-    renders by extension (`.md` markdown, code / data as highlighted code,
-    else text) via `Rendered` (§5.4). For an `/ext/<name>/…` outside
-    `groups` / `public` the extension check comes first (an image or an Office
-    file gets that category's sentence), and only then the refusal, whose next
-    step (non-proxy) is 「テキストなら run_shell の cp で /workspace/ にコピーしてから read_file で読む。CSV・JSON などのデータを集計するなら run_python でそのパスを開く。」
-    (was 「run_shell の cat で読む」, 2026-10-19). When `image_hint` is the
-    default and `feed_image` is not on the turn, the image / PDF refusal says
-    「PDF なら run_shell の pdftotext (スキャンなら tesseract) で /workspace/ にテキストを書き出し、そのファイルを read_file で読む。」
-    instead (a deployment's own valve text is kept as is).
-    `edit_file(path, old_text, new_text)` (2026-10-27, requested by llens) edits
-    part of an existing text file: it replaces the **one** occurrence of
-    `old_text` with `new_text` and writes the file back. Path resolution, ACL
-    (`/workspace/`, a writable `/ext/groups/<g>/`, `/ext/public/` for admins),
-    the directory / read-only / not-visible refusals and the write itself
-    (`/files/write`, with `mounts` for `/ext`) are **shared with `write_file`**
-    (one resolver), so the two never disagree. It reads the whole file the way
-    `read_file` does (`/files/stat` then `/files/read` with `nofollow`,
-    symlinks refused), decides the encoding on the whole file (BOM-UTF-8 →
-    UTF-8 → cp932, strict) and **writes back in the same encoding** (BOM kept,
-    cp932 stays cp932; a `new_text` character cp932 cannot represent is refused
-    rather than switching the file to UTF-8). Matching is a literal match on
-    the decoded text — no whitespace / CRLF normalisation, no nearest match.
-    0 matches → 「… に old_text と一致する箇所が無い」, next step
-    「read_file で現物を見て、空白・改行まで含めて old_text を写し直す (結果の抜粋の行番号と | は含めない)。」;
-    when the file has CRLF and `old_text` uses bare `\n` the fact gets
-    「(このファイルの改行は CRLF)」 and the next step is
-    「old_text と new_text の改行を \r\n で書くか、1 行に収まる old_text にする。」;
-    2 or more (overlapping matches count) → 「… が N か所ある (a, b, … 行目)」
-    (up to 5 line numbers), next step 「前後の行を old_text に含めて、一致が 1 か所になるようにする。」.
-    An empty `old_text` is refused (no append mode): 「末尾に足すなら、最後の行を old_text に含め、new_text にその行 + 足す行を書く。」
-    (the description also says how to append — getting it half right, `new_text`
-    without the last line, is not an error and drops that line). A missing file
-    is 「… というファイルは無い」 with 「list_workspace で確かめる。新しく作るなら write_file で書く。」
-    (outside `imports/`, where the expiry hint comes instead).
-    Image / Office / other binary extensions are refused before asking the
-    sandbox, undecodable content after reading, both with `read_file`'s fact
-    sentence and the next step 「edit_file はテキストファイルだけを直す。バイナリの中身を変えるなら run_python で扱う。」.
-    The file before and the result after the edit are capped by
-    `SANDBOX_TEXT_MAX_SIZE_MB`. The result is
-    「<path> の N 行目 (N〜M 行目) を置き換えた (文字コード: …、size)。」
-    followed by the edited lines with line numbers (2 lines of context each
-    side, at most 10 lines). A write by someone else between the read and the
-    write is not detected (the sandbox has no conditional write).
-    `write_file`'s and `read_file`'s docstrings point at `edit_file` for
-    partial edits, and `read_file`'s cp932 label says `edit_file` keeps cp932.
-    `edit_file`'s own description (2026-10-30, trimmed at llens' request) says
-    only what it does, how to append and the arguments; the rest (no match,
-    creating, binary, size, encoding, writable places) is said by the error or
-    result of that case.
-    **No-overwrite places for `write_file` (2026-10-31, ken):** the model sometimes
-    rewrote the memory index wholesale with `write_file`, dropping existing lines.
-    The sandbox valve `write_no_overwrite_paths` (same format and matching as
-    `rm_allowed_paths` below — newline / comma separated absolute paths, globs per
-    segment, paths normalised so `..` neither escapes nor sneaks in, files **below**
-    an entry, nested ones included) makes `write_file` there **create only** — it
-    writes with the sandbox's exclusive create (`/files/write` `exclusive`, `O_EXCL`;
-    no stat-then-write race) and turns the 409 into
-    「<path> は既にある (この置き場では write_file で上書きしない)。次の手: 一部を直す・足すなら edit_file (末尾に足すなら最後の行を old_text に含める。構成を変えるなら edit_file で該当範囲ごと置き換える — run_shell や run_python で書き直さない)。」
-    (a final symlink is refused by the sandbox as before). Creating a new file there
-    still works; outside the entries nothing changes; the default is empty (no
-    change). There is no escape hatch for a full rewrite (`edit_file` can replace a
-    large span). Not covered: `run_shell` redirections (`>`, `cat > … <<EOF`),
-    `python` `open(…, "w")`, `mv` / `cp` over the file, `rm` then `write_file` where
-    `rm` is allowed (`rm_allowed_paths`), or a symlink placed outside the entry that
-    points into it — a guard, not a security boundary.
-    **`rm` guard on `run_shell` (2026-10-30, requested by llens):** asked to
-    「完全に消して」, the model sometimes ran `rm -rf /workspace/<作業フォルダ>` (and once,
-    as an admin, `rm -rf` on shared `/ext/public` recipes) instead of `remove_file`.
-    Before sending a command to the sandbox, `run_shell` looks for a plain `rm`
-    **command word** (at the start, after `;` `&&` `||` `|` `&` a newline `(` `$(` or a
-    backtick, after `if` / `then` / `do` / … and past `sudo` / `env` / `command` / `exec` /
-    `nohup` / `time` / `nice` / `timeout` (with their value-taking options) and
-    `VAR=value` prefixes; `/bin/rm`, `\rm`, `'rm'` and `unlink` count) and resolves its
-    operands — relative ones against the working directory `/workspace` (following a
-    literal `cd` / `pushd`, scoped to `( … )` subshells; after a `cd` it cannot resolve,
-    `cd -` or `popd`, relative operands are ignored), `~` / `$HOME` as `/workspace`,
-    `$PWD` as the current directory, a glob by the part before its first
-    metacharacter, `..` and a leading `//` folded; redirections (`2>/dev/null`) are
-    not operands — and refuses the whole command if any operand is under `/workspace`
-    or `/ext` (or `/` itself, so `rm -rf /*` counts):
-    「<path> を rm で消すコマンドなので、コマンド全体を実行していない。次の手: 消すのは remove_file (その置き場のゴミ箱へ移る。完全に消したいならユーザーが画面のワークスペースの「サンドボックス」で消せる)。別の手段 (find -delete・python 等) で消し直さない。」.
-    Deployment exceptions go in the sandbox valve `rm_allowed_paths` (absolute
-    paths separated by newlines / commas; `rm` **below** each is let through — not the
-    place itself; a segment may use `*` `?` `[…]`; a glob operand is let through only
-    when the part before the glob is itself below an entry, so a place cannot be
-    emptied with `…/*`); the default is none.
-    Paths are normalised before comparing, so `/workspace/memory/../x` is not under
-    `/workspace/memory`; symlinks are not resolved (nucllei does not see the sandbox
-    fs). **This is a guard against the common direct `rm`, not a security boundary**:
-    `find -delete`, `xargs rm`, `python -c "os.remove(…)"`, `mv … /dev/null`, a path
-    in a variable, `eval`, a script file that calls `rm` and the like are not looked
-    for (nor `$(…)` inside double quotes). Parsing is conservative — `rm` only as a
-    command word (`echo rm …`, `grep rm file`, `git rm` pass), `#` comments (outside
-    quotes, at a word start) and `\`-newline continuations are handled, and a command
-    it cannot read (unclosed quote, a heredoc `<<`) runs unchanged (`utils/rm_guard.py`).
-    `remove_file(path)` (2026-10-27, decided by ken, requested by llens)
-    **moves** a file or a folder (with its contents) to the trash of the place
-    it is in — it never deletes: `/workspace/…` → `/workspace/trash/<name>`,
-    `/ext/groups/<g>/…` → `/ext/groups/<g>/trash/<name>`, `/ext/public/…` →
-    `/ext/public/trash/<name>` (flat; a taken name gets `-2`, `-3`… before the
-    extension, never overwritten). Path resolution and ACL are `write_file`'s
-    (same refusals for read-only / not-visible places), except that a folder
-    (also with a trailing `/`) is accepted and the place itself (`/workspace`,
-    `/ext/groups/<g>`, `/ext/public`) is refused. Refused before asking the
-    sandbox: the trash itself and anything in it (next step: nothing to do, it
-    empties itself; to empty it sooner the user can delete it on screen under
-    the workspace's 「サンドボックス」 — said in the error since 2026-10-30, not
-    left to the deployment prompt), a name starting with `.`,
-    and `/workspace/imports`. The sandbox endpoint is the new
-    `POST /files/trash` — `/files/delete` is unchanged (its `/ext` delete stays
-    permanent, so the workspace file browser behaves as before); a sandbox
-    without `/files/trash` (FastAPI's `{"detail":"Not Found"}` 404) is
-    reported as 「sandbox が古く、remove_file に対応していない (sandbox の更新が要る)」
-    instead of silently deleting. A final symlink is refused (「… は symlink で、remove_file では移さない (リンク先も移さない)」).
-    The result is 「<path> を <trash path> へ移した。移してから N 日で自動で消える。」
-    (N = the sandbox's `cache_ttl_days`; the sentence is dropped when it is 0
-    or missing) and the restore line
-    「戻すなら run_shell で `mv '<trash path>' '<path>'` を実行する。」 (shell-quoted).
-    `remove_file`'s description says 「ファイルを消すときは run_shell の rm ではなくこちらを使う (例外は system prompt の決まりに従う)」
-    (the toolkit note said it until 2026-10-30; the note now only says that
-    `imports/` and `trash/` expire).
-    The sandbox empties `/ext/groups/*/trash/` and `/ext/public/trash/` with
-    the same rule as `/workspace/trash/` (`SANDBOX_CACHE_TTL_DAYS`, per
-    top-level entry, max(mtime, ctime)) every hour.
-    **Wording of the sandbox texts (2026-10-19, llens audit)**: a full
-    workspace (HTTP 507 / `No space left on device`) ends with
-    「次の手: 自分では消さない。ユーザーに容量が一杯だと伝え、整理するか聞く (ゴミ箱へ移しただけでは空かず、ゴミ箱を空にして初めて空く)。ユーザーは画面の「ワークスペース」→「サンドボックス」タブで使用量を見て整理できる。」
-    — the model never deletes to make room (it used to be told to `rm` inside
-    `trash/`); in `send_to_workspace`'s per-file report it is one line
-    「- <name>: workspace の容量 (quota) が一杯 (取り込まなかった)」 per file
-    and the 次の手 once at the end. A cut run output ends with
-    「…全文が要るなら出力を /workspace のファイルに書き出し read_file で読む (探すだけなら rg で絞る)」
-    (was `rg / head / tail`). A timeout says 「処理を分けるか、timeout_s を上げて呼び直す (上限 600 秒)」,
-    or, when the effective timeout is already 600 s, 「処理を分けて呼び直す (timeout_s は既に上限の 600 秒)」
-    (`run_python` cells: 「…続ける」). A `run_python` cell that did not answer
-    and was killed with its kernel reports only
-    「**タイムアウト (実行環境を強制終了した。変数・import は失われた)** 次の手: 処理を分けて定義からやり直す。」
-    (the sandbox's own `error` for that case is dropped — before, "reset",
-    "variables are kept" and "restarted" appeared in one result); the
-    sandbox's `/exec_cell` errors are plain style and no longer carry the
-    exception `repr` (logged instead). `write_file` over the text cap says
-    「run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。」
-    (was 「分割して複数回に分ける」). `write_file`'s `path` description and
-    refusal state that **admins can also write to every group's place and to
-    `/ext/public/`**. `list_workspace` appends
-    「N 件で打ち切った。次の手: 下の階層のディレクトリを path に渡して、絞って一覧する。」
-    when the sandbox's `/files/list` reports `truncated: true` (500 files —
-    the field is new in the sandbox image; an older image without it gets no
-    line). `run_shell`'s docstring lists `unar` (archive extraction) in place
-    of `unzip`. A sandbox that does not answer: 「1 回だけ呼び直す。続くなら sandbox を使わずにできる範囲で自分で処理し、無理ならユーザーに sandbox が今使えないと伝える。」
-    The docstrings carry no example paths any more (`/workspace/work/index.html`
-    and the like were copied literally), and the toolkit note and
-    `send_to_workspace` say 「sandbox」 rather than 「jail」 / 「Files」.
-    **No implicit attachment** (2026-10-19): nothing a tool writes is attached
-    on its own — `run_python*` / `run_shell` / `write_file` results carry no
-    "generated files" part, and writing to `/workspace/exports/` attaches
-    nothing (the folder is only swept by the expiry, like `imports/`). Handing
-    a file to the user is **only** `fetch_from_workspace`. Called from a
-    subagent's turn (`agent_session` in the metadata) it refuses with an
-    ERROR before touching the sandbox — an attachment there would land in the
-    child chat the user never sees; the child writes the absolute path into
-    its result and the main agent hands the file over.
-    `fetch_from_workspace(path)` turns a sandbox file into something the user
-    can open, and **also takes `/ext/…`**: a `/workspace/…` file is read through
-    the sandbox, registered as a File and attached to the chat (`file_id`
-    returned). Where the attachment shows up decides the returned note
-    (2026-10-04): image / audio / video are also pushed to the display
-    channel, i.e. **already on the user's screen** under the tool call, and the
-    result says 「ユーザーの画面には既に表示されている。次の手: 本文に貼り直さない」; any
-    other file is only listed in the chat's file pane (`message.files` entries
-    of type `file` are not drawn under the message), so the result carries a
-    ready link 「次の手: 本文に [<name>](/api/v1/files/<id>/content) と書く」.
-    The File keeps the sandbox path it came from in `meta.source`. An `/ext/…` file that the `/ext` gate serves
-    (static: exists in the mount; proxy: the upstream answers 2xx) is **not copied or attached** — the tool
-    answers with its `/ext/{rest}` URL (`image_refs.url_for_mounted_path`; the
-    same string as the path for ASCII names, percent-encoded otherwise) and
-    returns it ready to paste (`![name](/ext/…)` for images, `[name](/ext/…)`
-    otherwise). Since 2026-10-19 the docstring tells the model not to call it
-    for `/ext/…` at all — 「`/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書く。」
-    (the earlier 「呼んだ場合は…」 sentence and the `/ext/doc` citation remark
-    are gone; the toolkit note no longer lists `fetch_from_workspace` among the
-    tools that take `/ext` paths). The call path above is unchanged. Caveat: a
-    deployment whose `EXT_MOUNTS` does not serve `groups` / `public` cannot
-    open such a link — there the call (which attaches the file read through
-    the sandbox, below) is the only way, but the docstring no longer says so. Any other `/ext/…` path is read by the server through
-    `EXT_MOUNTS` (`resolve_path`: confined to the mount, capped at
-    `FETCH_MAX_BYTES`) and attached like a workspace file — which in practice
-    means a path the sandbox sees but nucllei does not is reported as
-    unreadable (the deployment withholds by not mounting; §3.8). Failures are
-    worded per `RefError.code`: unreadable (missing, a directory, or a link
-    leaving the mount — one wording, fail closed) vs. over the cap (with actual
-    size and limit). The unreadable wording is the neutral
-    「このサーバの /ext に無い (存在しないか、sandbox の中にだけある)。次の手: 受け取った literal のまま渡したか確かめ、list_workspace か run_shell で親ディレクトリを一覧する。」
-    sentence of §3.8 "Bridging", shared with `feed_image(path=)` (2026-10-04;
-    「sandbox にだけ mount されている」 / 「sandbox で読んで使う」 until
-    2026-10-19, then aligned with `feed_image` by llens decision) — `/ext`
-    files are shown by URL only.
-    `path` is only ever a sandbox path — a URL or a file URL in it is refused
-    as "not a sandbox path" (fixed sentence). The returned
-    `/ext/…` URL is percent-encoded, so it may be a different spelling of the
-    URL a document shows for the same file. This is the reverse of
-    `send_to_workspace(url=)` below (§3.8, bridging table).
-    `send_to_workspace(filename?, file_id?, url?)` copies into
-    `/workspace/imports/` and returns the absolute path. Its arguments are
-    interpreted by name, as everywhere else (§3.8 reference rules): `file_id` =
-    an owned attachment / generated file, `url` = a **URL** — absolute
-    `http(s)://…` or same-server `/ext/{rest}` — resolved by the shared
-    resolver (`resolve_url`), so exactly the URLs `feed_image` / `fetch_url`
-    above can read:
-    `/ext/{rest}` (relative or on any host — through `EXT_MOUNTS`: static is
-    read locally, proxy is fetched from the upstream); and any other scheme-qualified `http(s)://` URL (§3.8 "General
-    URLs"), fetched directly from its host and pinned to the resolved address,
-    redirects followed up to 3 times — wherever the deployment's network
-    reaches. No cookie is forwarded. **The only refused destination is this
-    server itself and its co-located services** (`unknown_upstream` /
-    `server_self`, computed at runtime). (History: until 2026-10-03 the tool
-    fetched any LAN URL outside a CIDR deny-list — valve `url_blocked_cidrs`,
-    removed; the move to the shared resolver then made it refuse everything
-    outside the registered upstreams; the same day an `EXT_INTRANET_CIDRS`
-    allowlist was added and withdrawn — ken decided the tool must not gate by
-    destination.) Failures are reported
-    per `RefError.code` and `reason` (missing / oversize with actual size and
-    limit / redirect — to an unusable target, to the server itself, too many /
-    upstream status / unreachable or unresolvable name / the server itself),
-    each with a fixed sentence that never inspects the value — the shared
-    defaults of `ref_errors` (§3.8) except `too_large` (the cap is the
-    deployment's sandbox setting and cannot be raised by an argument; the
-    text says 「上限は sandbox の設定で、引数では上げられない」 — 「配備」 is not
-    used in model text since 2026-10-19). A file (`file_id` / file URL) over
-    the import cap, or a URL refused by the sandbox's own cap (413), names the
-    tools that read without the sandbox (2026-10-19 — was 「sandbox に入れずに
-    使える tool があればそれを使う」): 「sandbox に入れずに、同じ file_id を read_attachment (テキスト)・feed_image (画像・PDF) に渡して読む。読めなければユーザーに伝える。」
-    (`url`: `fetch_url (ページ・文書)`・`feed_image (画像・PDF)`; only the ones on
-    the turn; with none, 「sandbox には取り込めないとユーザーに伝える。」).
-    The cap is the **sandbox cap** `SANDBOX_FILE_MAX_SIZE_MB` (§3.7 "Per-file size
-    limits" — no `file_id` is created), passed as `max_bytes`; the body is
-    streamed by the resolver into a temp file (`resolve_url(sink=…)`, only the
-    first 64 bytes stay in memory for type sniffing) and then streamed to the
-    sandbox's `PUT /files/raw` — no base64 JSON, so GB-sized files work. A
-    `/api/v1/files/{id}/content` URL is the `file_id` path (attachment cap).
-    When the URL is `/ext/<name>/<sub>`, `<name>` is a **static** mount and
-    **the file exists there** (`image_refs.mounted_path_for_url`), nothing is copied: the
-    tool answers with the sandbox path `/ext/{rest}` (the same string as the
-    URL) — 「取り込み不要: <url> は sandbox から同じパス <path> で見えているので取り込まない。次の手: run_python / run_shell でそのパスを開く。」
-    (no 「(read-only)」 any more: group places are writable) — because the sandbox binds the same tree at its `/ext` (#138) — this
-    relies on the deployment binding the same
-    volume on both sides, which the server cannot verify; the size cap does not
-    apply. A `url` that is this server's file delivery URL
-    (`/api/v1/files/{id}/content`, relative or absolute) is routed to that file
-    and imported with the same owner check as `file_id` (URL routing, not HTTP).
-    **No value is reinterpreted as another argument**: a UUID or a sandbox path
-    in `url` is "not resolvable as a URL", a URL in `file_id` is "no such
-    record, or no access". Form errors are assembled from the shared fixed
-    sentences (§3.8) and never vary with the value; `unknown_upstream` is
-    worded by `RefError.reason`.
+      The stateful kernel is recreated (`session_reset`) when either value
+      changes, as it is for a change in the `/ext` mounts. A subagent runs as the
+      same user, so it sees the same values. Old sandboxes ignore the two fields.
+      `SANDBOX_TOKEN` is the **optional** shared bearer token of the sandbox API
+      and is _not_ part of that gate: sandbox-side authentication is opt-in, so a
+      URL-only deployment still works (unauthenticated). When set, it must carry
+      the same value on both sides — the backend then sends
+      `Authorization: Bearer` on every sandbox call and the sandbox rejects
+      everything else with 401; a URL-without-token deployment logs a warning at
+      boot. On a 401 the model only gets 「ERROR: sandbox との認証に失敗した
+      (サーバの設定の問題)。次の手: 呼び直さない。…」 — the token-mismatch
+      explanation (with the env name) goes to the log, as do the exception text
+      and `detail` of every other sandbox failure (the model gets 「sandbox に
+      接続できない」 / 「使えない path」 / 「大きすぎて取り出せない」 / 「HTTP <status>」). **Both are read from the environment only — never a valve or a DB
+      row.** The sandbox ships with the server (same git tag) and compose brings
+      it up alongside, so there is no legitimate reason to repoint it at runtime;
+      keeping the destination out of the DB also means an admin account cannot
+      aim it at an outside host and harvest the bearer token.
+      The `path` argument of `write_file(path, content)` / `list_workspace(path?)`
+      / `fetch_from_workspace(path)` is an **absolute path on the sandbox
+      filesystem under `/workspace/`** — the same form `send_to_workspace`
+      returns (`/workspace/imports/<name>`) and that code sees inside
+      `run_python` / `run_shell` — and everything these tools return is absolute
+      too, so one tool's result can be passed straight to another. **Relative
+      paths are refused** (`path` has one form; `list_workspace()` without an
+      argument lists `/workspace`). Anything that is not a sandbox path the tool
+      handles — relative, empty, a URL, outside `/workspace` — gets the common
+      fixed-sentence error (§3.8: `… は sandbox のパスの形でない。` +
+      `次の手: ` + `WORKSPACE_PATH_ARG_FORM` / `PATH_ARG_FORM`, + `REF_ARGS_RULE` only
+      for a URL / id); `/ext/…`
+      (read-only reference data) is refused by `write_file` and `list_workspace`
+      with a pointer to `run_shell` (a distinction inside the same `path`
+      argument, based on what the path resolves to).
+      `read_file(path, offset=0, max_chars=40000)` (#153) is `write_file`'s
+      counterpart: it reads a text file under `/workspace/`, a visible
+      `/ext/groups/<g>/` or `/ext/public/` (same ACL, `/files/stat` then
+      `/files/read` with `nofollow`, symlinks refused) of **any size**: it takes the
+      byte size from the stat and reads only one page by range (`/files/read`
+      `offset` / `length`) plus the first 64 KiB, where the encoding is decided
+      (BOM-UTF-8 → UTF-8 → cp932, strict; named on the first line together with
+      `全 N バイトのうち a〜b バイト目`). A page holds at most `max_chars` (default
+      40000, max 60000) characters and is **cut back to a line break** (`0x0A`
+      never occurs inside a UTF-8 or cp932 multi-byte character, so pages never
+      split one); only a single line longer than the page is cut mid-line, and the
+      result says so. `offset` / `next_offset=` are **byte** positions — pass the
+      previous `next_offset` as is (another offset reads from mid-line; one inside a
+      UTF-8 character is refused). `.csv` / `.tsv` are cut only at record ends
+      (newlines outside quotes, counted from the page start — which is a record end
+      when it is a previous `next_offset`), and pages after the first get the first
+      record (header) prepended, noted on the first line. Images
+      / PDF, Office and other binaries (by extension, or undecodable / NUL) and
+      `/ext` proxy mounts get one fixed sentence per category; the "next step"
+      of each comes from the valves `image_hint` / `binary_hint` /
+      `proxy_mount_hint`, so a deployment can point at its own tools. The result
+      renders by extension (`.md` markdown, code / data as highlighted code,
+      else text) via `Rendered` (§5.4). For an `/ext/<name>/…` outside
+      `groups` / `public` the extension check comes first (an image or an Office
+      file gets that category's sentence), and only then the refusal, whose next
+      step (non-proxy) is 「テキストなら run_shell の cp で /workspace/ にコピーしてから read_file で読む。CSV・JSON などのデータを集計するなら run_python でそのパスを開く。」
+      (was 「run_shell の cat で読む」, 2026-10-19). When `image_hint` is the
+      default and `feed_image` is not on the turn, the image / PDF refusal says
+      「PDF なら run_shell の pdftotext (スキャンなら tesseract) で /workspace/ にテキストを書き出し、そのファイルを read_file で読む。」
+      instead (a deployment's own valve text is kept as is).
+      `edit_file(path, old_text, new_text)` (2026-10-27, requested by llens) edits
+      part of an existing text file: it replaces the **one** occurrence of
+      `old_text` with `new_text` and writes the file back. Path resolution, ACL
+      (`/workspace/`, a writable `/ext/groups/<g>/`, `/ext/public/` for admins),
+      the directory / read-only / not-visible refusals and the write itself
+      (`/files/write`, with `mounts` for `/ext`) are **shared with `write_file`**
+      (one resolver), so the two never disagree. It reads the whole file the way
+      `read_file` does (`/files/stat` then `/files/read` with `nofollow`,
+      symlinks refused), decides the encoding on the whole file (BOM-UTF-8 →
+      UTF-8 → cp932, strict) and **writes back in the same encoding** (BOM kept,
+      cp932 stays cp932; a `new_text` character cp932 cannot represent is refused
+      rather than switching the file to UTF-8). Matching is a literal match on
+      the decoded text — no whitespace / CRLF normalisation, no nearest match.
+      0 matches → 「… に old_text と一致する箇所が無い」, next step
+      「read_file で現物を見て、空白・改行まで含めて old_text を写し直す (結果の抜粋の行番号と | は含めない)。」;
+      when the file has CRLF and `old_text` uses bare `\n` the fact gets
+      「(このファイルの改行は CRLF)」 and the next step is
+      「old_text と new_text の改行を \r\n で書くか、1 行に収まる old_text にする。」;
+      2 or more (overlapping matches count) → 「… が N か所ある (a, b, … 行目)」
+      (up to 5 line numbers), next step 「前後の行を old_text に含めて、一致が 1 か所になるようにする。」.
+      An empty `old_text` is refused (no append mode): 「末尾に足すなら、最後の行を old_text に含め、new_text にその行 + 足す行を書く。」
+      (the description also says how to append — getting it half right, `new_text`
+      without the last line, is not an error and drops that line). A missing file
+      is 「… というファイルは無い」 with 「list_workspace で確かめる。新しく作るなら write_file で書く。」
+      (outside `imports/`, where the expiry hint comes instead).
+      Image / Office / other binary extensions are refused before asking the
+      sandbox, undecodable content after reading, both with `read_file`'s fact
+      sentence and the next step 「edit_file はテキストファイルだけを直す。バイナリの中身を変えるなら run_python で扱う。」.
+      The file before and the result after the edit are capped by
+      `SANDBOX_TEXT_MAX_SIZE_MB`. The result is
+      「<path> の N 行目 (N〜M 行目) を置き換えた (文字コード: …、size)。」
+      followed by the edited lines with line numbers (2 lines of context each
+      side, at most 10 lines). A write by someone else between the read and the
+      write is not detected (the sandbox has no conditional write).
+      `write_file`'s and `read_file`'s docstrings point at `edit_file` for
+      partial edits, and `read_file`'s cp932 label says `edit_file` keeps cp932.
+      `edit_file`'s own description (2026-10-30, trimmed at llens' request) says
+      only what it does, how to append and the arguments; the rest (no match,
+      creating, binary, size, encoding, writable places) is said by the error or
+      result of that case.
+      **No-overwrite places for `write_file` (2026-10-31, ken):** the model sometimes
+      rewrote the memory index wholesale with `write_file`, dropping existing lines.
+      The sandbox valve `write_no_overwrite_paths` (same format and matching as
+      `rm_allowed_paths` below — newline / comma separated absolute paths, globs per
+      segment, paths normalised so `..` neither escapes nor sneaks in, files **below**
+      an entry, nested ones included) makes `write_file` there **create only** — it
+      writes with the sandbox's exclusive create (`/files/write` `exclusive`, `O_EXCL`;
+      no stat-then-write race) and turns the 409 into
+      「<path> は既にある (この置き場では write_file で上書きしない)。次の手: 一部を直す・足すなら edit_file (末尾に足すなら最後の行を old_text に含める。構成を変えるなら edit_file で該当範囲ごと置き換える — run_shell や run_python で書き直さない)。」
+      (a final symlink is refused by the sandbox as before). Creating a new file there
+      still works; outside the entries nothing changes; the default is empty (no
+      change). There is no escape hatch for a full rewrite (`edit_file` can replace a
+      large span). Not covered: `run_shell` redirections (`>`, `cat > … <<EOF`),
+      `python` `open(…, "w")`, `mv` / `cp` over the file, `rm` then `write_file` where
+      `rm` is allowed (`rm_allowed_paths`), or a symlink placed outside the entry that
+      points into it — a guard, not a security boundary.
+      **`rm` guard on `run_shell` (2026-10-30, requested by llens):** asked to
+      「完全に消して」, the model sometimes ran `rm -rf /workspace/<作業フォルダ>` (and once,
+      as an admin, `rm -rf` on shared `/ext/public` recipes) instead of `remove_file`.
+      Before sending a command to the sandbox, `run_shell` looks for a plain `rm`
+      **command word** (at the start, after `;` `&&` `||` `|` `&` a newline `(` `$(` or a
+      backtick, after `if` / `then` / `do` / … and past `sudo` / `env` / `command` / `exec` /
+      `nohup` / `time` / `nice` / `timeout` (with their value-taking options) and
+      `VAR=value` prefixes; `/bin/rm`, `\rm`, `'rm'` and `unlink` count) and resolves its
+      operands — relative ones against the working directory `/workspace` (following a
+      literal `cd` / `pushd`, scoped to `( … )` subshells; after a `cd` it cannot resolve,
+      `cd -` or `popd`, relative operands are ignored), `~` / `$HOME` as `/workspace`,
+      `$PWD` as the current directory, a glob by the part before its first
+      metacharacter, `..` and a leading `//` folded; redirections (`2>/dev/null`) are
+      not operands — and refuses the whole command if any operand is under `/workspace`
+      or `/ext` (or `/` itself, so `rm -rf /*` counts):
+      「<path> を rm で消すコマンドなので、コマンド全体を実行していない。次の手: 消すのは remove_file (その置き場のゴミ箱へ移る。完全に消したいならユーザーが画面のワークスペースの「サンドボックス」で消せる)。別の手段 (find -delete・python 等) で消し直さない。」.
+      Deployment exceptions go in the sandbox valve `rm_allowed_paths` (absolute
+      paths separated by newlines / commas; `rm` **below** each is let through — not the
+      place itself; a segment may use `*` `?` `[…]`; a glob operand is let through only
+      when the part before the glob is itself below an entry, so a place cannot be
+      emptied with `…/*`); the default is none.
+      Paths are normalised before comparing, so `/workspace/memory/../x` is not under
+      `/workspace/memory`; symlinks are not resolved (nucllei does not see the sandbox
+      fs). **This is a guard against the common direct `rm`, not a security boundary**:
+      `find -delete`, `xargs rm`, `python -c "os.remove(…)"`, `mv … /dev/null`, a path
+      in a variable, `eval`, a script file that calls `rm` and the like are not looked
+      for (nor `$(…)` inside double quotes). Parsing is conservative — `rm` only as a
+      command word (`echo rm …`, `grep rm file`, `git rm` pass), `#` comments (outside
+      quotes, at a word start) and `\`-newline continuations are handled, and a command
+      it cannot read (unclosed quote, a heredoc `<<`) runs unchanged (`utils/rm_guard.py`).
+      `remove_file(path)` (2026-10-27, decided by ken, requested by llens)
+      **moves** a file or a folder (with its contents) to the trash of the place
+      it is in — it never deletes: `/workspace/…` → `/workspace/trash/<name>`,
+      `/ext/groups/<g>/…` → `/ext/groups/<g>/trash/<name>`, `/ext/public/…` →
+      `/ext/public/trash/<name>` (flat; a taken name gets `-2`, `-3`… before the
+      extension, never overwritten). Path resolution and ACL are `write_file`'s
+      (same refusals for read-only / not-visible places), except that a folder
+      (also with a trailing `/`) is accepted and the place itself (`/workspace`,
+      `/ext/groups/<g>`, `/ext/public`) is refused. Refused before asking the
+      sandbox: the trash itself and anything in it (next step: nothing to do, it
+      empties itself; to empty it sooner the user can delete it on screen under
+      the workspace's 「サンドボックス」 — said in the error since 2026-10-30, not
+      left to the deployment prompt), a name starting with `.`,
+      and `/workspace/imports`. The sandbox endpoint is the new
+      `POST /files/trash` — `/files/delete` is unchanged (its `/ext` delete stays
+      permanent, so the workspace file browser behaves as before); a sandbox
+      without `/files/trash` (FastAPI's `{"detail":"Not Found"}` 404) is
+      reported as 「sandbox が古く、remove_file に対応していない (sandbox の更新が要る)」
+      instead of silently deleting. A final symlink is refused (「… は symlink で、remove_file では移さない (リンク先も移さない)」).
+      The result is 「<path> を <trash path> へ移した。移してから N 日で自動で消える。」
+      (N = the sandbox's `cache_ttl_days`; the sentence is dropped when it is 0
+      or missing) and the restore line
+      「戻すなら run_shell で `mv '<trash path>' '<path>'` を実行する。」 (shell-quoted).
+      `remove_file`'s description says 「ファイルを消すときは run_shell の rm ではなくこちらを使う (例外は system prompt の決まりに従う)」
+      (the toolkit note said it until 2026-10-30; the note now only says that
+      `imports/` and `trash/` expire).
+      The sandbox empties `/ext/groups/*/trash/` and `/ext/public/trash/` with
+      the same rule as `/workspace/trash/` (`SANDBOX_CACHE_TTL_DAYS`, per
+      top-level entry, max(mtime, ctime)) every hour.
+      **Wording of the sandbox texts (2026-10-19, llens audit)**: a full
+      workspace (HTTP 507 / `No space left on device`) ends with
+      「次の手: 自分では消さない。ユーザーに容量が一杯だと伝え、整理するか聞く (ゴミ箱へ移しただけでは空かず、ゴミ箱を空にして初めて空く)。ユーザーは画面の「ワークスペース」→「サンドボックス」タブで使用量を見て整理できる。」
+      — the model never deletes to make room (it used to be told to `rm` inside
+      `trash/`); in `send_to_workspace`'s per-file report it is one line
+      「- <name>: workspace の容量 (quota) が一杯 (取り込まなかった)」 per file
+      and the 次の手 once at the end. A cut run output ends with
+      「…全文が要るなら出力を /workspace のファイルに書き出し read_file で読む (探すだけなら rg で絞る)」
+      (was `rg / head / tail`). A timeout says 「処理を分けるか、timeout_s を上げて呼び直す (上限 600 秒)」,
+      or, when the effective timeout is already 600 s, 「処理を分けて呼び直す (timeout_s は既に上限の 600 秒)」
+      (`run_python` cells: 「…続ける」). A `run_python` cell that did not answer
+      and was killed with its kernel reports only
+      「**タイムアウト (実行環境を強制終了した。変数・import は失われた)** 次の手: 処理を分けて定義からやり直す。」
+      (the sandbox's own `error` for that case is dropped — before, "reset",
+      "variables are kept" and "restarted" appeared in one result); the
+      sandbox's `/exec_cell` errors are plain style and no longer carry the
+      exception `repr` (logged instead). `write_file` over the text cap says
+      「run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。」
+      (was 「分割して複数回に分ける」). `write_file`'s `path` description and
+      refusal state that **admins can also write to every group's place and to
+      `/ext/public/`**. `list_workspace` appends
+      「N 件で打ち切った。次の手: 下の階層のディレクトリを path に渡して、絞って一覧する。」
+      when the sandbox's `/files/list` reports `truncated: true` (500 files —
+      the field is new in the sandbox image; an older image without it gets no
+      line). `run_shell`'s docstring lists `unar` (archive extraction) in place
+      of `unzip`. A sandbox that does not answer: 「1 回だけ呼び直す。続くなら sandbox を使わずにできる範囲で自分で処理し、無理ならユーザーに sandbox が今使えないと伝える。」
+      The docstrings carry no example paths any more (`/workspace/work/index.html`
+      and the like were copied literally), and the toolkit note and
+      `send_to_workspace` say 「sandbox」 rather than 「jail」 / 「Files」.
+      **No implicit attachment** (2026-10-19): nothing a tool writes is attached
+      on its own — `run_python*` / `run_shell` / `write_file` results carry no
+      "generated files" part, and writing to `/workspace/exports/` attaches
+      nothing (the folder is only swept by the expiry, like `imports/`). Handing
+      a file to the user is **only** `fetch_from_workspace`. Called from a
+      subagent's turn (`agent_session` in the metadata) it refuses with an
+      ERROR before touching the sandbox — an attachment there would land in the
+      child chat the user never sees; the child writes the absolute path into
+      its result and the main agent hands the file over.
+      `fetch_from_workspace(path)` turns a sandbox file into something the user
+      can open, and **also takes `/ext/…`**: a `/workspace/…` file is read through
+      the sandbox, registered as a File and attached to the chat (`file_id`
+      returned). Where the attachment shows up decides the returned note
+      (2026-10-04): image / audio / video are also pushed to the display
+      channel, i.e. **already on the user's screen** under the tool call, and the
+      result says 「ユーザーの画面には既に表示されている。次の手: 本文に貼り直さない」; any
+      other file is only listed in the chat's file pane (`message.files` entries
+      of type `file` are not drawn under the message), so the result carries a
+      ready link 「次の手: 本文に [<name>](/api/v1/files/<id>/content) と書く」.
+      The File keeps the sandbox path it came from in `meta.source`. An `/ext/…` file that the `/ext` gate serves
+      (static: exists in the mount; proxy: the upstream answers 2xx) is **not copied or attached** — the tool
+      answers with its `/ext/{rest}` URL (`image_refs.url_for_mounted_path`; the
+      same string as the path for ASCII names, percent-encoded otherwise) and
+      returns it ready to paste (`![name](/ext/…)` for images, `[name](/ext/…)`
+      otherwise). Since 2026-10-19 the docstring tells the model not to call it
+      for `/ext/…` at all — 「`/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書く。」
+      (the earlier 「呼んだ場合は…」 sentence and the `/ext/doc` citation remark
+      are gone; the toolkit note no longer lists `fetch_from_workspace` among the
+      tools that take `/ext` paths). The call path above is unchanged. Caveat: a
+      deployment whose `EXT_MOUNTS` does not serve `groups` / `public` cannot
+      open such a link — there the call (which attaches the file read through
+      the sandbox, below) is the only way, but the docstring no longer says so. Any other `/ext/…` path is read by the server through
+      `EXT_MOUNTS` (`resolve_path`: confined to the mount, capped at
+      `FETCH_MAX_BYTES`) and attached like a workspace file — which in practice
+      means a path the sandbox sees but nucllei does not is reported as
+      unreadable (the deployment withholds by not mounting; §3.8). Failures are
+      worded per `RefError.code`: unreadable (missing, a directory, or a link
+      leaving the mount — one wording, fail closed) vs. over the cap (with actual
+      size and limit). The unreadable wording is the neutral
+      「このサーバの /ext に無い (存在しないか、sandbox の中にだけある)。次の手: 受け取った literal のまま渡したか確かめ、list_workspace か run_shell で親ディレクトリを一覧する。」
+      sentence of §3.8 "Bridging", shared with `feed_image(path=)` (2026-10-04;
+      「sandbox にだけ mount されている」 / 「sandbox で読んで使う」 until
+      2026-10-19, then aligned with `feed_image` by llens decision) — `/ext`
+      files are shown by URL only.
+      `path` is only ever a sandbox path — a URL or a file URL in it is refused
+      as "not a sandbox path" (fixed sentence). The returned
+      `/ext/…` URL is percent-encoded, so it may be a different spelling of the
+      URL a document shows for the same file. This is the reverse of
+      `send_to_workspace(url=)` below (§3.8, bridging table).
+      `send_to_workspace(filename?, file_id?, url?)` copies into
+      `/workspace/imports/` and returns the absolute path. Its arguments are
+      interpreted by name, as everywhere else (§3.8 reference rules): `file_id` =
+      an owned attachment / generated file, `url` = a **URL** — absolute
+      `http(s)://…` or same-server `/ext/{rest}` — resolved by the shared
+      resolver (`resolve_url`), so exactly the URLs `feed_image` / `fetch_url`
+      above can read:
+      `/ext/{rest}` (relative or on any host — through `EXT_MOUNTS`: static is
+      read locally, proxy is fetched from the upstream); and any other scheme-qualified `http(s)://` URL (§3.8 "General
+      URLs"), fetched directly from its host and pinned to the resolved address,
+      redirects followed up to 3 times — wherever the deployment's network
+      reaches. No cookie is forwarded. **The only refused destination is this
+      server itself and its co-located services** (`unknown_upstream` /
+      `server_self`, computed at runtime). (History: until 2026-10-03 the tool
+      fetched any LAN URL outside a CIDR deny-list — valve `url_blocked_cidrs`,
+      removed; the move to the shared resolver then made it refuse everything
+      outside the registered upstreams; the same day an `EXT_INTRANET_CIDRS`
+      allowlist was added and withdrawn — ken decided the tool must not gate by
+      destination.) Failures are reported
+      per `RefError.code` and `reason` (missing / oversize with actual size and
+      limit / redirect — to an unusable target, to the server itself, too many /
+      upstream status / unreachable or unresolvable name / the server itself),
+      each with a fixed sentence that never inspects the value — the shared
+      defaults of `ref_errors` (§3.8) except `too_large` (the cap is the
+      deployment's sandbox setting and cannot be raised by an argument; the
+      text says 「上限は sandbox の設定で、引数では上げられない」 — 「配備」 is not
+      used in model text since 2026-10-19). A file (`file_id` / file URL) over
+      the import cap, or a URL refused by the sandbox's own cap (413), names the
+      tools that read without the sandbox (2026-10-19 — was 「sandbox に入れずに
+      使える tool があればそれを使う」): 「sandbox に入れずに、同じ file_id を read_attachment (テキスト)・feed_image (画像・PDF) に渡して読む。読めなければユーザーに伝える。」
+      (`url`: `fetch_url (ページ・文書)`・`feed_image (画像・PDF)`; only the ones on
+      the turn; with none, 「sandbox には取り込めないとユーザーに伝える。」).
+      The cap is the **sandbox cap** `SANDBOX_FILE_MAX_SIZE_MB` (§3.7 "Per-file size
+      limits" — no `file_id` is created), passed as `max_bytes`; the body is
+      streamed by the resolver into a temp file (`resolve_url(sink=…)`, only the
+      first 64 bytes stay in memory for type sniffing) and then streamed to the
+      sandbox's `PUT /files/raw` — no base64 JSON, so GB-sized files work. A
+      `/api/v1/files/{id}/content` URL is the `file_id` path (attachment cap).
+      When the URL is `/ext/<name>/<sub>`, `<name>` is a **static** mount and
+      **the file exists there** (`image_refs.mounted_path_for_url`), nothing is copied: the
+      tool answers with the sandbox path `/ext/{rest}` (the same string as the
+      URL) — 「取り込み不要: <url> は sandbox から同じパス <path> で見えているので取り込まない。次の手: run_python / run_shell でそのパスを開く。」
+      (no 「(read-only)」 any more: group places are writable) — because the sandbox binds the same tree at its `/ext` (#138) — this
+      relies on the deployment binding the same
+      volume on both sides, which the server cannot verify; the size cap does not
+      apply. A `url` that is this server's file delivery URL
+      (`/api/v1/files/{id}/content`, relative or absolute) is routed to that file
+      and imported with the same owner check as `file_id` (URL routing, not HTTP).
+      **No value is reinterpreted as another argument**: a UUID or a sandbox path
+      in `url` is "not resolvable as a URL", a URL in `file_id` is "no such
+      record, or no access". Form errors are assembled from the shared fixed
+      sentences (§3.8) and never vary with the value; `unknown_upstream` is
+      worded by `RefError.reason`.
 - **Code execution runs in an external sandbox service**, never in the server
   process. `builtin_sandbox` bridges over HTTP to an nsjail + IPython service
   and provides a stateful `run_python` (per user+chat kernel), `run_shell`, and
@@ -2739,7 +2739,7 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   re-collectable while the row is retained: indefinitely by default, see
   `ASYNC_EXEC_RETENTION_DAYS`; since 2026-10-30 the description no longer
   states the period — a purged row comes back as `{ok: false, …, error:
-  「このタスクの結果は保持期間を過ぎて消えている。次の手: 結果が要るなら同じ処理をもう一度実行する。」}`
+「このタスクの結果は保持期間を過ぎて消えている。次の手: 結果が要るなら同じ処理をもう一度実行する。」}`
   instead of an empty success). Per entry: done →
   `{ok, task_id, tool_name, status, result, duration?, usage?, truncated?}`
   (with the original tool's settled result display — text included — when
@@ -2974,13 +2974,13 @@ POST /api/v1/skills/create
   **Which side is the source** (2026-10-30, llens: "in the UI chat `{{CURRENT_WEEKDAY}}`
   came out as `Friday`" — the browser's values used to be applied first and won):
 
-  | Variable | Source | Note |
-  |---|---|---|
-  | `{{CURRENT_DATE}}` `{{CURRENT_TIME}}` `{{CURRENT_DATETIME}}` `{{CURRENT_WEEKDAY}}` | server | made by the server in the **user's time zone** — the browser's `{{CURRENT_TIMEZONE}}` (an IANA name) for the request; without one (API, continuation turns) or with an invalid one, the server process's TZ (the container's `TZ` env — llens sets `Asia/Tokyo`; the image default is UTC). `{{CURRENT_TIME}}` is 24-hour `HH:MM:SS`, `{{CURRENT_WEEKDAY}}` Japanese |
-  | `{{USER_NAME}}` `{{USER_LOCATION}}` `{{USER_ROLE}}` `{{USER_GROUPS}}` | server | the signed-in user |
-  | `{{BASE_MODEL_ID}}` `{{SKILLS}}` `{{USER_RECIPES}}` | server | need the preset |
-  | `{{USER_MEMORY_INDEX}}` | server | the user's memory index file (sandbox); system prompt only — empty in skill bodies and subagent child turns |
-  | `{{CURRENT_TIMEZONE}}` `{{USER_LANGUAGE}}` | browser | only the browser knows them: the chat sends them as `variables` (`getPromptVariables`); they are expanded in the preset's system prompt and the chat's system prompt, and stay literal where no browser is involved (API, skills) |
+  | Variable                                                                           | Source  | Note                                                                                                                                                                                                                                                                                                                                                                 |
+  | ---------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `{{CURRENT_DATE}}` `{{CURRENT_TIME}}` `{{CURRENT_DATETIME}}` `{{CURRENT_WEEKDAY}}` | server  | made by the server in the **user's time zone** — the browser's `{{CURRENT_TIMEZONE}}` (an IANA name) for the request; without one (API, continuation turns) or with an invalid one, the server process's TZ (the container's `TZ` env — llens sets `Asia/Tokyo`; the image default is UTC). `{{CURRENT_TIME}}` is 24-hour `HH:MM:SS`, `{{CURRENT_WEEKDAY}}` Japanese |
+  | `{{USER_NAME}}` `{{USER_LOCATION}}` `{{USER_ROLE}}` `{{USER_GROUPS}}`              | server  | the signed-in user                                                                                                                                                                                                                                                                                                                                                   |
+  | `{{BASE_MODEL_ID}}` `{{SKILLS}}` `{{USER_RECIPES}}`                                | server  | need the preset                                                                                                                                                                                                                                                                                                                                                      |
+  | `{{USER_MEMORY_INDEX}}`                                                            | server  | the user's memory index file (sandbox); system prompt only — empty in skill bodies and subagent child turns                                                                                                                                                                                                                                                          |
+  | `{{CURRENT_TIMEZONE}}` `{{USER_LANGUAGE}}`                                         | browser | only the browser knows them: the chat sends them as `variables` (`getPromptVariables`); they are expanded in the preset's system prompt and the chat's system prompt, and stay literal where no browser is involved (API, skills)                                                                                                                                    |
 
   **Server-made values are fixed to `ja`** (2026-10-30, ken: "the server's locale is
   ja"), whatever the browser's language (`{{USER_LANGUAGE}}`) or the server process's
@@ -2993,6 +2993,7 @@ POST /api/v1/skills/create
   `system` message — per-chat settings) is expanded **by the server** too
   (`payload.expand_chat_system_message` in `process_chat_payload`); the browser no
   longer expands it.
+
 - `tool_ids` — workspace tool ids to load on activation (**admin-only** to set,
   since it grants tool access through skill visibility).
 - `auto_load_content_types` — content-type **prefixes** (e.g. `["audio/"]`,
@@ -3063,12 +3064,12 @@ condition passes through as plain text (no error).
   → system prompt → skills → recipes; the lists go into the system prompt"), the
   manifest goes there instead and `load_skill`'s description ends with the fixed
   sentence `使える skill の一覧は system prompt の「使える skill (load_skill の skill_id
-  にそのまま渡す)」にある。`, with no `enum`. Chat templates (Kimi / MiMo / GLM) put
+にそのまま渡す)」にある。`, with no `enum`. Chat templates (Kimi / MiMo / GLM) put
   the tool declarations before the system prompt, so per-user lists in tool
   descriptions kept the whole prompt out of the cross-user prefix cache; with
   the variable, a preset's tool declarations are the same string for every user.
   An id the user cannot see is still refused (`system prompt の「使える skill
-  (…)」の一覧にある id をそのまま渡す。`). Without the variable nothing changes, so a
+(…)」の一覧にある id をそのまま渡す。`). Without the variable nothing changes, so a
   preset that forgets it keeps the list. Which system prompt counts: the preset's
   `params.system`, read from the database like the routers do (a subagent's child
   preset the same way).
@@ -3100,7 +3101,10 @@ condition passes through as plain text (no error).
 All paths return the same tool result:
 
 ```json
-{ "result": "<before results> <expanded skill content> <after results>", "tools": ["secret_password"] }
+{
+	"result": "<before results> <expanded skill content> <after results>",
+	"tools": ["secret_password"]
+}
 ```
 
 `result` enters the model history as a `role:"tool"` message (not a system
@@ -3207,11 +3211,11 @@ is not on the turn (in the description until 2026-10-30). A model whose preset t
 off and calls one of them anyway (history replay) gets the usual "not in this
 turn's tool list" error.
 
-| layer | place | who can write |
-|---|---|---|
-| personal `/workspace` | `/workspace/recipes/<name>/` | the user |
+| layer                   | place                             | who can write                                           |
+| ----------------------- | --------------------------------- | ------------------------------------------------------- |
+| personal `/workspace`   | `/workspace/recipes/<name>/`      | the user                                                |
 | group `/ext/groups/<g>` | `/ext/groups/<g>/recipes/<name>/` | members (admins: every group). Invisible to non-members |
-| everyone `/ext/public` | `/ext/public/recipes/<name>/` | admins (everyone reads) |
+| everyone `/ext/public`  | `/ext/public/recipes/<name>/`     | admins (everyone reads)                                 |
 
 Read / write access is exactly `read_file` / `write_file`'s (§5.7). Deleting is
 `remove_file` on the folder (→ that layer's `trash/`, §5.7) — there is no
@@ -3256,13 +3260,14 @@ made full-width too, so a mark cannot be closed early. Folders that break the
 name rule (below), `trash`, and names starting with `.` are not listed. Two
 marks, both **computed every time** and never stored, and both shared with
 `load_recipe`:
+
 - **`[壊れている: …]`** (`assess_recipe` → `frontmatter_problems`) — the
   **frontmatter itself is invalid** (a schema error, the same for every reader at
   any time): `RECIPE.md` missing, not a regular file or not text; not closed, not
   YAML, not a mapping; an **unknown key** (only `title` `description` `author`
   `updated` `requires`; the message names the key, the allowed keys and either
   the retired-key hint — `on_load は requires に変わった`, `tools は廃止 (使える人が
-  限られる関数は本文の関数名で判定する)` — or a close spelling, so a typo like
+限られる関数は本文の関数名で判定する)` — or a close spelling, so a typo like
   `require:` is never silently ignored); a required key empty; a wrong type
   (`title` / `description` / `author` one-line strings, `updated` `YYYY-MM-DD`);
   a `requires` entry that does not fit the notation (including `skill:` — a recipe
@@ -3299,11 +3304,11 @@ marks, both **computed every time** and never stored, and both shared with
 from a narrower layer to a wider one only, so a shared recipe's hook cannot make
 the reader's `/workspace` (memory, EMR exports) flow into the conversation:
 
-| recipe's layer | `recipe:` | `read:` | `shell:` / `python:` |
-|---|---|---|---|
-| personal | personal, the reader's groups, everyone | anything the reader can see | yes (its own attachments) |
-| group `g` | `g` and everyone only | `g`, `/ext/public`, its own folder, the read-only `/ext/<name>` mounts (doc …) | **no** |
-| everyone | everyone only | `/ext/public`, its own folder, the read-only `/ext` mounts | **no** |
+| recipe's layer | `recipe:`                               | `read:`                                                                        | `shell:` / `python:`      |
+| -------------- | --------------------------------------- | ------------------------------------------------------------------------------ | ------------------------- |
+| personal       | personal, the reader's groups, everyone | anything the reader can see                                                    | yes (its own attachments) |
+| group `g`      | `g` and everyone only                   | `g`, `/ext/public`, its own folder, the read-only `/ext/<name>` mounts (doc …) | **no**                    |
+| everyone       | everyone only                           | `/ext/public`, its own folder, the read-only `/ext` mounts                     | **no**                    |
 
 Shared → personal, group → another group, and everyone → group are violations.
 A violation is a **warning**, the same for every reader, and the entry is
@@ -3421,14 +3426,14 @@ exit_code=0 (0.1s)
 - **Warnings.** An entry that does not pass (layer rule, gone, invisible) is
   not run; its position holds the heading and one line
   `警告: <reason> — 読まなかった。次の手: <next>。` (`参照先を戻すか、edit_recipe で
-  requires から外す・直す` / `この利用者には使えないので、そうユーザーに伝える (直せるのは
-  その参照先が見える人)` / `edit_recipe で requires から外す・直す (この置き場のレシピからは
-  実行しない)`). Recipe-wide warnings (a restricted function the reader cannot use) go just
+requires から外す・直す` / `この利用者には使えないので、そうユーザーに伝える (直せるのは
+その参照先が見える人)` / `edit_recipe で requires から外す・直す (この置き場のレシピからは
+実行しない)`). Recipe-wide warnings (a restricted function the reader cannot use) go just
   above the body in a frame only the tool writes —
   `<recipe-warning>\n警告: <reason>。次の手: <next>。\n</recipe-warning>` (`<recipe` is
   defused in material, so a body or a file cannot forge it; 2026-10-30). A
   `recipe:` target that is broken shows `警告: requires の recipe <folder> は壊れている:
-  … — 読まなかった。` at its position.
+… — 読まなかった。` at its position.
 - **Once per chat.** A recipe, and each `read` / `shell` / `python`, runs once per
   chat. "Already loaded" is decided from the **markers in earlier `load_recipe`
   results** in the history — `<recipe path="…">` (a recipe whose body was given)
@@ -3439,7 +3444,7 @@ exit_code=0 (0.1s)
 - **After a fix, the new version (2026-10-30, llens review).** A successful
   `save_recipe` / `edit_recipe` (including a `from_path` copy, for the folder
   written) ends its reply with `<recipe-reset path="<folder>"> (この後の load_recipe
-  はこのレシピの新しい版を最初から返す)`. Reading the history in order, a reset drops
+はこのレシピの新しい版を最初から返す)`. Reading the history in order, a reset drops
   the earlier marks of that recipe — the folder and the entries it owns — so the
   next `load_recipe` in the same chat returns the new body and runs its
   `requires` again; other recipes' marks stay. Within one request the same is
@@ -3484,10 +3489,10 @@ list of single-key entries only:
 
 ```yaml
 requires:
-  - recipe: /ext/groups/EMR/recipes/共通の抽出条件   # absolute folder path only
-  - read: /ext/groups/EMR/notes/検査結果.md          # relative = inside this recipe's folder, no ..
-  - shell: prep.sh --since 30d                     # personal recipes only
-  - python: prep.py                                # personal recipes only (python3)
+  - recipe: /ext/groups/EMR/recipes/共通の抽出条件 # absolute folder path only
+  - read: /ext/groups/EMR/notes/検査結果.md # relative = inside this recipe's folder, no ..
+  - shell: prep.sh --since 30d # personal recipes only
+  - python: prep.py # personal recipes only (python3)
 ```
 
 `shell` / `python` run **only a file attached directly in this recipe's folder**.
@@ -3502,6 +3507,7 @@ to content the check can inspect.
 
 **`save_recipe(path, title, description, body, requires?, from_path?)`** —
 creates a recipe or rewrites one completely; the tool builds `RECIPE.md`.
+
 - **Overwrite.** An existing `RECIPE.md` goes to that layer's trash as
   `<name>.RECIPE.md` (`-2`, `-3` … if taken; the sandbox's `/files/trash` with
   `name`). A broken previous version is accepted and trashed like any other.
@@ -3530,6 +3536,7 @@ creates a recipe or rewrites one completely; the tool builds `RECIPE.md`.
 **`edit_recipe(path, old_text, new_text)`** — `edit_file`'s matching rules
 (exactly one occurrence) over the **whole** `RECIPE.md`, frontmatter included
 (`old_text="title: 旧"`, `new_text="title: 新"`).
+
 - **Always set.** `updated` is set to today.
 - **Never changed.** An edit that changes `author` is refused.
 - **Checked after the edit only.** The edited folder goes through the full
@@ -3544,6 +3551,7 @@ reply is `書く前の検査で止めた (何も書いていない):` + the list
 step lists the fixes) are of two kinds. **The frontmatter rule** is exactly the
 "broken" check above (`frontmatter_problems`; `on_load` / `tools` / `tool_ids` are
 unknown keys with the retired-key hint). **The write rules** (`check_folder`):
+
 - **Shape.** `RECIPE.md` directly in the folder, a `RECIPE.md` in a subfolder,
   symlinks, and anything that is not a regular file.
 - **`updated`.** Not in the future. The lint also checks that it is not older
