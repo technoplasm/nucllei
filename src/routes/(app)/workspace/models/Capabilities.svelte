@@ -22,7 +22,7 @@
 	// OFF でこのモデルの manifest(load_skill)と /command 発火が両方止まる。
 	// llens(#140): 旧「サブエージェント」トグル(meta.features.subagent)は撤去 —
 	// builtin_subagent を toolIds に入れるか(ToolsSelector)に吸収した。
-	// 機能「レシピ」(meta.features.recipes、既定 ON — ken 2026-10-30「スキルみたいに」)。
+	// 機能「レシピ」(meta.features.recipes、既定 ON)。
 	// ON でこのモデルに load_recipe / save_recipe / edit_recipe と見えるレシピの一覧が入る
 	// (backend の is_recipes_feature_enabled。sandbox の無い配備では入らない)。
 	let {

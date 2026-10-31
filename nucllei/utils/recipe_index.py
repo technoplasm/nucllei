@@ -1,4 +1,4 @@
-"""見えるレシピの一覧 (load_recipe の説明に入る) と、レシピの「壊れている」の判定の I/O (2026-10-30)。
+"""見えるレシピの一覧 (load_recipe の説明に入る) と、レシピの「壊れている」の判定の I/O。
 
 判定そのものは `utils/recipes.py` (壊れている = `assess_recipe`、警告 = `reference_warnings`)。
 ここは sandbox と DB に問い合わせて材料を集める:
@@ -9,7 +9,7 @@
 
 一覧と `load_recipe` は同じ判定を通る (片方だけ直って片方が壊れている、を作らない)。
 「壊れている」は frontmatter の不正だけで、層の規則の違反・参照先が無い・見えないは「警告」(読み込めて、通らない要素だけ
-実行しない — ken 2026-10-30)。どちらも保存しない — 毎回その場で判定するので、参照先を戻せば警告は消える。
+実行しない)。どちらも保存しない — 毎回その場で判定するので、参照先を戻せば警告は消える。
 
 層は個人 → 所属グループ (名前順) → 全体。管理者でも所属している分だけ ({{USER_GROUPS}} と同じ規則 —
 `user_group_names` のうち今のグループ名の規則を通るもの)。一覧は能力「レシピ」が ON のリクエストごとに
@@ -69,7 +69,7 @@ def _uid_role(user) -> tuple[Optional[str], Optional[str]]:
 def recipe_writable(folder: str, user) -> bool:
     """読む人 `user` がレシピのフォルダ `folder` の層に書けるか (直す案内を出すか)。個人の層は書ける、
     `/ext/…` は ACL (`ext_acl.ext_path_access`) が rw のときだけ — 全体は管理者だけ、グループは
-    書き込みの形と `writers` 次第 (2026-10-31 ken、案 A)。案内の文にだけ使う — 書けるかの最後の
+    書き込みの形と `writers` 次第。案内の文にだけ使う — 書けるかの最後の
     判定は save_recipe / edit_recipe の書き先の検査 (`sandbox._write_target`)。"""
     from nucllei.utils.ext_acl import ext_path_access
 

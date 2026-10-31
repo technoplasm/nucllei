@@ -1,4 +1,4 @@
-"""能力「レシピ」(meta.features.recipes、既定 ON — ken 2026-10-30「スキルみたいに」「能力として」) の
+"""能力「レシピ」(meta.features.recipes、既定 ON) の
 middleware 経路の回帰。
 
 process_chat_payload が load_recipe / save_recipe / edit_recipe を合成して tools に差し込むか
@@ -119,7 +119,7 @@ class TestRecipeCapability(AbstractPostgresTest):
     def test_variable_in_preset_system_keeps_the_description_fixed(self, monkeypatch):
         """preset の system prompt (DB の行 — subagent の子 preset も id で同じく引く) に {{USER_RECIPES}}
         があれば、load_recipe の説明に一覧を入れない (1 文だけ)。一覧の取得はそれでも 1 回 (変数の展開用)。
-        変数が無ければ今までどおり説明に一覧が入る。"""
+        変数が無ければ説明に一覧が入る。"""
         from nucllei.builtin_tools.recipe_tools import RECIPE_INDEX_IN_PROMPT
         from nucllei.models.models import ModelForm, ModelMeta, ModelParams, Models
 

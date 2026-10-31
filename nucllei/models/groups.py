@@ -90,7 +90,7 @@ class GroupForm(BaseModel):
 
 
 class GroupExtForm(BaseModel):
-    """グループの `/ext/groups/<名前>/` の書き込み (2026-10-31 ken、案 A。`utils/ext_acl`)。
+    """グループの `/ext/groups/<名前>/` の書き込み (`utils/ext_acl`)。
     `members` = メンバー全員が書ける (無いときと同じ)、`listed` = `writers` のメンバーだけ書ける
     (他のメンバーは読むだけ)。`writers` は保存時に `user_ids` との積に揃える。"""
 

@@ -1,6 +1,4 @@
-"""レシピの判定 (`nucllei/utils/recipes.py`) の回帰。llens の `/ext/bin/recipe check` と
-`scripts/recipes/lint.py` の判定を移したもの (2026-10-30、llens 依頼) — ケースも llens の
-`scripts/recipes/test_recipe_cli.py` / `test_lint.py` から移植した。I/O を伴う tool の回帰は
+"""レシピの判定 (`nucllei/utils/recipes.py`) の回帰。I/O を伴う tool の回帰は
 `routers/test_builtin_recipes.py`、ホストの lint の CLI はこのファイルの末尾。
 """
 
@@ -117,17 +115,17 @@ def test_cp932_and_binary_attachments():
         (
             GOOD.replace("---\n\n", "tool_ids: emr\n---\n\n"),
             "frontmatter の知らないキー: tool_ids (使えるのは title・description・author・"
-            "updated・requires)。tool_ids は廃止 (使える人が限られる関数は本文の関数名で判定する)",
+            "updated・requires)。tool_ids は書かない (使える人が限られる関数は本文の関数名で判定する)",
         ),
         (
             GOOD.replace("---\n\n", "tools: query_emr\n---\n\n"),
             "frontmatter の知らないキー: tools (使えるのは title・description・author・"
-            "updated・requires)。tools は廃止 (使える人が限られる関数は本文の関数名で判定する)",
+            "updated・requires)。tools は書かない (使える人が限られる関数は本文の関数名で判定する)",
         ),
         (
             GOOD.replace("---\n\n", "on_load: []\n---\n\n"),
             "frontmatter の知らないキー: on_load (使えるのは title・description・author・"
-            "updated・requires)。on_load は requires に変わった",
+            "updated・requires)。on_load は requires で書く",
         ),
     ],
 )
@@ -138,7 +136,7 @@ def test_frontmatter_findings(md, want):
 
 
 def test_unknown_keys_are_broken():
-    """知らないキーは壊れている (`onload:` の綴り違いを黙って無視しない — ken 2026-10-30)。"""
+    """知らないキーは壊れている (`onload:` の綴り違いを黙って無視しない)。"""
     folder = "/workspace/recipes/x"
     text = GOOD.replace("---\n\n", "require:\n  - read: a.md\nmemo: x\n---\n\n")
     # 詳しい理由 (save / edit の検査と同じ)。一覧・load_recipe の印は safe (既定) で値を出さない
@@ -358,14 +356,14 @@ def test_on_load_must_be_a_list_and_missing_attachment_does_not_stop():
     assert R.parse_recipe_requires({"read": "a"}, "/workspace/recipes/x")[1][
         0
     ].endswith("(リスト) で書く")
-    # 付属が無いのは止めない (警告 — 後から write_file で置ける。ken 2026-10-30)
+    # 付属が無いのは止めない (警告 — 後から write_file で置ける)
     assert _check(GOOD.replace("---\n\n", "requires:\n  - shell: prep.sh\n---\n\n")).ok
     res = _check(GOOD.replace("---\n\n", "requires:\n  - python: prep.sh\n---\n\n"))
     assert any("python で実行できるのは .py の付属だけ" in p for p in res.stops)
     assert any(R.REQUIRES_FORM in f for f in res.fixes)
 
 
-# ---- requires の層の規則 (llens 依頼・ken 2026-10-30) -------------------------------
+# ---- requires の層の規則 -------------------------------------------------------------
 
 EMR = R.group_layer("EMR")
 
@@ -554,7 +552,8 @@ def test_restricted_tools_warn_for_non_members(monkeypatch):
     monkeypatch.setenv(
         "RECIPE_RESTRICTED_TOOLS", json.dumps({"query_emr": "EMR", "mine": None})
     )
-    # 本文に名前が出てくるかで判定する (旧 tools は廃止。説明に書いただけでも当たる — 厳しい側)
+    # 本文に名前が出てくるかで判定する (frontmatter の tools は使わない。説明に書いただけでも
+    # 当たる — 厳しい側)
     text = GOOD + "1. query_emr で引き、mine で書く。query_emrx は別の関数\n"
     folder = "/workspace/recipes/x"
     assert not R.reference_warnings(folder, text, {}, {}, member_groups=["EMR"])
@@ -578,8 +577,8 @@ def test_index_line_neutralizes_instructions():
 
 def test_index_marks_cannot_be_forged_from_description():
     """一覧の印は行頭 (`- [壊れている: …] <フォルダ>` / `- [警告: …] <フォルダ> — …`) だけ。description に
-    同じ形・括弧書きの印を書いても、`—` の後に全角の括弧・区切りを変えた形で出て、印とは見分けが付く
-    (2026-10-30 llens のレビュー)。普通の括弧書きはそのまま。"""
+    同じ形・括弧書きの印を書いても、`—` の後に全角の括弧・区切りを変えた形で出て、印とは見分けが付く。
+    普通の括弧書きはそのまま。"""
     fake = "[壊れている: x] (警告: y が無い) [警告: z] 壊れている：w (月次)"
     line = R.index_line("/p", fake)
     assert line == (
@@ -702,7 +701,7 @@ def test_recipe_check_cli(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 壊れている理由の印 (一覧・load_recipe の ERROR) — 書いた人の文を混ぜない (llens 経由 ken 2026-10-30)
+# 壊れている理由の印 (一覧・load_recipe の ERROR) — 書いた人の文を混ぜない
 # ---------------------------------------------------------------------------
 _SAFE_FOLDER = "/workspace/recipes/x"
 
@@ -721,7 +720,7 @@ def _safe(text):
 @pytest.mark.parametrize(
     "key, shown",
     [
-        ("tools", "frontmatter の知らないキー tools (廃止)"),
+        ("tools", "frontmatter の知らないキー tools (書かない)"),
         ("onload", "frontmatter の知らないキー onload"),
         ("my_key-2", "frontmatter の知らないキー my_key-2"),
         ("a" * 32, "frontmatter の知らないキー " + "a" * 32),
@@ -789,7 +788,7 @@ def test_broken_mark_for_each_kind_says_what_and_where_without_author_text(
 
 
 def test_broken_reasons_are_detailed_for_save_and_edit():
-    """save / edit の検査 (自分が書いたもの) と safe でない判定は値まで言う (今までどおり)。"""
+    """save / edit の検査 (自分が書いたもの) と safe でない判定は値まで言う。"""
     assert R.frontmatter_problems(
         _fm().replace("2026-10-01", "SECRET"), _SAFE_FOLDER
     ) == ["updated が YYYY-MM-DD でない: 'SECRET'"]
@@ -809,7 +808,7 @@ def test_broken_mark_hides_keys_yaml_rewrote_and_counts_lines_from_the_file():
     text = "---\n\n\ntitle: [SECRET\n---\n"
     assert _safe(text) == ["frontmatter が YAML として読めない (4 行目)"]
     assert text.splitlines()[3].startswith("title: [")
-    # 日付として読めない値・深い入れ子は YAMLError でなく落ちていた
+    # 日付として読めない値・深い入れ子 (YAMLError 以外の例外) も読めない扱い
     assert _safe(_fm().replace("2026-10-01", "2026-02-30")) == [
         "frontmatter が YAML として読めない"
     ]

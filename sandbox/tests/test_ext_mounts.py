@@ -323,7 +323,7 @@ def test_files_ro_is_403_and_unbound_is_404(monkeypatch, tmp_path):
 
 def test_read_only_group_is_ro_bind_and_403(monkeypatch, tmp_path):
     """グループも ro で渡せる (nucllei 側で書き込みを「指定した人だけ」にしたグループの、指定されて
-    いないメンバー — 2026-10-31 案 A)。jail は --bindmount_ro、`/files/*` の書き込みは 403、読みは通る。
+    いないメンバー)。jail は --bindmount_ro、`/files/*` の書き込みは 403、読みは通る。
     ro で置き場がまだ無ければ作らずに飛ばす (書ける人が最初に書いたときに作られる)。"""
     mod, ext = _load(monkeypatch, tmp_path)
     (ext / "groups" / "EMR" / "a.md").write_text("emr")
@@ -581,7 +581,7 @@ def test_kernel_is_recreated_when_mounts_change(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 所属とロールの env (`NUCLLEI_USER_GROUPS` / `NUCLLEI_USER_ROLE`。2026-10-27 llens 依頼)
+# 所属とロールの env (`NUCLLEI_USER_GROUPS` / `NUCLLEI_USER_ROLE`)
 # ---------------------------------------------------------------------------
 def _envs_of(cmd):
     """nsjail の引数から `--env K=V` を dict で拾う。"""
@@ -725,7 +725,7 @@ def test_kernel_is_recreated_when_user_env_changes(monkeypatch, tmp_path):
         assert r3 is True and s3 is not s1 and seen[-1] == after
         # ロールだけの変化も別の指紋
         assert fp(promoted) != fp(before)
-        # env を送らない (古い nucllei) ときの指紋は従来どおり bind だけ
+        # env を送らないときの指紋は bind だけ
         assert mod._mounts_fingerprint(binds, {}) == mod._mounts_fingerprint(binds)
 
     asyncio.new_event_loop().run_until_complete(scenario())

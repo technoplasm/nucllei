@@ -262,7 +262,7 @@ class TestSandboxFiles(AbstractPostgresTest):
         assert {"path": "/ext/public", "rw": True} in fake.calls[0][1]["mounts"]
 
     def test_group_read_only_for_non_writer(self, monkeypatch):
-        """書き込みを「指定した人だけ」にしたグループ (2026-10-31 ken、案 A): 指定されていないメンバーには
+        """書き込みを「指定した人だけ」にしたグループ: 指定されていないメンバーには
         読み取り専用 — places / 一覧 / 読みの `rw` は False、書き換えは sandbox を呼ばずに 403、
         sandbox にも ro の bind で渡る。指定された人は書ける。"""
         from nucllei.models.groups import GroupExtForm, GroupUpdateForm, Groups

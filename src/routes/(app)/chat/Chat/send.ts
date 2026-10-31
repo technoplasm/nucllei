@@ -365,7 +365,7 @@ export class ChatSend {
 		// wire 形への組み立て(system 注入・画像展開・tool 往復復元)は純関数層
 		// (chat-messages.ts buildWireMessages)— vitest で契約を固定している
 		// チャットの system prompt の変数はサーバが展開する (BE の payload.expand_chat_system_message —
-		// 日時・曜日・利用者はサーバの値が正、2026-10-30)。ここでは素のまま送る
+		// 日時・曜日・利用者はサーバの値が正)。ここでは素のまま送る
 		const messages = buildWireMessages(
 			createMessagesList(_history, responseMessageId),
 			session.params?.system || null

@@ -1,6 +1,5 @@
-"""write_file の上書き止め (valve `write_no_overwrite_paths` — 2026-10-31 ken「MEMORY.md の上書きは edit_file に
-案内で」)。置き場の下の既にあるファイルへの write_file は断って edit_file へ向け、新しく作るのは通す。置き場の外・
-既定 (空) は今までどおり。"""
+"""write_file の上書き止め (valve `write_no_overwrite_paths`)。置き場の下の既にあるファイルへの write_file は
+断って edit_file へ向け、新しく作るのは通す。置き場の外と既定 (空) は止めない。"""
 
 import asyncio
 
@@ -73,7 +72,7 @@ def test_outside_the_place_and_the_place_itself_are_unchanged():
     assert _write(tool, "/workspace/20261031-x/a.md").startswith(
         "/workspace/20261031-x/a.md に書き込んだ"
     )
-    assert _exclusive(tool) == [False]  # 今までどおりの上書き
+    assert _exclusive(tool) == [False]  # 上書きする
     # `..` で置き場の外へ出たものは置き場の下ではない (正規化してから見る)
     tool = _tool(exists=True)
     assert _write(tool, "/workspace/memory/../notes.md").startswith(
@@ -109,7 +108,7 @@ def test_globs_and_lists_follow_rm_allowed_paths():
 
 
 def test_other_sandbox_errors_are_reported_as_before():
-    """409 以外の失敗 (繋がらない等) は今までどおりの ERROR (書けたことにしない)。"""
+    """409 以外の失敗 (繋がらない等) は通常の ERROR (書けたことにしない)。"""
     from nucllei.builtin_tools.sandbox import Tools
 
     tool = Tools()

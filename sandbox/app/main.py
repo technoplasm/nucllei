@@ -323,7 +323,7 @@ CACHE_DIRS = ("imports", "exports")
 # trash/ の直下へ mv)。期限は同じ `SANDBOX_CACHE_TTL_DAYS`。3 つの置き場とも判定単位は
 # **直下の各エントリ**、時刻はその lstat の max(mtime, ctime) (`_sweep_entries`)。
 # 共有の置き場 `/ext/groups/<g>/trash/` `/ext/public/trash/` も同じ名前・同じ規則
-# (`/files/trash` が作る。掃除は `_ext_trash_loop`。2026-10-27、ken 決定・llens 依頼)
+# (`/files/trash` が作る。掃除は `_ext_trash_loop`)
 TRASH_DIR = "trash"
 # 共有の置き場の trash/ の期限掃除の間隔 (workspace の trash/ は idle 回収のついでなので別)
 EXT_TRASH_SWEEP_S = 3600
@@ -886,11 +886,11 @@ def _prepare_mounts(validated: list[tuple[str, bool]]) -> list[tuple[str, str, b
 
 
 # ---------------------------------------------------------------------------
-# 呼び出し元のユーザーの所属とロールを jail の env で渡す (2026-10-27、llens 依頼・ken 指示)
+# 呼び出し元のユーザーの所属とロールを jail の env で渡す
 # ---------------------------------------------------------------------------
 # jail の中のプログラム (配備側の CLI 等) が「このユーザーはどのグループに属し、どのロールか」を
-# 知る口。それまで llens の skill はグループ名を {{USER_GROUPS}} でコマンドの引数に埋めていて、
-# 名前の記号でコマンドが壊れる / 展開される余地があった。env なら引用も展開も通らない。
+# 知る口。グループ名をコマンドの引数に埋めると名前の記号でコマンドが壊れる / 展開される余地があるが、
+# env なら引用も展開も通らない。
 #
 # - `NUCLLEI_USER_GROUPS`: 所属するグループ名のカンマ区切り (nucllei の {{USER_GROUPS}} と同じ順。
 #   管理者でも所属している物だけ)。所属なしは空文字で**定義する** — 未定義 = 呼び出し元が
@@ -1596,13 +1596,13 @@ class DeleteRequest(PathRequest):
 
 class TrashRequest(PathRequest):
     # ゴミ箱での名前 (省略時は元の名前)。nucllei の save_recipe が前の版の RECIPE.md を
-    # `<レシピ名>.RECIPE.md` として移すのに使う (2026-10-30、llens 依頼)。同名は `-2` `-3`… の
+    # `<レシピ名>.RECIPE.md` として移すのに使う。同名は `-2` `-3`… の
     # 規則のまま。`/` `.` 始まり・NUL・255 バイト超は 400
     name: Optional[str] = None
 
 
 class RecipeIndexRequest(BaseModel):
-    # `{{USER_RECIPES}}` の一覧 (nucllei、2026-10-30)。`places` は層の jail のパス
+    # `{{USER_RECIPES}}` の一覧 (nucllei)。`places` は層の jail のパス
     # (`/workspace` / `/ext/groups/<g>` / `/ext/public`)。各層の `recipes/<名前>/RECIPE.md` の先頭
     # `head_bytes` バイトとフォルダの種類を 1 回で返す
     user_id: str
@@ -1612,8 +1612,8 @@ class RecipeIndexRequest(BaseModel):
 
 
 class StatManyRequest(BaseModel):
-    # 複数のパスの種類をまとめて (nucllei の {{USER_RECIPES}} が on_load の参照先の有無を 1 回で
-    # 調べる。2026-10-30)。jail の絶対パス (`/workspace/…` `/ext/…`)
+    # 複数のパスの種類をまとめて (nucllei の {{USER_RECIPES}} が requires の参照先の有無を 1 回で
+    # 調べる)。jail の絶対パス (`/workspace/…` `/ext/…`)
     user_id: str
     paths: list[str] = Field(default_factory=list)
     mounts: list[MountIn] = Field(default_factory=list)
@@ -1621,7 +1621,7 @@ class StatManyRequest(BaseModel):
 
 class RecipeFolderRequest(PathRequest):
     # レシピのフォルダの中身 (付属を含む全ファイルの本文と、持っていかないもの)。nucllei の
-    # save_recipe / edit_recipe / load_recipe が検査と写しに使う (2026-10-30)
+    # save_recipe / edit_recipe / load_recipe が検査と写しに使う
     limit_bytes: Optional[int] = None
 
 
@@ -2869,14 +2869,14 @@ async def files_delete(req: DeleteRequest):
 
 @app.post("/files/trash")
 async def files_trash(req: TrashRequest):
-    """ゴミ箱へ移す (nucllei の builtin `remove_file`。2026-10-27、ken 決定・llens 依頼)。
+    """ゴミ箱へ移す (nucllei の builtin `remove_file`)。
     ファイルもディレクトリ (中身ごと) も、その置き場の trash/ の直下へ: workspace は
     `trash/<名前>`、`/ext/groups/<g>/…` は `/ext/groups/<g>/trash/<名前>`、`/ext/public/…` は
     `/ext/public/trash/<名前>` (元の階層は持たない。同名は `-2` `-3`…、尽きたら 409)。
     応答 `{ok, trashed: true, path, cache_ttl_days}` (`path` は workspace なら相対)。
-    `/files/delete` の既定 (`/ext` は完全に消す) は変えない — 新しい nucllei と古い sandbox の
-    組み合わせで `/ext` のファイルが黙って完全に消えないよう、別の endpoint にした (古い
-    sandbox は 404 で止まる)。`name` を渡すとゴミ箱ではその名前にする (同名の規則は同じ)。"""
+    `/files/delete` (既定は `/ext` を完全に消す) とは別の endpoint — 新しい nucllei と古い sandbox の
+    組み合わせで `/ext` のファイルが黙って完全に消えないように (古い sandbox は 404 で止まる)。
+    `name` を渡すとゴミ箱ではその名前にする (同名の規則は同じ)。"""
     dest_name = _valid_trash_name(req.name) if req.name is not None else None
     t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
     return await asyncio.to_thread(_fs_trash, t, dest_name)
@@ -2896,8 +2896,7 @@ async def files_mkdir(req: PathRequest):
 
 
 # ---------------------------------------------------------------------------
-# レシピ (nucllei の builtin load_recipe / save_recipe / edit_recipe と {{USER_RECIPES}}。
-# 2026-10-30、llens 依頼・ken 指示「ぜんぶ nuc にやらせて」)
+# レシピ (nucllei の builtin load_recipe / save_recipe / edit_recipe と {{USER_RECIPES}})
 # ---------------------------------------------------------------------------
 # 置き場は `<層>/recipes/<名前>/RECIPE.md` (+ 同じフォルダの付属)。層は workspace と
 # `/ext/groups/<g>` `/ext/public` (リクエストの mounts の bind)。どちらも fd で辿り、経路も末端も

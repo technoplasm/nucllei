@@ -1,5 +1,4 @@
-"""preset / skill の編集画面の「プレビュー」(2026-10-30、llens 経由 ken「実際どのように展開されるか
-プレビューをタブで付けて」)。
+"""preset / skill の編集画面の「プレビュー」— 実際にどう展開されるかを見せる。
 
 **実際のリクエストと同じ関数を通す** — プレビュー専用の展開は書かない:
 - system prompt: `payload.apply_model_system_prompt_to_body` (routers/openai・ollama・functions が

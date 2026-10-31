@@ -363,11 +363,11 @@ def test_large_file_is_read_by_range_not_whole():
     tool.read_bytes = 0
     n = len(tool.calls)
     head, body, _, _ = _page(tool, "/workspace/huge.log", offset=2_000_000 * len(line))
-    # + 1: offset の直前の 1 バイト (行の途中から読んだかを見る — 2026-10-30 batch 2)
+    # + 1: offset の直前の 1 バイト (行の途中から読んだかを見る)
     assert tool.read_bytes <= 64 * 1024 + 40000 * 4 + 1
     assert body.startswith("あいうえお,12345\n")
     reads = [c[1] for c in tool.calls[n:] if c[0] == "/files/read"]
-    # 2 つ目は offset の直前の 1 バイトから (行の途中から読んだかを見る — 2026-10-30 batch 2)
+    # 2 つ目は offset の直前の 1 バイトから (行の途中から読んだかを見る)
     assert [r["offset"] for r in reads] == [0, 2_000_000 * len(line) - 1]
     assert all(r["length"] <= 40000 * 4 + 1 for r in reads)
 
@@ -523,7 +523,7 @@ def test_spec_and_no_static_result_declaration():
     assert "sandbox の絶対パス (`/workspace/…`" in (
         spec["parameters"]["properties"]["path"]["description"]
     )
-    # 説明は何をするか・いつ使うかだけ (2026-10-30 llens「tool の説明を削る」batch 2) — 文字コード・
+    # 説明は何をするか・いつ使うかだけ — 文字コード・
     # 続き・CSV の見出し・テキストでないものは結果 / ERROR が言う
     desc = spec["description"]
     assert "run_shell の cat ではなくこちら" in desc
@@ -534,8 +534,8 @@ def test_spec_and_no_static_result_declaration():
 
 
 def test_offset_inside_a_line_is_said_in_the_result():
-    """next_offset 以外の offset (行の途中) で読んだら結果の先頭行が言う (説明から外した「それ以外の値は
-    行の途中から」— 2026-10-30 batch 2)。next_offset (行の切れ目の直後) では言わない。"""
+    """next_offset 以外の offset (行の途中) で読んだら結果の先頭行が言う。next_offset (行の切れ目の直後)
+    では言わない。"""
     tool = _tool(b"alpha\nbeta\ngamma\n")
     out = _read(tool, "/workspace/a.txt", offset=2).text
     assert "offset 2 は行の途中なので、最初の行は途中から始まる" in out

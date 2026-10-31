@@ -15,7 +15,7 @@
   `places` の中のグループの列挙で代える(`ext_visible_groups` = 見えるグループだけ)
 - ro の場所への書き換え(write / upload / delete / rename / mkdir)は 403。sandbox にも
   ro の bind として渡すので 2 重に止まる。`places` の `rw` と一覧・読みの応答の `rw` が画面の
-  読み取り専用の表示(書き換えの操作を出さない)の元 — グループの ro もここに乗る(2026-10-31 案 A)
+  読み取り専用の表示(書き換えの操作を出さない)の元 — グループの ro もここに乗る
 - `.` 始まりのセグメントは扱わない(400)— 一覧でも隠す(list_workspace と同じ)。
   経路上の symlink は sandbox が辿らない(`/files/*` の O_NOFOLLOW。#152 と同じ仕組み)
 - 平文の判定(`read` の `editable`): テキストの上限(env `SANDBOX_TEXT_MAX_SIZE_MB`)以内・

@@ -33,10 +33,9 @@ def get_task_model_id(
     return task_model_id
 
 
-# ブラウザでしか分からない変数 (2026-10-30 llens 依頼「UI のチャットで {{CURRENT_WEEKDAY}} が英語になる」)。
+# ブラウザでしか分からない変数。
 # チャットの metadata.variables (ブラウザの getPromptVariables) から当てるのはこの 2 つだけで、ほかの
-# 変数 (日付・時刻・曜日・利用者) はサーバの値が正 — ブラウザが送ってきても使わない (以前はブラウザの値が
-# 先に当たり、曜日が英語・時刻の形もブラウザ次第だった)。日時はサーバが作るが、TZ はブラウザの
+# 変数 (日付・時刻・曜日・利用者) はサーバの値が正 — ブラウザが送ってきても使わない。日時はサーバが作るが、TZ はブラウザの
 # {{CURRENT_TIMEZONE}} を使う (request_timezone — 利用者の地域の日付・曜日になるように)
 BROWSER_PROMPT_VARIABLES = ("{{CURRENT_TIMEZONE}}", "{{USER_LANGUAGE}}")
 
@@ -142,20 +141,19 @@ def user_prompt_params(user) -> dict:
     }
 
 
-# {{SKILLS}} / {{USER_RECIPES}}(2026-10-30、llens 経由 ken「tool → system prompt → スキル → レシピの並び。
-# 日付・スキル・利用者・レシピ一覧を {{}} で system prompt に入れるほうが自然」): 利用者ごとに変わる
-# 一覧を tool の説明 (chat template で system より前に出る) から system prompt へ移せるようにする。
+# {{SKILLS}} / {{USER_RECIPES}}: 利用者ごとに変わる一覧を、tool の説明 (chat template で system より
+# 前に出る) でなく system prompt に入れられるようにする。
 # preset の system prompt に変数があれば load_skill / load_recipe の説明には一覧を入れない
 # (middleware — preset_system_prompt)。展開には preset (model) が要る: どの skill が載るか
 # (meta.skillIds・能力「スキル」)、能力「レシピ」が有効か。model を渡さない呼び出し (タイトル生成等)
 # では空。
 SKILLS_TOKEN = "{{SKILLS}}"
 USER_RECIPES_TOKEN = "{{USER_RECIPES}}"
-# 利用者の記憶の目次 (2026-10-31 ken「レシピが一覧で入るなら記憶も何かしら入るべき」— utils/memory_index)。
+# 利用者の記憶の目次 (utils/memory_index)。
 # 能力「レシピ」に依らない (変数が system prompt にあるときだけ取る)。サブエージェントの子ターンでは空
 USER_MEMORY_INDEX_TOKEN = "{{USER_MEMORY_INDEX}}"
 
-# 変数ごとの「何で変わるか」(2026-10-30 ken「実際どのように展開されるかプレビューを」): system prompt の
+# 変数ごとの「何で変わるか」: system prompt の
 # プレビュー (utils/prompt_preview) が、prefix cache の観点でどこが利用者ごと・日時ごとかの印を付ける。
 # prompt_template とブラウザの getPromptVariables (src/lib/utils、チャットの metadata.variables) が
 # 展開する変数を全部載せる。user = 利用者ごと、time = 日時で変わる、preset = preset ごとに固定
@@ -387,10 +385,9 @@ def prompt_template(
 
     # Format the date to YYYY-MM-DD
     formatted_date = current_date.strftime("%Y-%m-%d")
-    # サーバが作る値は ja の表記に固定 (ken 2026-10-30「サーバーの locale は ja で」— ブラウザの言語・
-    # プロセスのロケールに依らない。strftime の %Y %m %d %H %M %S はロケールに依らない)。時刻は 24 時間制
-    # (2026-10-30 まで UI のチャットはブラウザの HH:MM:SS が当たっていた — その形とも同じ)。日付は ISO の
-    # まま (2026年10月30日 にはしない — レシピの updated・tool の引数が ISO)
+    # サーバが作る値は ja の表記に固定 (ブラウザの言語・プロセスのロケールに依らない。strftime の
+    # %Y %m %d %H %M %S はロケールに依らない)。時刻は 24 時間制。日付は ISO のまま (2026年10月30日 には
+    # しない — レシピの updated・tool の引数が ISO)
     formatted_time = current_date.strftime("%H:%M:%S")
     # 曜日は日本語で固定(2026-10-19 llens 監査 — strftime("%A") はプロセスのロケール次第で
     # 英語になっていた。モデル向けの文は日本語 — _memos/model-frames.md)

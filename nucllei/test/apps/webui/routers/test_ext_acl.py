@@ -426,7 +426,7 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         assert {"path": "/ext/public", "rw": True} in tool.calls[1][1]["mounts"]
 
     def test_exec_and_cell_send_user_groups_and_role(self):
-        """jail の env NUCLLEI_USER_GROUPS / NUCLLEI_USER_ROLE の元 (2026-10-27、llens 依頼)。
+        """jail の env NUCLLEI_USER_GROUPS / NUCLLEI_USER_ROLE の元。
         所属は {{USER_GROUPS}} と同じ順で、#151 より前の不正な名前 (rank:部長) は落とす。
         管理者でも所属分だけ (全グループではない)。所属なしは []。"""
         res = {"exit_code": 0, "duration_s": 0.1, "stdout": "", "stderr": ""}
@@ -489,7 +489,7 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         assert "書き込んだ" in out
 
     def test_edit_file(self):
-        """edit_file (2026-10-27) は write_file と同じ ACL — 書けない置き場は sandbox に問い合わせず
+        """edit_file は write_file と同じ ACL — 書けない置き場は sandbox に問い合わせず
         断り、書ける置き場は mounts 付きで stat → 読み (nofollow) → 書き戻す。"""
         body = "- 手順 1\n".encode("utf-8")
         responses = {
@@ -539,7 +539,7 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         assert {"path": "/ext/public", "rw": True} in tool.calls[2][1]["mounts"]
 
     def test_remove_file(self):
-        """remove_file (2026-10-27) は write_file と同じ ACL — 書けない置き場は sandbox に問い合わせず
+        """remove_file は write_file と同じ ACL — 書けない置き場は sandbox に問い合わせず
         断り、書ける置き場は mounts 付きで `/files/trash` に渡す (移す先は置き場の trash/)。"""
         tool = _tool(
             {
@@ -692,7 +692,6 @@ class TestSandboxToolAcl(AbstractPostgresTest):
 
     def test_list_workspace_marks_groups_admin_is_not_in(self):
         # 管理者には全グループが見えて書ける — 所属していないものはそう添える
-        # (2026-10-30 llens: モデルが見えるだけのグループにレシピを上げた)
         from nucllei.models.groups import GroupUpdateForm, Groups
 
         g = next(x for x in Groups.get_groups() if x.name == "EMR")
@@ -812,7 +811,7 @@ def test_group_dir_name(name, ok):
 
 
 # ---------------------------------------------------------------------------
-# グループの書き込み (2026-10-31 ken、案 A): data.ext = {"write": "members"|"listed", "writers": […]}
+# グループの書き込み: data.ext = {"write": "members"|"listed", "writers": […]}
 # ---------------------------------------------------------------------------
 WRITER = {"id": "writer1", "role": "user"}
 READER = {"id": "reader1", "role": "user"}

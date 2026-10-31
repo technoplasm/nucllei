@@ -1,5 +1,5 @@
 <script lang="ts">
-	// skill の編集画面のプレビュー (2026-10-30 ken「実際どのように展開されるかプレビューをタブで」)。
+	// skill の編集画面のプレビュー。
 	// 編集中の本文を自分として展開し、before → 本文 → after の並びで見せる (POST /skills/preview —
 	// 読み込みと同じ展開の関数。before / after は実行せず、何を実行するかの一覧だけ)。
 	import { getContext, onMount } from 'svelte';

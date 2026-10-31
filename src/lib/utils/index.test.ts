@@ -2,7 +2,7 @@
 // - createMessagesList: parentId が循環した履歴で無限再帰して FE が落ちた
 // - TTS の文分割: 和文は「。」の後に空白が無いため 1 文にもならず、全文を 1 リクエストで送っていた
 // - replaceTokens: 本文の [n] を <source_id> に置換する引用チップを撤去(2026-10-05)— [n] は素の文字列のまま
-// - getPromptVariables: 日付・曜日などを送ってサーバの値 (日本語の曜日) を上書きしていた(2026-10-30)
+// - getPromptVariables: 日付・曜日・利用者の変数を送らない (サーバの値 (日本語の曜日) を上書きしない)
 
 import { describe, it, expect, vi } from 'vitest';
 

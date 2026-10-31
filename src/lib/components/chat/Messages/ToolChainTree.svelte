@@ -1,5 +1,5 @@
 <script lang="ts">
-	// tool の中で順に読み込んだ・実行したものの木(results[i].chain — 2026-10-30)。
+	// tool の中で順に読み込んだ・実行したものの木(results[i].chain)。
 	// load_recipe: requires を書いた順の行(recipe は入れ子)→ 本文。
 	// load_skill(/command・自動ロード): before の行 → 本文 → after の行。
 	// 1 行 = 種類・対象・状態(済 / 読み込み済み / 警告 / ERROR)。警告・ERROR は理由を常に出し、

@@ -60,8 +60,7 @@ def expand_chat_system_message(
     messages: list, user=None, model=None, variables: Optional[dict] = None
 ) -> list:
     """チャットの system prompt (先頭の system メッセージ — 利用者がチャットに付けたもの) の変数を
-    サーバで展開する (2026-10-30 — それまではブラウザが自前で展開していて、曜日が英語・時刻の形も
-    ブラウザ次第だった。続きターン (execution_resume) は前からサーバで展開している)。
+    サーバで展開する (続きターンの execution_resume と同じ)。
     preset の system prompt はこの後 routers が前に足す (apply_model_system_prompt_to_body)。
     variables はブラウザが送った変数 (preset の system prompt と同じく、ブラウザでしか分からない
     {{CURRENT_TIMEZONE}} {{USER_LANGUAGE}} だけ当たる)。非破壊 (新しい list を返す)。文字列でない

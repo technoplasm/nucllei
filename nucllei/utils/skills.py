@@ -101,7 +101,7 @@ def apply_skill_command(form_data, user, model):
     履歴で知るので冗長ロードも起きない。UI も既存の tool_calls 描画がそのまま使える。
 
     ペイロード内の**全 user メッセージ**を毎リクエスト走査する。状態は会話そのもの
-    (2026-07-06 改訂) — 発火した `/command` の往復は応答に残り、履歴として届く。
+    — 発火した `/command` の往復は応答に残り、履歴として届く。
 
     - 各 user メッセージの先頭行の行頭が `/([a-zA-Z0-9_-]+)` なら、その command で
       read 可視な skill を lookup する。
@@ -114,11 +114,10 @@ def apply_skill_command(form_data, user, model):
       (この `/command` が前のターンで発火して応答に残った load_skill 往復、モデル自律の
       load_skill、このリクエストで先に注入した分 — 位置は問わない)exchange を足さない —
       本文が context に 2 回入らない。発火リストにも載せない。
-    - **発火は 1 回**(2026-10-30): 発火したターンの応答の先頭に、この exchange を通常の
+    - **発火は 1 回**: 発火したターンの応答の先頭に、この exchange を通常の
       tool_calls ブロックとして残す(skill_activation_seed_block)。次のリクエストからは履歴の
       load_skill 往復として届くので、ここでは足さない(本文と before / after の結果がその
-      1 つの結果に書いた順で入ったまま並ぶ — 本文を毎回組み直していたときは、保存された
-      before / after の結果が本文の後ろに回っていた)。
+      1 つの結果に書いた順で入ったまま並ぶ)。
 
     戻り値は (form_data, 発火リスト)。発火リストの要素は
     {call_id, id, name, content(展開済み), result, result_message, tool_ids, skill}。
@@ -270,7 +269,7 @@ def hook_call(skill_id: str, phase: str, n: int, entry: dict) -> dict:
 
 
 async def run_skill_hooks(skill, tools: dict, execute) -> list[dict]:
-    """skill の before / after を書いた順に実行して記録の列を返す(llens#22、2026-10-30)。
+    """skill の before / after を書いた順に実行して記録の列を返す(llens#22)。
 
     - tool は `tools`(このターンの tools_dict — モデルの tool の read ACL・skill の tool を
       通った物)に在るものだけ。無ければ実行せず ERROR の 1 行
@@ -625,8 +624,8 @@ def current_skill_activation_seeds(skill_activations) -> list:
     """今回のリクエストの `/command` 発火・自動ロードを、応答に残す形(metadata)へ絞る。
 
     受け側は process_chat_response(応答先頭の tool_calls ブロック)で、
-    call_id / id / result(と before / after の記録 hooks)を読む。#43 で skill の可読キーを
-    command→id に改名した際、ここだけ旧キー参照が残り KeyError になっていた(回帰テストあり)。
+    call_id / id / result(と before / after の記録 hooks)を読む(キー名は受け側と揃える —
+    回帰テストあり)。
     """
     return [
         {
@@ -681,7 +680,7 @@ def skill_manifest(model, user) -> dict:
 
 
 def skills_listing(manifest: dict) -> str:
-    # llens(#43): manifest 識別子は id 一本(旧 command)。id/name の二重露出はしない。
+    # llens(#43): manifest 識別子は id 一本。id/name の二重露出はしない。
     return "\n".join(
         f"- {sid}: {skill.description.strip()}" for sid, skill in manifest.items()
     )
@@ -728,7 +727,7 @@ def build_load_skill_tool(
     **preset の system prompt に {{SKILLS}} があれば** (`listing_in_prompt`)、一覧は system prompt に
     入るので説明には 1 文 (SKILLS_IN_PROMPT) だけ置き、skill_id の enum も付けない — tool の宣言は
     chat template で system より前に出るので、利用者ごとに変わる一覧・enum を入れると prefix cache が
-    利用者をまたげない (ken 2026-10-30)。説明と spec は preset ごとに同じ文字列になる。無ければ今までどおり。
+    利用者をまたげない。説明と spec は preset ごとに同じ文字列になる。無ければ一覧と enum を説明・spec に入れる。
     """
     manifest = skill_manifest(model, user)
     if not manifest:

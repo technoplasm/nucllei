@@ -24,9 +24,9 @@ rw / ro / 見えない のどれか」を決め、次の全員がそれに従う
 - グループのディレクトリ名 = グループ名そのまま。メンバー判定は `Groups.get_groups_by_member_id`。
   名前は `utils/group_names.validate_group_name` を通る物だけを扱う(#151 より前に作られた
   `:` 入り等の名前は bind も配信もしない — warning を 1 行出して飛ばす)
-- **グループの書き込み(2026-10-31 ken、案 A)**: 所属(`user_ids`)の意味は変えず、グループの属性
+- **グループの書き込み**: 所属(`user_ids`)の意味は変えず、グループの属性
   `data.ext = {"write": "members" | "listed", "writers": [user_id, …]}` で書ける人を絞れる。
-  無い・`members` はメンバー全員 rw(設定の無いグループは移行不要)、
+  無い・`members` はメンバー全員 rw、
   `listed` は `writers` にいるメンバーだけ rw・他のメンバーは ro。`writers` は保存のたびに
   `user_ids` との積に揃える(`normalize_group_data`)うえ、判定でも所属を確かめる — メンバーで
   ない人が `writers` に残っていても何も与えない。これは**グループの属性で、ユーザーの権限

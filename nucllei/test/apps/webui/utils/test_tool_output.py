@@ -836,7 +836,7 @@ def test_progress_helper_passes_subagent_through_context():
 
 def test_set_chain_is_harvested_into_result_and_not_sent_to_model():
     """set_chain(load_recipe / load_skill の木)は results[i].chain に載り、モデル向けの
-    履歴(convert_content_blocks_to_messages)には入らない(2026-10-30)。"""
+    履歴(convert_content_blocks_to_messages)には入らない。"""
     import asyncio
 
     from nucllei.utils.middleware import execute_tool_calls

@@ -364,7 +364,7 @@ def _ext(mod, monkeypatch, tmp_path) -> pathlib.Path:
 
 
 def test_ext_trash_sweep(monkeypatch, tmp_path):
-    # 共有の置き場の trash/ (/ext/groups/<g>/trash/ と /ext/public/trash/) も同じ規則 (2026-10-27)
+    # 共有の置き場の trash/ (/ext/groups/<g>/trash/ と /ext/public/trash/) も同じ規則
     mod = _load_main(monkeypatch, tmp_path)
     ext = _ext(mod, monkeypatch, tmp_path)
     _file(ext / "groups" / "EMR" / "trash" / "r.md", data=b"x" * 10)

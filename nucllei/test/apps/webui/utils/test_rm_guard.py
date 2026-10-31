@@ -1,4 +1,4 @@
-"""run_shell の rm の歯止め (utils/rm_guard — 2026-10-30 llens 経由 ken、batch 8)。
+"""run_shell の rm の歯止め (utils/rm_guard)。
 
 止めるのは /workspace・/ext の下を直接 rm するコマンドだけ。rm でないコマンドを止めない (読み違えて止める
 ほうが見逃すより悪い)。安全の境界ではない (find -delete・python・xargs 等は追わない)。
@@ -19,7 +19,7 @@ ALLOWED = parse_allowed(
 @pytest.mark.parametrize(
     "command, blocked",
     [
-        # よくある形 (staging): ls → rm -rf /workspace/<作業フォルダ>
+        # よくある形: ls → rm -rf /workspace/<作業フォルダ>
         ("rm -rf /workspace/20261030-x", ["/workspace/20261030-x"]),
         ("ls /workspace && rm -rf /workspace/20261030-x", ["/workspace/20261030-x"]),
         ("ls /workspace\nrm -rf /workspace/20261030-x", ["/workspace/20261030-x"]),
@@ -58,7 +58,7 @@ ALLOWED = parse_allowed(
         ("rm -rf /workspace/memory", ["/workspace/memory"]),
         ("rm /workspace/memory/../recipes/a", ["/workspace/recipes/a"]),
         ("rm /workspace/20261030-x/../recipes/a", ["/workspace/recipes/a"]),
-        # 作業フォルダそのもの・glob で空にするのは除外にならない (staging の形)
+        # 作業フォルダそのもの・glob で空にするのは除外にならない
         ("rm -rf /workspace/20261030-肺癌集計", ["/workspace/20261030-肺癌集計"]),
         ("rm -rf /workspace/20261030-x/", ["/workspace/20261030-x"]),
         ("rm -rf /workspace/20261030-x/*", ["/workspace/20261030-x/*"]),

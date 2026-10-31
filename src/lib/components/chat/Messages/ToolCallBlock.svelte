@@ -63,7 +63,7 @@
 		// tool のエラー種別(README_API §5.1)。content はモデルに渡した ERROR 文そのもの
 		error_kind?: ToolErrorKind;
 		// 中で順に読み込んだ・実行したものの木(load_recipe の requires・load_skill の
-		// before / after — 2026-10-30)。表示専用でモデルには渡らない
+		// before / after)。表示専用でモデルには渡らない
 		chain?: unknown;
 	};
 

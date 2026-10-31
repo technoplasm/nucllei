@@ -377,14 +377,14 @@ class TestAsyncExec(AbstractPostgresTest):
         tools = self._exec_tools()
         await_desc = tools["await_task"]["spec"]["description"]
         assert "ターンを終えること" not in await_desc
-        # 2026-10-30 (llens「tool の説明を削る」batch 3): running のときにどうするかは説明でなく、running を
+        # running のときにどうするかは説明でなく、running を
         # 返した結果の note が言う (test_await_running_note)。結果が自動で届くことは await_task だけが言う
         assert '時間切れのタスクは status: "running"' in await_desc
         assert "結果は完了時に自動で届く" in await_desc
         check_desc = tools["check_task"]["spec"]["description"]
         assert "自動で届く" not in check_desc
         # task_id の出どころ (background: true の返り) は 3 つとも引数に書かない — 不正な id の
-        # per-entry error が言う (2026-10-30 batch 3 / 4)
+        # per-entry error が言う
         for name in ("check_task", "await_task", "stop_task"):
             ids = tools[name]["spec"]["parameters"]["properties"]["task_ids"]
             assert "background" not in ids["description"], name
@@ -397,7 +397,7 @@ class TestAsyncExec(AbstractPostgresTest):
         include_done = tools["check_task"]["spec"]["parameters"]["properties"][
             "include_done"
         ]["description"]
-        # orphaned の意味は行の error (ORPHANED_ERROR) が言う (2026-10-30 batch 3)
+        # orphaned の意味は行の error (ORPHANED_ERROR) が言う
         assert "orphaned" in include_done and "再起動" not in include_done
 
     def test_spawn_note_without_await_task_in_the_turn(self):
@@ -1003,7 +1003,7 @@ class TestAsyncExec(AbstractPostgresTest):
 
         out = asyncio.run(check())
         assert out["total"] == 2
-        # running を返したときは check_task を待つために呼び続けないよう note が言う (2026-10-30 batch 3)
+        # running を返したときは check_task を待つために呼び続けないよう note が言う
         assert out["note"] == self.exec_tools._CHECK_RUNNING_NOTE
         assert [t["task_id"] for t in out["tasks"]] == ["old-running", "new-running"]
         entry = out["tasks"][0]
@@ -1172,7 +1172,7 @@ class TestAsyncExec(AbstractPostgresTest):
             assert isinstance(entry["started_at"], int)
             assert entry["elapsed_s"] >= 0
             assert "result" not in entry
-            # running を返したときだけ、どうするかを note が言う (2026-10-30 — 説明から移した)
+            # running を返したときだけ、どうするかを note が言う (説明には書かない)
             assert out["note"] == self.exec_tools._AWAIT_RUNNING_NOTE
             assert "待つために呼び直さず" in out["note"]
             # 待ちを外しただけ — exec は生きている(D6)
@@ -1202,7 +1202,7 @@ class TestAsyncExec(AbstractPostgresTest):
 
     def test_await_task_says_when_the_result_was_purged(self):
         """保持期間 (ASYNC_EXEC_RETENTION_DAYS) を過ぎて結果を消した行は、空の成功 (result: None) に
-        見せずに消えたと言う (2026-10-30 batch 3 — 説明から保持期間を外した代わり)。"""
+        見せずに消えたと言う (保持期間は説明に書かない)。"""
         self._insert("purged")
         assert self.Executions.finish_execution("purged", status="done", result="秘")
         assert self.Executions.purge_stale_results(int(time.time()) + 1) == 1
@@ -1849,7 +1849,7 @@ class TestAsyncExec(AbstractPostgresTest):
 
     def test_toolkit_note_goes_to_the_anchor_when_declared(self):
         """`Tools.toolkit_note_anchor` (関数名) があれば注記はその spec に付く。その関数が無ければ先頭
-        (2026-10-30 — 名前順の先頭は tool を足すたびに変わる)。"""
+        (名前順の先頭は tool を足すたびに変わる)。"""
         import types
 
         from nucllei.models.tools import ToolForm, Tools as ToolsTable

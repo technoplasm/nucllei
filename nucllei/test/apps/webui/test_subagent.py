@@ -287,12 +287,12 @@ class TestRunSubagent(AbstractPostgresTest):
             in spec["description"]
         )
         assert "サブエージェントどうしは同時に走り" in spec["description"]
-        # sandbox の直列は sandbox の共通注記が言う・結果の受け取り方は await_task の説明が言う
-        # (2026-10-30 batch 6 で外した)。続け方 (session_id) は注記の 1 回だけ
+        # sandbox の直列は sandbox の共通注記が言う・結果の受け取り方は await_task の説明が言う。
+        # 続け方 (session_id) は注記の 1 回だけ
         assert "sandbox で実行する tool" not in spec["description"]
         assert spec["description"].count("session_id") == 1
         # per-tool timeout(クラス属性 timeouts)と表示ディスクリプタ(戻り型の Annotated)
-        # 席を待つ分を足す (2026-10-30)
+        # 席を待つ分を足す
         from nucllei.env import SUBAGENT_QUEUE_TIMEOUT_S
 
         from nucllei.env import SUBAGENT_QUEUE_GRACE_S
@@ -816,8 +816,7 @@ class TestRunSubagent(AbstractPostgresTest):
 
     def test_preset_id_defaults_to_the_only_usable_preset(self, monkeypatch):
         """新規起動で preset_id を省いたとき: 使える preset が 1 つならそれで起動、2 つ以上なら渡せる id を
-        挙げた ERROR (2026-10-30 staging P05: 並べた 3 本とも preset_id を省いて ERROR)。継続 (session_id) では
-        子の preset を使うので要らない。"""
+        挙げた ERROR。継続 (session_id) では子の preset を使うので要らない。"""
         from nucllei.models.models import ModelForm
 
         self._patch_child_pipeline(monkeypatch)
@@ -901,7 +900,7 @@ class TestRunSubagent(AbstractPostgresTest):
         assert result.kind == "failure"
         assert "自分で処理する" in result.text
 
-    # ---- 席の待ち行列 (2026-10-30 llens staging P11: 上限で即エラーにするとモデルが呼び直し続けた) ----
+    # ---- 席の待ち行列 (上限を超えた呼び出しは即エラーにせず席を待つ) ----
 
     def test_over_cap_call_waits_for_a_slot_then_runs(self, monkeypatch):
         """上限を超えた呼び出しはエラーにせず、席が空くまで待ってから走る。待ったことは結果の note に。"""
@@ -1361,7 +1360,7 @@ class TestRunSubagent(AbstractPostgresTest):
         )
         assert "即エラー" not in Tools.__doc__
         assert "5 本以上も一度に並べてよい (background でも同じ)" in Tools.__doc__
-        # 待ちの上限の既定は子ターンの上限 + 余裕 (2026-10-30 llens 決定 — 席がすべて長い子で埋まって
+        # 待ちの上限の既定は子ターンの上限 + 余裕 (席がすべて長い子で埋まって
         # いても、後から並んだ呼び出しはその子が止められる前に時間切れにならない)
         from nucllei.env import SUBAGENT_QUEUE_GRACE_S
 

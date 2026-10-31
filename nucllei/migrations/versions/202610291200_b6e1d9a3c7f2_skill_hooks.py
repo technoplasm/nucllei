@@ -1,9 +1,7 @@
 """skill before / after
 
-skill を読み込んだときにサーバが実行する tool (llens prism-hu/llens#22「hooks 的な」、
-2026-10-29。2026-10-30 に on_load 1 列から before / after の 2 列へ — 未出荷なのでこの
-migration を書き換えた)。どちらも `[{"tool": <名前>, "args": {…}}]`。結果は before → 本文 →
-after の順に 1 つの load_skill の結果へ入る。発火の規則は _memos/skill-design.md「before / after」。
+skill を読み込んだときにサーバが実行する tool (prism-hu/llens#22)。
+どちらも `[{"tool": <名前>, "args": {…}}]`。結果は before → 本文 → after の順に 1 つの load_skill の結果へ入る。発火の規則は _memos/skill-design.md「before / after」。
 
 Revision ID: b6e1d9a3c7f2
 Revises: ac4c52211a8e

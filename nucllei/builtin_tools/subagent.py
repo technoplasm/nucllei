@@ -71,14 +71,14 @@ class Tools:
     # 恒久不適格の衝突ガードに掛かる。
     backgroundable = ("run_subagent",)
     # background のユーザーごとの同時数には走り出してから数える — 席が空くのを待っているだけのタスクが
-    # 子の run_python 等の background を上限で弾かないように (2026-10-30 llens 決定。get_tools が
-    # per-entry キーへ落とす — utils/executions.exec_count_started)
+    # 子の run_python 等の background を上限で弾かないように (get_tools が per-entry キーへ落とす —
+    # utils/executions.exec_count_started)
     exec_count_on_start = ("run_subagent",)
 
     # #107 決定 7: 子ターン全体(モデル呼び出しと tool 実行の反復)を包むので
     # TOOL_EXEC_TIMEOUT_S より長い。-1 等の非正値は「システム側上限なし」
     # (get_tools が非正値も per-entry timeout として通す)。
-    # 2026-10-30: 席が空くのを待つ分 (SUBAGENT_QUEUE_TIMEOUT_S) を足す — 待ちで子ターンの持ち時間を
+    # 席が空くのを待つ分 (SUBAGENT_QUEUE_TIMEOUT_S) を足す — 待ちで子ターンの持ち時間を
     # 削らない (どちらかが非正値 = 無制限なら子ターンの値のまま)
     # 外側の歯止めには、子を止めて途中までの回答を組む間の余裕 (2 × SUBAGENT_QUEUE_GRACE_S) も足す —
     # 待ちと子ターンが両方とも上限近くまで使われても、内側の時間切れ (途中までの回答) が先に効く

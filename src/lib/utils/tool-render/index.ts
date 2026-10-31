@@ -463,7 +463,7 @@ export const classifyToolResult = (
 	return { kind: 'text', value: content };
 };
 
-// 中で順に読み込んだ・実行したものの木(results[i].chain — BE tool_output.set_chain、2026-10-30)。
+// 中で順に読み込んだ・実行したものの木(results[i].chain — BE tool_output.set_chain)。
 // load_recipe の requires(recipe は入れ子)と、load_skill(/command・自動ロード)の before / after。
 // モデルには渡らない表示専用のデータ — 中の実行は別のカードにせず、この木で見せる。
 export type ToolChainStatus = 'ok' | 'loaded' | 'warning' | 'error';

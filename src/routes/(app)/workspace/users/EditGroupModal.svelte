@@ -54,7 +54,7 @@
 	let name = $state('');
 	let description = $state('');
 	let userIds = $state<string[]>([]);
-	// グループの置き場への書き込み(data.ext。2026-10-31 ken、案 A)— GroupUsers で編集
+	// グループの置き場への書き込み(data.ext)— GroupUsers で編集
 	let writeMode = $state<'members' | 'listed'>('members');
 	let writers = $state<string[]>([]);
 

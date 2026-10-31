@@ -155,7 +155,7 @@ class ToolOutputSink:
         with self._lock:
             return dict(self._result_render) if self._result_render else None
 
-    # --- 中で読み込んだ・実行したものの木(2026-10-30)-----------------------
+    # --- 中で読み込んだ・実行したものの木 -----------------------------------
 
     def set_chain(self, chain: dict) -> None:
         if not isinstance(chain, dict) or not chain:
@@ -437,7 +437,7 @@ def progress(
 
 def set_chain(chain: dict) -> None:
     """この tool の中で順に読み込んだ・実行したもの(load_recipe の requires、load_skill の
-    before / after)の木を、結果のカードに見せる(results[i].chain — 2026-10-30)。
+    before / after)の木を、結果のカードに見せる(results[i].chain)。
 
     `{"entries": [node…], "body": <本文>}`。node は {kind, target, status (ok / loaded /
     warning / error), reason?, output?, phase? (before / after), children? / body? (入れ子の

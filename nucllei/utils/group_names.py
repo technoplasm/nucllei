@@ -24,7 +24,7 @@ MAX_GROUP_NAME_BYTES = 255
 # 名前に含めてはいけない文字(パス区切り・nsjail の bind 指定の区切り)
 FORBIDDEN_GROUP_NAME_CHARS = frozenset("/\\:")
 
-# シェルのメタ文字(2026-10-27、llens 依頼): 配備側の skill が `{{USER_GROUPS}}` を run_shell の
+# シェルのメタ文字: 配備側の skill が `{{USER_GROUPS}}` を run_shell の
 # コマンド (`--groups "…"`) に埋めるので、`"` で引用が壊れ、`$( )` や `` ` `` で展開される。
 # 引用符・展開・区切り・リダイレクト・グロブ・履歴展開・コメントに効く ASCII の記号を弾く。
 # 見るのは入力そのままの形だけ — 全角の「（）」「！」等はシェルにとってただの文字なので通す

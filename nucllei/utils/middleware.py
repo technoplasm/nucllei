@@ -470,13 +470,12 @@ async def build_capability_tools(
     """モデルの能力が差し込む合成の tool (load_skill、レシピの load_recipe / save_recipe / edit_recipe)。
 
     process_chat_payload と system prompt のプレビュー (utils/prompt_preview) が同じこれを通る
-    (プレビューの tool の宣言が実際とずれないように — 2026-10-30 ken「実際どのように展開されるか」)。
+    (プレビューの tool の宣言が実際とずれないように)。
     戻り値は {名前: エントリ} を差し込む順に。呼び手が tools_dict に重ねる (同名は合成側が勝つ)。
 
     preset の system prompt に {{SKILLS}} / {{USER_RECIPES}} があれば、一覧は system prompt に入るので
     load_skill / load_recipe の説明には入れない (tool の宣言を利用者によらず preset ごとに同じにする —
-    chat template は tool を system より前に出すので、prefix cache が利用者をまたげるように。
-    ken 2026-10-30「変わりにくいものを前に、変わりやすいものを後ろに」)。
+    chat template は tool を system より前に出すので、prefix cache が利用者をまたげるように)。
     messages: `/command` の合成 exchange・過去ターンの load_skill を見て、読み込み済みの skill は
     本文を再注入しない(46b5ff9ed)。load_tools / run_hooks は load_skill の呼び出し時のフック
     (プレビューでは渡さない — 呼ばないので)。
@@ -498,7 +497,7 @@ async def build_capability_tools(
     if load_skill_tool is not None:
         entries["load_skill"] = load_skill_tool
 
-    # 能力「レシピ」(meta.features.recipes、既定 ON — ken 2026-10-30「スキルみたいに」):
+    # 能力「レシピ」(meta.features.recipes、既定 ON):
     # load_recipe / save_recipe / edit_recipe を合成して差し込む(builtin_sandbox・toolIds の
     # 有無に依らない)。一覧は 1 リクエスト 1 回 — OFF・sandbox の無い配備では sandbox に聞かない。
     entries.update(

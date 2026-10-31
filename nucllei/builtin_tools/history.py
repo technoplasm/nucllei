@@ -187,9 +187,8 @@ class Tools:
                 "updated_at": _fmt_time(c.updated_at),
                 "matches": matches,
             }
-            # 抜粋の上限・空の意味は、その場合だけヒットに添える (2026-10-30 llens「tool の説明を削る」
-            # batch 5 — 説明の「最大 3 件」を外した代わり。敵対レビュー: 3 件を全出現と数える・空を
-            # 壊れた結果と見る)
+            # 抜粋の上限・空の意味は、その場合だけヒットに添える (無いと上限の件数を全出現と数え、
+            # 空を壊れた結果と見る)
             if len(matches) >= MAX_MATCHES_PER_CHAT:
                 item["matches_note"] = (
                     f"抜粋は最初の {MAX_MATCHES_PER_CHAT} 件まで (他にも一致があるかもしれない)"

@@ -39,7 +39,7 @@
 
 	// 基本設定 | プロンプト | 高度なパラメータ(Admin > Users の様式)
 	let selectedTab = $state('general');
-	// プロンプトタブの System Prompt 欄: 編集 | プレビュー(2026-10-30 ken「実際どのように展開されるか」)
+	// プロンプトタブの System Prompt 欄: 編集 | プレビュー
 	let systemView = $state<'edit' | 'preview'>('edit');
 
 	let loading = $state(false);

@@ -1,5 +1,4 @@
-"""system prompt の変数 {{USER_MEMORY_INDEX}} — 利用者の記憶の目次 (2026-10-31 ken「レシピが一覧で入るなら記憶も
-何かしら入るべき」)。"""
+"""system prompt の変数 {{USER_MEMORY_INDEX}} — 利用者の記憶の目次。"""
 
 import asyncio
 import base64

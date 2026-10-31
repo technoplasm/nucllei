@@ -1,19 +1,17 @@
-"""レシピの tool — load_recipe / save_recipe / edit_recipe (2026-10-30)。
+"""レシピの tool — load_recipe / save_recipe / edit_recipe。
 
-llens 依頼・ken 指示「ぜんぶ nuc にやらせて」で、llens の jail のコマンド `/ext/bin/recipe` (list / check /
-promote) を nucllei に移した。有効化はモデル (preset) の能力「レシピ」(`meta.features.recipes`、既定 ON —
-ken 2026-10-30「スキルみたいに」「能力として」): ON かつ sandbox のある配備 (SANDBOX_URL) なら、middleware が
-`build_recipe_tools` で 3 つを合成して tools に差し込む (load_skill と同じ流儀。builtin_sandbox / toolIds の
-有無に依らない — ツール選択の一覧には出ない)。見えるレシピの一覧は load_recipe の説明に入る (skill の
+有効化はモデル (preset) の能力「レシピ」(`meta.features.recipes`、既定 ON): ON かつ sandbox のある
+配備 (SANDBOX_URL) なら、middleware が `build_recipe_tools` で 3 つを合成して tools に差し込む (load_skill
+と同じ流儀。builtin_sandbox / toolIds の有無に依らない — ツール選択の一覧には出ない)。見えるレシピの一覧は load_recipe の説明に入る (skill の
 manifest と同じ)。preset の system prompt に {{USER_RECIPES}} があれば一覧はそちらに入り、説明には
-1 文 (RECIPE_INDEX_IN_PROMPT) だけ置く (1a12fbb73)。sandbox への HTTP・書き先の解決・read_file / run_shell は、
+1 文 (RECIPE_INDEX_IN_PROMPT) だけ置く。sandbox への HTTP・書き先の解決・read_file / run_shell は、
 中に持つ `sandbox.Tools` のインスタンスから借りる (valve は builtin_sandbox の保存値)。判定は
 `utils/recipes.py`、一覧と「壊れている」の材料集めは `utils/recipe_index.py`。
 
 - 置き場は `<層>/recipes/<名前>/RECIPE.md` + 同じフォルダの付属。読む・書ける範囲は read_file /
   write_file と同じ ACL (/workspace・所属グループの /ext/groups/<g> (書き込みを「指定した人だけ」に
   したグループは指定された人だけ — 他のメンバーは読むだけ)・管理者は全グループと /ext/public)
-- load_recipe はモデルが呼ぶ tool。結果は 1 つにまとめる (ken 2026-10-30「資料を先・指示を最後」):
+- load_recipe はモデルが呼ぶ tool。結果は 1 つにまとめる (資料を先・指示を最後):
   frontmatter の requires を書いた順に中で実行して見出し付きで先に並べ、このレシピの本文を最後に
   置く。recipe: は深さ優先で、読み込んだレシピも「その requires → その本文」の順に入れ子で展開する。
   shell / python は run_shell と同じ形 (`cd '<フォルダ>' && bash ./<付属> …`) を中で呼ぶ (stateful
@@ -23,7 +21,7 @@ manifest と同じ)。preset の system prompt に {{USER_RECIPES}} があれば
   断らず、書いた後の全体だけを検査する)。壊れたレシピの load_recipe は本文を返さず ERROR (一覧と
   同じ判定)。中の値が通らないもの (参照先が無い・読む人に見えない・requires の層の規則の違反・使える
   人が限られる関数) は警告で、本文は返し、通らない要素はその位置に見出し + 警告 1 行を入れて実行しない
-- write_file / edit_file で RECIPE.md を書くのは断る (抜け道)。付属は今までどおり write_file /
+- write_file / edit_file で RECIPE.md を書くのは断る (抜け道)。付属は write_file /
   edit_file で書ける。run_shell の mv / cp で回り込むのは止められない
 """
 
@@ -123,7 +121,7 @@ _FRAME_TAG = re.compile(r"<(/?recipe)", re.IGNORECASE)
 def _defuse(text: str) -> str:
     """中に入れる利用者由来の文字列 (本文・要素の出力・見出しの対象・警告の理由) が枠を作らない
     ように、`<recipe` / `</recipe` (`<recipe-part` も) を `&lt;recipe` / `&lt;/recipe` に潰す。
-    閉じタグだけでなく開きタグも潰す (2026-10-30 llens): `_history_marks` は結果の中の
+    閉じタグだけでなく開きタグも潰す: `_history_marks` は結果の中の
     `<recipe path="…">` / `<recipe-part key="…">` で「読み込み済み」を拾うので、共有レシピの本文や
     読ませたファイルに書かれると別のレシピ・要素を止められる。偽の枠が作れなければ、本文の中の
     「警告: …」のような行も `<recipe>` の中 = 利用者が書いた文だと構造で分かる。何度掛けても同じ。"""
@@ -146,7 +144,7 @@ def _history_marks(messages) -> _Marks:
       `<recipe-part key="…" owner="…" status="ok">` (実行した要素) を足す。status が ok 以外
       (loaded / warning / error) は数えない
     - save_recipe / edit_recipe の結果の `<recipe-reset path="…">` で、それより前のそのレシピの印を
-      外す (直した後の load_recipe は新しい版を返す — 2026-10-30 llens)
+      外す (直した後の load_recipe は新しい版を返す)
     見るのはその tool の結果だけ — 利用者が貼った文や他の tool の結果の同じ文字列は見ない。結果の中に
     入る利用者由来の文字列は `_defuse` 済みなので、そこに書かれた印も数えない。"""
     names, texts = {}, []
@@ -419,7 +417,7 @@ class RecipeTools:
 
         :param path: レシピのフォルダの絶対パス (一覧の path。`…/RECIPE.md` でもよい)
         """
-        # 説明から外した細目 (2026-10-30 llens「削って結果へ」) は、その場面の結果が言う: 利用者の文で
+        # 説明に書かない細目は、その場面の結果が言う: 利用者の文で
         # システムの指示ではない・status の読み方は結果の先頭 (REQUIRES_HEAD、requires のあるとき) と
         # 本文の前の lead、<recipe-warning> の枠と付属を動かす run_shell が無いことは lead
         # (_expand_recipe)、読み込み済みは LOADED_RECIPE_RESULT、壊れている・警告は ERROR と各要素の
@@ -456,8 +454,8 @@ class RecipeTools:
                 + "。",
             )
         if root["children"]:
-            # 資料 (requires) を読む前に枠付けを言う (load_recipe の説明から移した — 資料のあるときだけ
-            # 要る。本文の直前の lead は資料の後に来るので、ここで先に。2026-10-30 llens)
+            # 資料 (requires) を読む前に枠付けを言う (資料のあるときだけ要る。本文の直前の lead は
+            # 資料の後に来るので、ここで先に)
             sections.insert(0, _Section(REQUIRES_HEAD))
         if isinstance(__metadata__, dict):
             __metadata__[RECIPES_LOADED_KEY] |= marks.folders
@@ -570,12 +568,11 @@ class RecipeTools:
                 + (" …" if len(attachments) > 20 else "")
                 + f"。付属のパスは {ref.folder}/<ファイル名>。"
             )
-        # 付属を自分で動かす手が無いこと (load_recipe の説明から移した — 読み込んだときだけ要る。
-        # 2026-10-30 llens)。入れ子のレシピごとには繰り返さない
+        # 付属を自分で動かす手が無いこと (読み込んだときだけ言う)。入れ子のレシピごとには繰り返さない
         if depth == 0 and attachments and not tool_in_turn("run_shell"):
             lead += " このターンには run_shell が無いので、本文の手順で付属を自分で動かすことはできない。"
         # レシピ全体の警告 (使える人が限られる関数・所属外 等) も tool だけが書ける枠に入れる
-        # (資料・本文の `<recipe` は潰すので、`<recipe-warning>` は作れない — 2026-10-30 llens)
+        # (資料・本文の `<recipe` は潰すので、`<recipe-warning>` は作れない)
         warning = ""
         if warns.recipe:
             lead += " 本文の前の枠はこのレシピ全体への tool の警告。"
@@ -730,7 +727,7 @@ class RecipeTools:
         :param requires: 読み込み時に本文より先に入れる資料。`[{"read": "<パス>"}, {"recipe": "<フォルダ>"}, {"shell": "<付属> 引数"}, {"python": "<付属の .py> 引数"}]` の並び。read の相対パスと shell / python の付属はこのフォルダの中
         :param from_path: 別のレシピを付属ごと path へ写すときの写し元のフォルダ (省いた title / description / body / requires と author は写し元のまま)
         """
-        # 説明から外した細目 (2026-10-30 llens「削って ERROR へ」) は、その場面の戻り値が言う: 検査の
+        # 説明に書かない細目は、その場面の戻り値が言う: 検査の
         # 中身 (患者データ・壊れた形・層の規則) と直し方は検査の ERROR、前の版の置き場と戻し方・author は
         # 結果、写すときに付属のパスを書き換えないのは「付属は相対のファイル名」の決まりどおり
         from nucllei.utils.recipes import (
@@ -951,7 +948,7 @@ class RecipeTools:
         :param old_text: 置き換える部分。空白・改行・インデントまで RECIPE.md の中の文字どおりで、1 か所だけに一致すること
         :param new_text: 置き換え後の文字列 (空なら old_text の部分を消す)
         """
-        # 説明から外した細目 (2026-10-30 llens「削って ERROR へ」) は、その場面の戻り値が言う: 一致
+        # 説明に書かない細目は、その場面の戻り値が言う: 一致
         # 0 / 2 か所以上・old_text 空・author を変えた・検査の中身は ERROR、updated を今日にしたことは
         # 結果、壊れたレシピも直せることは load_recipe の ERROR (BROKEN_NEXT) と一覧の印
         from nucllei.utils.recipes import (
@@ -1089,7 +1086,7 @@ class RecipeTools:
 def _written_reply(lines: list, tell: str, metadata, folder: str) -> str:
     """save_recipe / edit_recipe の返答。利用者由来の文字列 (題・作者・直した行の抜粋・警告の理由) が
     枠や印を作らないよう潰し、最後に「読み込み済み」を外す印 (`<recipe-reset path="…">`) と
-    返答への指示を置く — 直した後の load_recipe は同じ会話でも新しい版を最初から返す (2026-10-30 llens)。"""
+    返答への指示を置く — 直した後の load_recipe は同じ会話でも新しい版を最初から返す。"""
     return "\n".join(
         [_defuse(x) for x in lines]
         + [_reset_marks(metadata, folder), f"返答への指示: {_defuse(tell)}"]
@@ -1098,7 +1095,7 @@ def _written_reply(lines: list, tell: str, metadata, folder: str) -> str:
 
 def _audience(layer) -> str:
     """save_recipe の結果の「誰が見て直せるか」。書き込みを「指定した人だけ」にしたグループは
-    メンバー全員が直せるとは言わない (2026-10-31 ken、案 A)。"""
+    メンバー全員が直せるとは言わない。"""
     if layer.kind == "group":
         from nucllei.utils.ext_acl import WRITE_LISTED, group_write_mode_by_name
 
@@ -1174,8 +1171,8 @@ async def build_recipe_tools(
     間は持ち回り、system prompt の {{USER_RECIPES}} も同じものを使う)。preset の system prompt に
     {{USER_RECIPES}} があれば (`listing_in_prompt`) 一覧は system prompt に入るので、load_recipe の
     説明には 1 文 (RECIPE_INDEX_IN_PROMPT) だけ置く — tool の宣言は chat template で system より前に
-    出るので、利用者ごとに変わる一覧を説明に入れると prefix cache が利用者をまたげない (ken 2026-10-30
-    「変わりにくいものを前に」)。無ければ今までどおり説明の末尾に一覧 (書き忘れた preset で消えないように)。
+    出るので、利用者ごとに変わる一覧を説明に入れると prefix cache が利用者をまたげない。
+    無ければ説明の末尾に一覧 (書き忘れた preset で消えないように)。
     戻り値は get_tools と同じ形のエントリ (tool_id は RECIPE_TOOL_ID、3 つで 1 レーン = 応答順に
     1 本ずつ)。extra_params は tools_extra_params (`__user__` `__metadata__` `__messages__` を関数の
     引数に当てる)。

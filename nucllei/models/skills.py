@@ -37,8 +37,8 @@ class Skill(Base):
     # 条件に合う添付が会話にあれば `/command` と同じ経路で発火する
     # (utils/skills.py apply_skill_auto_load)。空 = 自動ロードしない。
     auto_load_content_types = Column(JSON, nullable=True)
-    # 読み込まれたときにサーバが実行する tool(llens#22、2026-10-30 に on_load から before / after
-    # へ)。どちらも `[{"tool": <tool 名>, "args": {…}}]`(args は固定値だけ)で、書いた順に
+    # 読み込まれたときにサーバが実行する tool(llens#22)。どちらも
+    # `[{"tool": <tool 名>, "args": {…}}]`(args は固定値だけ)で、書いた順に
     # 実行し、結果は before → 本文 → after の順に 1 つの load_skill の結果へ入れる
     # (utils/skills.py run_skill_hooks)。要素が 1 つでもあれば保存は admin のみ。
     before = Column(JSON, nullable=True)
@@ -118,7 +118,7 @@ class SkillFieldError(ValueError):
 
 
 # skill の読み込みに使う tool。before / after には書けない(skill が別の skill やレシピを読み込む
-# 場面は無い — 2026-10-30 ken。読み込むかはモデルが決める)
+# 場面は無い。読み込むかはモデルが決める)
 HOOK_FORBIDDEN_TOOLS = ("load_skill", "load_recipe")
 
 HOOK_FIELDS = ("before", "after")
@@ -256,7 +256,7 @@ class SkillsTable:
                 skill.content = form_data.content
                 skill.tool_ids = form_data.tool_ids
                 skill.auto_load_content_types = form_data.auto_load_content_types
-                # 省略(None)は既存値を保つ — 旧いクライアントの保存で消えないように
+                # 省略(None)は既存値を保つ — before / after を送らないクライアントの保存で消えないように
                 if form_data.before is not None:
                     skill.before = form_data.before
                 if form_data.after is not None:

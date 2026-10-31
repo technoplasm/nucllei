@@ -154,7 +154,7 @@ class SkillPreviewForm(BaseModel):
 async def preview_skill(
     request: Request, form_data: SkillPreviewForm, user=Depends(get_verified_user)
 ):
-    """skill の編集画面のプレビュー (2026-10-30 ken): 編集中の本文をリクエストした本人として展開し、
+    """skill の編集画面のプレビュー: 編集中の本文をリクエストした本人として展開し、
     before / after を書いた順に並べて返す (実行しない)。skill を編集できる人 (editor) だけ。
     model_id の preset は本人が使えるもの (admin は全部)。"""
     from nucllei.utils.prompt_preview import preview_skill as build_preview

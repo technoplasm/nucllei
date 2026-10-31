@@ -8,7 +8,7 @@
 
 	const i18n = getContext('i18n');
 
-	// writeMode / writers: グループの置き場(/ext/groups/<名前>)への書き込み(2026-10-31 ken、案 A)。
+	// writeMode / writers: グループの置き場(/ext/groups/<名前>)への書き込み。
 	// 'members' = メンバー全員が書ける(既定)、'listed' = writers のメンバーだけ書ける。
 	// 所属(userIds)の意味は変えない。writers は保存時に BE が userIds との積に揃えるが、
 	// 画面でもメンバーから外したら writers から落とす

@@ -635,7 +635,7 @@ class TestSkills(AbstractPostgresTest):
         assert tool["render"] == {"result": {"kind": "skill"}}
 
     def test_skills_variable_and_fixed_load_skill_spec(self):
-        """{{SKILLS}} (ken 2026-10-30): load_skill の説明に入れていた一覧と同じ中身・並び・可視の判定
+        """{{SKILLS}}: 変数の無い preset で load_skill の説明に入る一覧と同じ中身・並び・可視の判定
         (skill_manifest を共有)。system prompt に変数がある preset (listing_in_prompt) では load_skill の
         説明・spec は利用者によらず同じ文字列 (enum も付けない — 利用者ごとに変わるので)。"""
         import asyncio
@@ -691,7 +691,7 @@ class TestSkills(AbstractPostgresTest):
         )
         assert "enum" not in fixed["parameters"]["properties"]["skill_id"]
         assert "pubcmd" not in fixed["description"]
-        # 変数の無い preset は今までどおり (説明に一覧・enum)
+        # 変数の無い preset は説明に一覧・enum が入る
         assert spec(u7, False) != spec(u8, False)
         # 見えない skill はその利用者には呼べない (enum が無くても manifest で止まる)
         tool = build_load_skill_tool(model, u8, listing_in_prompt=True)

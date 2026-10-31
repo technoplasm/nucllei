@@ -693,9 +693,8 @@ export const blobToFile = (blob: Blob, fileName: string) => {
 };
 
 // チャットの送信で metadata.variables に載せる、ブラウザでしか分からない変数 (BE の
-// task.BROWSER_PROMPT_VARIABLES)。日付・時刻・曜日・利用者の変数はサーバの値が正なので送らない
-// (2026-10-30 — 以前はここで英語の曜日などを送り、サーバの値を上書きしていた)。日時はサーバが
-// {{CURRENT_TIMEZONE}} の TZ で作る
+// task.BROWSER_PROMPT_VARIABLES)。日付・時刻・曜日・利用者の変数はサーバの値が正なので送らない。
+// 日時はサーバが {{CURRENT_TIMEZONE}} の TZ で作る
 export const getPromptVariables = () => {
 	return {
 		'{{CURRENT_TIMEZONE}}': Intl.DateTimeFormat().resolvedOptions().timeZone,

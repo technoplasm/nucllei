@@ -1,4 +1,4 @@
-"""preset / skill の編集画面のプレビュー (2026-10-30 ken「実際どのように展開されるかプレビューをタブで」)。
+"""preset / skill の編集画面のプレビュー。
 
 - POST /api/v1/models/preview: 編集中 (未保存) の preset で、新しいチャットの最初のターンにモデルへ
   渡る tools と system prompt を、リクエストした本人として返す。admin だけ (preset の編集と同じ)
@@ -57,7 +57,7 @@ def _insert_skill(skill_id="pvskill", description="集計の手順"):
     )
 
 
-# ブラウザ (getPromptVariables の旧形) が送っていた英語の曜日など — サーバの値を上書きしてはいけない
+# ブラウザが送りうる英語の曜日など — サーバの値を上書きしてはいけない
 BROWSER_VARIABLES = {
     "{{CURRENT_DATE}}": "1999-01-01",
     "{{CURRENT_TIME}}": "11:59:59 PM",
@@ -262,8 +262,8 @@ class TestModelPreview(AbstractPostgresTest):
 
     def test_system_matches_the_real_request_and_server_values_win(self, monkeypatch):
         """system prompt はプレビューも実際のリクエスト (routers の apply_model_system_prompt_to_body) も、
-        日付・曜日・利用者はサーバの値。ブラウザが英語の曜日などを送っても使わない (2026-10-30 llens:
-        UI のチャットで {{CURRENT_WEEKDAY}} が Friday になっていた)。日時は {{CURRENT_TIMEZONE}} の TZ。"""
+        日付・曜日・利用者はサーバの値。ブラウザが英語の曜日などを送っても使わない。
+        日時は {{CURRENT_TIMEZONE}} の TZ。"""
         from nucllei.models.models import ModelForm
         from nucllei.models.users import UserModel
         from nucllei.utils.payload import apply_model_system_prompt_to_body
@@ -450,8 +450,8 @@ def test_segment_expansion_falls_back_when_pieces_do_not_join():
 
 
 class TestChatSystemPrompt(AbstractPostgresTest):
-    """チャットの system prompt (先頭の system メッセージ) の変数はサーバが展開する — ブラウザの自前展開
-    (英語の曜日・12 時間制) をやめた (2026-10-30)。"""
+    """チャットの system prompt (先頭の system メッセージ) の変数はサーバが展開する (ブラウザは展開
+    しない)。"""
 
     BASE_PATH = "/api/v1/chats"
 
@@ -474,11 +474,11 @@ class TestChatSystemPrompt(AbstractPostgresTest):
         )
         after = _now_in(tz)
         # チャットの system はサーバの日本語の曜日・本人の名前。ブラウザでしか分からない
-        # {{USER_LANGUAGE}} はブラウザの値 (以前ブラウザが自前展開していたのと同じに効く)
+        # {{USER_LANGUAGE}} はブラウザの値
         assert out["messages"][0]["content"] in {
             f"{d} {w} Taro ja-JP" for d, w in (before, after)
         }
-        # 利用者の本文は展開しない (今までどおり)
+        # 利用者の本文は展開しない
         assert out["messages"][1]["content"] == "{{CURRENT_WEEKDAY}}"
 
 

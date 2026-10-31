@@ -1,9 +1,7 @@
-"""run_shell の `rm` の歯止め (2026-10-30 llens 経由 ken、batch 8)。
+"""run_shell の `rm` の歯止め。
 
-「完全に消して」と頼まれると、system prompt が remove_file (ゴミ箱へ移す) を決めていても 1/10 ほどの回で
-run_shell の `rm -rf /workspace/<作業フォルダ>` を打つ (管理者の回で /ext/public のレシピを消したことも
-ある)。sandbox へ送る前に、コマンドの中の素直な `rm` を見つけ、その対象が `/workspace` か `/ext` の下なら
-実行せずに断る。
+sandbox へ送る前に、コマンドの中の素直な `rm` を見つけ、その対象が `/workspace` か `/ext` の下なら
+実行せずに断る (消すのは remove_file — ゴミ箱へ移す)。
 
 **これは安全の境界ではない** — よくある直接の `rm` を止める歯止めだけ。`find -delete`・`xargs rm`・
 `python -c "os.remove(…)"`・`mv … /dev/null`・変数に入れたパス・eval・別の場所に書いたスクリプトの中の

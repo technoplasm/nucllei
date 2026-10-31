@@ -1,5 +1,4 @@
-"""skill の before / after(llens prism-hu/llens#22「hooks 的な」、2026-10-30 に on_load から
-作り直し)の回帰テスト。
+"""skill の before / after(prism-hu/llens#22)の回帰テスト。
 
 before / after = skill が読み込まれたときにサーバが実行する tool の並び(admin が書く
 `[{"tool": …, "args": {…}}]`)。結果は before → 本文 → after の順に 1 つの load_skill の結果へ
@@ -27,7 +26,7 @@ from starlette.requests import Request
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
 
-# llens の emr.md の予定の形(2026-10-30)
+# llens の emr.md の形
 EMR_BEFORE = [
     {
         "tool": "run_shell",

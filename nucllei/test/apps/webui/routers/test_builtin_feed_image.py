@@ -405,8 +405,8 @@ def test_docstring_names_url_and_path_with_their_fixed_meanings():
     assert "取り違え" not in doc and "どちらでも" not in doc
     assert "BE 上" not in doc and "添付・生成物" in doc
     # 2026-10-04: `#page=N` の扱い等の細目は README_API §5.7.1 へ移した (毎ターン送る
-    # token の節約)。2026-10-30 (llens「削って ERROR へ」): ERROR の形 (「次の手:」) は llens の
-    # system prompt が持つので外し、受け取った形のままは url の引数へ
+    # token の節約)。ERROR の形 (「次の手:」) は説明に書かない (配備の system prompt が持つ)。
+    # 受け取った形のままは url の引数が言う
     assert "受け取った形のまま" in url_line and "ERROR" not in doc
     assert "1 件 3 ページまで" in doc and "総ページ数を返す" in doc and '"4-6"' in doc
     assert "cage" not in doc.lower() and "棚" not in doc
@@ -1057,8 +1057,8 @@ def test_no_args_targets_attached_pdfs_only_not_images(monkeypatch):
 def test_no_target_kind_depends_on_whether_something_was_named(monkeypatch):
     """「対象が見つからない」は url / path / file_id 無しのときだけ。何も指していない (添付
     PDF も無い) は call、filename で指したのに一致する添付 PDF が無いは outcome — 文面は同じ
-    (llens 判定 2026-10-04 — filename で指したときだけ、次の手に filename の効き方を前置する
-    2026-10-30)。file_id の不在は別経路 (file_id_error = call)。"""
+    (filename で指したときだけ、次の手に filename の効き方を前置する)。file_id の不在は別経路
+    (file_id_error = call)。"""
     mod, _resolver = _install(monkeypatch, TABLE, n_pages=1)
     files = [
         {
@@ -1604,7 +1604,7 @@ def test_spec_description_carries_the_new_sentences():
     )
     assert "このターン内で" not in desc
     assert "全部合わせて 10 ページまで" in desc
-    # 見せ方・作らないことは成功の結果が言う (2026-10-30 llens「削って ERROR へ」)
+    # 見せ方・作らないことは成功の結果が言う
     assert "Files" not in desc and "ユーザーには表示されない" in desc
     for gone in ("新しいファイル", "![", "(任意)", "続きは"):
         assert gone not in json_dumps(spec), gone

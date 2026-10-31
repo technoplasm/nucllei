@@ -1,8 +1,7 @@
 <script lang="ts">
-	// preset の編集画面「プロンプト」タブのプレビュー (2026-10-30 ken「実際どのように展開されるか
-	// プレビューをタブで付けて」)。編集中の system prompt で新しいチャットを始めたとき、モデルに渡る
-	// tools → system prompt を自分として展開して見せる (POST /models/preview — 実際のリクエストと
-	// 同じ関数を通る。実行はしない)。利用者ごと・日時ごとに変わる所は色で分ける (prefix cache)。
+	// preset の編集画面「プロンプト」タブのプレビュー。編集中の system prompt で新しいチャットを
+	// 始めたとき、モデルに渡る tools → system prompt を自分として展開して見せる (POST /models/preview
+	// — 実際のリクエストと同じ関数を通る。実行はしない)。利用者ごと・日時ごとに変わる所は色で分ける (prefix cache)。
 	import { getContext, onMount } from 'svelte';
 
 	import { previewModel, type ModelPreview } from '$lib/apis/models';

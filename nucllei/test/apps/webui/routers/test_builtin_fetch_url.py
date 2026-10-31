@@ -1350,7 +1350,7 @@ def test_continuation_keeps_the_query(monkeypatch, ext_env):
         " (同じ query を渡す)。next_offset=10" in result
     )
     result, _c = _run(monkeypatch, ext_env, f"{SITE}/top.aspx", limit=10)
-    # url はその字のまま (`url=...`) でなく実際の値で書く (2026-10-30 batch 2)
+    # url はその字のまま (`url=...`) でなく実際の値で書く
     assert (
         f'続きは fetch_url(url="{SITE}/top.aspx", offset=10) で取る。next_offset=10'
         in result
@@ -1443,8 +1443,7 @@ def test_spec_description_has_no_deployment_word():
         spec["parameters"]["properties"]["limit"]["description"]
         == "返す文字数 (既定 8000。上限を超える値は上限で頭打ち)"
     )
-    # 2026-10-30 (llens「tool の説明を削る」batch 2): 戻り値の形と ERROR の約束は説明から外し、
-    # 受け取った形のままは url の引数へ
+    # 戻り値の形と ERROR の約束は説明に書かない。受け取った形のままは url の引数が言う
     assert "ERROR" not in spec["description"] and "戻り値は" not in spec["description"]
     url = spec["parameters"]["properties"]["url"]["description"]
     assert "受け取った形のまま" in url and "1 文字も変えずに" in url

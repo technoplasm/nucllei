@@ -1,7 +1,6 @@
-"""system prompt の変数 {{USER_MEMORY_INDEX}} — 利用者の記憶の目次 (2026-10-31 ken「レシピが一覧で入るなら記憶も
-何かしら入るべき」、llens 経由)。
+"""system prompt の変数 {{USER_MEMORY_INDEX}} — 利用者の記憶の目次。
 
-目次のファイル (env `USER_MEMORY_INDEX_PATH`、既定 `/workspace/memory/MEMORY.md` — ken 2026-10-31 決定。nucllei
+目次のファイル (env `USER_MEMORY_INDEX_PATH`、既定 `/workspace/memory/MEMORY.md`。nucllei
 自身には記憶の決まりが無いので、置き場は設定で変えられる・空で無効) の中身を sandbox から読み、見出しと枠を付けて
 返す。読むのは 1 リクエスト 1 回 (task.ensure_user_recipes が {{USER_RECIPES}} と並べて先に取る)。
 

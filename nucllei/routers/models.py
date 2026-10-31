@@ -137,7 +137,7 @@ async def preview_model(
     form_data: ModelPreviewForm,
     user=Depends(get_admin_user),
 ):
-    """preset の編集画面のプレビュー (2026-10-30 ken): 編集中の preset で新しいチャットを始めたとき
+    """preset の編集画面のプレビュー: 編集中の preset で新しいチャットを始めたとき
     モデルに渡る tools と system prompt を、リクエストした本人として展開して返す (実行はしない)。
     他の利用者としては展開しない。preset の編集と同じく admin だけ。"""
     from nucllei.utils.prompt_preview import preview_preset

@@ -367,7 +367,7 @@ def get_tools(
                 else None
             )
             # 前置する spec: `Tools.toolkit_note_anchor` (関数名) があればその spec、無い・その関数が
-            # 無ければ先頭 (2026-10-30 — 名前順の先頭は tool を足すたびに変わる)
+            # 無ければ先頭 (名前順の先頭は tool を足すたびに変わるので、注記は anchor で固定する)
             anchor = getattr(module, "toolkit_note_anchor", None)
             note_spec = next(
                 (sp for sp in tool.specs if sp.get("name") == anchor),
@@ -473,7 +473,7 @@ def get_tools(
                 if getattr(module, "serial", False) is True:
                     tool_dict["serial"] = True
 
-                # 2026-10-30: background のユーザーごとの同時数 (ASYNC_EXEC_MAX_CONCURRENCY) に、spawn
+                # background のユーザーごとの同時数 (ASYNC_EXEC_MAX_CONCURRENCY) に、spawn
                 # したときでなく走り出したときから数える関数 (`Tools` クラス属性 `exec_count_on_start`
                 # に関数名の列)。run_subagent — 席が空くのを待っている間は数えない
                 # (utils/executions.exec_count_started)

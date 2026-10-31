@@ -110,7 +110,7 @@ _active_execs_by_user: dict[str, int] = {}
 
 # まだ数えていない exec (exec_id → user_id)。entry の `exec_count_on_start` (run_subagent) は spawn で
 # 数えず、tool が走り出したと言ったとき (exec_count_started) に数える — サブエージェントの席を待っている
-# だけのタスクが、子の run_python 等の background を上限で弾かないように (2026-10-30 llens 決定)
+# だけのタスクが、子の run_python 等の background を上限で弾かないように
 _uncounted_execs: dict[str, str] = {}
 
 # いま走っている exec の id (runner の中だけ — exec_count_started が自分の exec を見つける)
@@ -446,7 +446,7 @@ async def spawn_execution(
     # 同時数 check → 同期で increment(check→increment 間に await を挟まない —
     # subagent.py の規律)。超過は即エラー(行を作らない)。
     # サーバー全体の上限は、まだ数えていない (待っている) 分も入れて見る — 呼び直しを繰り返すモデルが
-    # background を際限なく積まないように (敵対レビュー)
+    # background を際限なく積まないように
     if (
         count_on_start
         and sum(_active_execs_by_user.values()) + len(_uncounted_execs)

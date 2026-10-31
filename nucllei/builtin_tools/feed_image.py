@@ -524,10 +524,10 @@ class Tools:
         :param pages: PDF のページ範囲 ("3" / "4-6" / "1-2,7")
         """
         # 使い方の細目 (失敗の種類・#page=N・file_id の出どころ等) は README_API §5.7.1。
-        # 型の判定・ERROR 文の次の一手は実行時の戻り値が持つ。説明から外した細目 (2026-10-30 llens
-        # 「削って ERROR へ」) もその場面の戻り値が言う: 見せ方 (url は ![…](…)、path は
-        # fetch_from_workspace) は成功の結果、続きのページ (file_id と pages) は打ち切りの結果、画像に
-        # pages は url / path では ERROR (file_id の画像では pages を見ない)
+        # 型の判定・ERROR 文の次の一手は実行時の戻り値が持つ。説明に書かない細目もその場面の戻り値が
+        # 言う: 見せ方 (url は ![…](…)、path は fetch_from_workspace) は成功の結果、続きのページ
+        # (file_id と pages) は打ち切りの結果、画像に pages は url / path では ERROR (file_id の画像では
+        # pages を見ない)
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         if __feed_image__ is None:

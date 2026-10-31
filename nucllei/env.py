@@ -272,8 +272,7 @@ try:
 except ValueError:
     SUBAGENT_MAX_DEPTH = 2
 
-# llens(#107): プロセス内の subagent 同時実行数上限。超過した呼び出しは席が空くまで到着順に待つ
-# (2026-10-30 — それまでは待たずにエラーを返し、モデルが呼び直し続けた)。
+# llens(#107): プロセス内の subagent 同時実行数上限。超過した呼び出しは席が空くまで到着順に待つ。
 SUBAGENT_MAX_CONCURRENCY = os.environ.get("SUBAGENT_MAX_CONCURRENCY", "4")
 try:
     # 1 未満は 1 (0 だと席を返す呼び出しが無く、待つ呼び出しが全部時間切れまで待つ)
@@ -285,7 +284,7 @@ except ValueError:
 # (SUBAGENT_TURN_TIMEOUT_S) + 子を止める間の余裕 SUBAGENT_QUEUE_GRACE_S — 子ターンは席を取ってから
 # SUBAGENT_TURN_TIMEOUT_S で止めるので、席がすべて長い子で埋まっていても、列の先頭から席の数までの
 # 呼び出しはその子が止められる前に時間切れにならない (それより後ろは席が何周か入れ替わるのを待つので、
-# 時間切れになりうる。2026-10-30 llens 決定)。明示したときだけその値。
+# 時間切れになりうる)。明示したときだけその値。
 # 子ターンの上限が非正値 (無制限) なら既定も無制限。run_subagent の per-tool timeout (同期・background
 # とも) は子ターンの上限 + この値 (外側の歯止め)。サブエージェントの中からの呼び出し (入れ子) は待たない。
 SUBAGENT_QUEUE_GRACE_S = 30
@@ -379,8 +378,8 @@ SANDBOX_URL = os.environ.get("SANDBOX_URL", "").strip()
 SANDBOX_TOKEN = os.environ.get("SANDBOX_TOKEN", "").strip()
 
 # system prompt の変数 {{USER_MEMORY_INDEX}} が入れる、利用者の記憶の目次のファイル (sandbox の `/workspace/…`。
-# 空・`/workspace/` の外は無効 = 変数は空)。既定は `/workspace/memory/MEMORY.md` (ken 2026-10-31 決定 — nucllei
-# 自身に記憶の決まりは無いので、置き場は設定で変えられる。utils/memory_index)
+# 空・`/workspace/` の外は無効 = 変数は空)。既定は `/workspace/memory/MEMORY.md` (nucllei 自身に記憶の
+# 決まりは無いので、置き場は設定で変えられる。utils/memory_index)
 USER_MEMORY_INDEX_PATH = os.environ.get(
     "USER_MEMORY_INDEX_PATH", "/workspace/memory/MEMORY.md"
 ).strip()

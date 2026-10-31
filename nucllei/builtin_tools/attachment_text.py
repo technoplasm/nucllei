@@ -96,8 +96,7 @@ def _no_text_next(file_id: str) -> str:
     条件にする (決めつけない)。どれも無ければ、読めないことを伝える。"""
     steps = []
     if tool_in_turn("feed_image"):
-        # 直接添付の画像は既に見えている — 呼ばせない (説明から「テキスト層が無いファイルは読めない —
-        # 見るなら feed_image」を外したので、ここが言う。2026-10-30 batch 3 の敵対レビュー)
+        # 直接添付の画像は既に見えている — 呼ばせない
         steps.append(
             f'画像・PDF なら feed_image(file_id="{file_id}") で見る'
             " (直接添付の画像は既に見えているので呼ばない)。"
@@ -128,9 +127,8 @@ class Tools:
         :param offset: 読み始めの文字位置 (省略時 0 = 先頭)。続きは前回の next_offset (返る間は続きがある)
         :param max_chars: 1 回で返す最大文字数 (省略時 40000、上限 60000)
         """
-        # 2026-10-30 (llens「tool の説明を削る」batch 3): 「自分のファイルのみ」は file_id_error、
-        # 「テキスト層が無いファイルは読めない — 見るなら feed_image」は抽出テキストが無いときの ERROR
-        # (`_no_text_next` — このターンにある tool で言う) が言う
+        # 「自分のファイルのみ」は file_id_error が、「テキスト層が無いファイルは読めない — 見るなら
+        # feed_image」は抽出テキストが無いときの ERROR (`_no_text_next` — このターンにある tool で言う) が言う
         # 戻り値は {ok, file_id, filename, content_type, source, total_chars, offset, text,
         # next_offset?}。docstring には「いつ呼ぶか」だけを書く (2026-10-19 llens 監査 (2) で
         # 絞った。next_offset の意味だけは本文に残す)。spec ビルダは `:return:` をモデルに見せない

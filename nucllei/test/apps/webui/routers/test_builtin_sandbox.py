@@ -1291,11 +1291,10 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             assert out.startswith("ERROR: sandbox に接続できない")
 
     def test_toolkit_note_keeps_only_facts_that_steer_calls(self):
-        """toolkit 共通注記 (クラス docstring) は呼び方・置き場の選び方に効く事実だけ (2026-10-30 llens
-        「tool の説明を削る」batch 2): ネットワーク不可・/workspace の共有と見えないこと (渡すのは
-        fetch_from_workspace)・/ext の書ける範囲 (管理者の例外 — 監査 (4) の要件)・直列。imports/ の期限は
-        取り込みの結果と「無い」の ERROR、rm せず remove_file は remove_file の説明、RECIPE.md の断りは
-        ERROR が言う。exports/ は 2026-10-19 に廃止。「配備」「Files」は内部語。"""
+        """toolkit 共通注記 (クラス docstring) は呼び方・置き場の選び方に効く事実だけ: ネットワーク不可・
+        /workspace の共有と見えないこと (渡すのは fetch_from_workspace)・/ext の書ける範囲 (管理者の例外)・
+        直列。imports/ の期限は取り込みの結果と「無い」の ERROR、rm せず remove_file は remove_file の説明、
+        RECIPE.md の断りは ERROR が言う。exports/ は無い。「配備」「Files」は内部語。"""
         import nucllei.builtin_tools.sandbox as sb
         from nucllei.builtin_tools.sandbox import Tools
         from nucllei.utils.tools import get_tool_specs
@@ -1306,12 +1305,12 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         assert "管理者はすべてのグループの置き場と `/ext/public/` に書ける" in note
         assert "background にしても並列にならない" in note
         # 消える置き場は 1 句だけ (期間・戻し方は結果と ERROR — run_* の中の FileNotFoundError には
-        # 案内が付かないので、消えること自体は残す。敵対レビュー)
+        # 案内が付かないので、消えること自体は注記が言う)
         assert "imports/ と trash/ は最後に触ってから一定期間で消える" in note
         assert "30 日" not in note and "send_to_workspace" not in note
         for gone in ("rm せず", "RECIPE.md", "exports", "配備", "Files"):
             assert gone not in note, gone
-        # 外した細目の行き先
+        # 細目は各 tool の説明・結果が言う
         specs = {s["name"]: s for s in get_tool_specs(Tools())}
         assert (
             "run_shell の rm ではなくこちらを使う"
@@ -1325,7 +1324,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
         )
 
     def test_toolkit_note_is_anchored_to_run_python(self):
-        """注記は名前順の先頭 (edit_file) ではなく run_python に付ける (2026-10-30)。"""
+        """注記は名前順の先頭 (edit_file) ではなく run_python に付ける。"""
         from nucllei.builtin_tools.sandbox import Tools
 
         assert Tools.toolkit_note_anchor == "run_python"
@@ -2315,21 +2314,21 @@ def test_docstrings_drop_example_paths_and_internal_words():
         assert "例:" not in path_desc(name), name
     assert "/workspace/work/" not in path_desc("write_file")
     assert "/workspace/out/" not in path_desc("fetch_from_workspace")
-    # write_file: 管理者はすべてのグループの置き場と /ext/public/ に書ける — 2026-10-30 から toolkit
-    # 共通注記 (クラス docstring) だけが言う (llens「tool の説明を削る」batch 2)
+    # write_file: 管理者はすべてのグループの置き場と /ext/public/ に書ける — toolkit
+    # 共通注記 (クラス docstring) だけが言う
     assert "`/ext/groups/<グループ名>/…`" in path_desc("write_file")
     assert "管理者はすべてのグループの置き場と `/ext/public/` に書ける" in re.sub(
         r"\s*\n\s*", "", Tools.__doc__
     )
     assert "unar (書庫の展開) / zip" in specs["run_shell"]["description"]
-    # 実行環境の言い方は「sandbox で」に揃えた (2026-10-30 llens「tool の説明を削る」batch 3 / 4)
+    # 実行環境の言い方は「sandbox で」
     for name in ("run_python", "run_python_once", "run_shell"):
         assert specs[name]["description"].startswith("sandbox で"), name
         assert "サーバーの隔離環境" not in specs[name]["description"], name
     assert "unzip" not in specs["run_shell"]["description"]
     send = specs["send_to_workspace"]["description"].replace("\n", "")
     assert "jail" not in send
-    # `/ext/…` の扱いの細目 (見えていればコピーしない) は結果が言う (2026-10-30)
+    # `/ext/…` の扱いの細目 (見えていればコピーしない) は結果が言う
     assert "既に sandbox から見えているので取り込まない" in send
     for spec in specs.values():
         text = json_dumps(spec)
@@ -2378,9 +2377,8 @@ def test_reference_params_are_described_in_fixed_words():
 
 
 def test_run_python_says_to_use_only_executed_output():
-    """run_python の説明は「計算・集計の結果は実行した出力だけ」を言う (2026-10-30 llens staging: 呼ばずに
-    コードと作った「出力」を書く回が出た)。規則は tool の説明だけが持つ (llens の prompt には無い)。
-    共通注記の後ろに付くので、run_python 自身の説明の先頭 2 文に置く。"""
+    """run_python の説明は「計算・集計の結果は実行した出力だけ」を言う。規則は tool の説明だけが持つ
+    (配備の system prompt には無い)。共通注記の後ろに付くので、run_python 自身の説明の先頭 2 文に置く。"""
     from nucllei.builtin_tools.sandbox import Tools
     from nucllei.utils.tools import get_tool_specs
 

@@ -1,5 +1,4 @@
-"""レシピ用の endpoint (`/recipes/index` `/recipes/folder`) と `/files/trash` の `name`
-(2026-10-30、llens 依頼・ken 指示「ぜんぶ nuc にやらせて」)。
+"""レシピ用の endpoint (`/recipes/index` `/recipes/folder`) と `/files/trash` の `name`。
 
 固定すること:
 

@@ -143,8 +143,7 @@ class Tools:
         # 切り詰めは散文の前置きではなく total として構造に載せる — モデルが
         # 「まだある」を機械的に読めるし、表示も JSON 一本で済む。
         out = {"total": total, "files": items}
-        # deleted の意味は、その印が出たときだけ言う (2026-10-30 llens「tool の説明を削る」batch 5 —
-        # list_chat_files / grep_chat_files の説明から移した)
+        # deleted の意味は、その印が出たときだけ言う
         if any(item.get("deleted") for item in items):
             out["note"] = (
                 "deleted: true のものは削除済みで、その file_id はもう開けない (渡しても読めない)。"

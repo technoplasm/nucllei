@@ -405,7 +405,7 @@ def test_usage(env):
 
 
 # ---------------------------------------------------------------------------
-# /files/trash (nucllei の remove_file。2026-10-27) — どの置き場もその trash/ の直下へ、完全には消さない
+# /files/trash (nucllei の remove_file) — どの置き場もその trash/ の直下へ、完全には消さない
 # ---------------------------------------------------------------------------
 def test_trash_workspace(env):
     mod, c, ws, ext = env
@@ -535,7 +535,7 @@ def test_trash_ext_group_and_public(env, owned):
 
 
 def test_delete_semantics_unchanged_by_trash(env):
-    # /files/delete の /ext は従来どおり完全に消す (ファイルブラウザの挙動は変えない)
+    # /files/delete の /ext は完全に消す (ゴミ箱を通さない)
     mod, c, ws, ext = env
     (ext / "groups" / "EMR" / "g.txt").write_text("g")
     r = _post(c, "/files/delete", path="/ext/groups/EMR/g.txt", mounts=MEMBER_MOUNTS)

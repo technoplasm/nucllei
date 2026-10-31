@@ -1,4 +1,4 @@
-"""builtin_sandbox の remove_file(llens 依頼・ken 決定 2026-10-27)の回帰。
+"""builtin_sandbox の remove_file の回帰。
 
 sandbox の HTTP(`_post`)だけをモックし、パスの解決と断り・応答の言い方は本物のコードを通す。
 `/files/trash` 自体(各置き場の trash/ へ移す・名前の番号・symlink・完全には消さない)は
@@ -188,11 +188,10 @@ def test_spec():
     assert list(spec["parameters"]["properties"]) == ["path"]
     assert spec["parameters"]["required"] == ["path"]
     assert "ゴミ箱 (`trash/`) へ移す" in spec["description"]
-    # 移す先の細目・期限・戻し方は結果が言う (2026-10-30 llens「tool の説明を削る」batch 3)
+    # 移す先の細目・期限・戻し方は結果が言う
     for gone in ("/workspace/trash/", "-2", "30 日", "mv"):
         assert gone not in spec["description"], gone
     assert "rm ではなくこちらを使う" in spec["description"]
-    # rm でなく remove_file は remove_file の説明だけが言う (2026-10-30 batch 2 で toolkit の共通注記から
-    # 外した)。記憶・EMR の抽出物の rm の例外は system prompt に委ねる
+    # rm でなく remove_file は remove_file の説明だけが言う (toolkit の共通注記には無い)。記憶・EMR の抽出物の rm の例外は system prompt に委ねる
     assert "例外は system prompt の決まりに従う" in spec["description"]
     assert "remove_file" not in Tools.__doc__

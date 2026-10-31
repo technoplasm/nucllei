@@ -195,7 +195,7 @@ def recipe_check(
     """共有の層 (/ext/groups・/ext/public) のレシピを、save_recipe / edit_recipe と同じ判定で点検する。
 
     1 所見 1 行で `stop|note|unchecked<TAB><レシピのフォルダ><TAB><所見>` を出す (何も直さない)。
-    個人の /workspace は対象外 (ホストから読めず、利用者の層は点検しない — ken 2026-10-30)。
+    個人の /workspace は対象外 (利用者の層は点検しない)。
     終了コード: 0 = 止める所見なし、1 = 止める所見あり、2 = 使い方の誤り。
     サーバの設定 (DB・秘密鍵) は使わない。配備層の表は env `RECIPE_RESTRICTED_TOOLS` /
     `RECIPE_MEMO_KEYS` (nucllei の README_API)。

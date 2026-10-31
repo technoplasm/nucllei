@@ -1,4 +1,4 @@
-"""builtin_sandbox の edit_file(llens 依頼・ken 指示 2026-10-27)の回帰。
+"""builtin_sandbox の edit_file の回帰。
 
 sandbox の HTTP(`_post`)だけをモックし、パスの解決・一致・文字コード・書き戻しは本物のコードを
 通す。偽の sandbox はファイル 1 つを持ち、`/files/read` は範囲だけを返し、`/files/write` は中身を
@@ -256,7 +256,7 @@ def test_stat_outcomes():
     assert out.startswith(
         "ERROR: /workspace/imports/a.md というファイルは無い (ディレクトリは不可)。"
     )
-    # 作らないことは説明から外し、無いときの次の手が言う (2026-10-30 llens)。期限で消える置き場
+    # 作らないことは無いときの次の手が言う。期限で消える置き場
     # (imports/) では作り直しを勧めない — send_to_workspace で戻すのが先
     assert "write_file" not in out and "send_to_workspace(file_id) で戻せる" in out
     out = _edit(_tool(stat={"exists": False}), "/workspace/notes/a.md", "x", "y")
@@ -334,7 +334,7 @@ def test_spec():
     assert "sandbox の絶対パス (`/workspace/…`" in (
         spec["parameters"]["properties"]["path"]["description"]
     )
-    # 説明は何をするかと引数だけ (2026-10-30 llens「削って ERROR へ」) — 作らない・文字コード・
+    # 説明は何をするかと引数だけ — 作らない・文字コード・
     # テキスト専用はその場面の ERROR / 結果が言う。末尾に足す書き方は ERROR にならない (最後の行が
     # 消えて通る) ので説明に残す
     desc = spec["description"]
@@ -347,4 +347,4 @@ def test_spec():
         assert gone not in desc, gone
     # write_file / read_file から「一部だけ直すなら edit_file」へ向ける
     assert "一部だけを直すなら edit_file" in specs["write_file"]["description"]
-    # read_file からは外した (2026-10-30 batch 2 — 選び違えるのは write_file の側)
+    # read_file の説明には出さない (選び違えるのは write_file の側)

@@ -1,7 +1,6 @@
-"""レシピ (利用者が残す手順) の判定 — 置き場・名前・frontmatter・requires・患者データ・層 (2026-10-30)。
+"""レシピ (利用者が残す手順) の判定 — 置き場・名前・frontmatter・requires・患者データ・層。
 
-llens 依頼・ken 指示「ぜんぶ nuc にやらせて」で、llens の jail のコマンド `/ext/bin/recipe` (list / check /
-promote) が持っていた判定をここへ移した。**判定の実装はここ 1 つ**で、使う側は 3 つ:
+**判定の実装はここ 1 つ**で、使う側は 3 つ:
 
 - builtin の `save_recipe` / `edit_recipe` (書く前の検査 = `check_folder`。個人の層も含む)
 - 一覧 (load_recipe の説明) と `load_recipe` (軽い検査 = `assess_recipe`。「壊れている」は保存せず、
@@ -52,26 +51,22 @@ RECIPE_MD = "RECIPE.md"
 TRASH = "trash"
 
 REQUIRED_KEYS = ("title", "description", "author", "updated")
-# frontmatter に書けるキー。これ以外は壊れている (`onload:` の綴り違いを黙って無視しない — ken 2026-10-30)。
-# 任意は requires (読み込み時に先に入れる資料) だけ。旧 on_load / tools は廃止 (`RETIRED_KEYS`)
+# frontmatter に書けるキー。これ以外は壊れている (`onload:` の綴り違いを黙って無視しない)。
+# 任意は requires (読み込み時に先に入れる資料) だけ
 KNOWN_KEYS = REQUIRED_KEYS + ("requires",)
 NAME_MAX_BYTES = 200
 # 一覧の description の上限 (1 行に畳んでから)
 INDEX_DESCRIPTION_CHARS = 120
 
-# 壊れたレシピの次の手 (一覧の印・load_recipe の ERROR — ken 2026-10-30)。印の理由は書いた人の文を
-# 含まない (`assess_recipe(safe=True)`) ので、直すには原文を見る (staging で「壊れているのを全部直して」に
-# load_recipe → ERROR → read_file → edit_recipe の 3 手ずつ掛かった)。直す tool と渡す path (フォルダ) を
-# 先に言い、原文の読み方は後ろに添える (staging の batch 1 の比較: read_file で <フォルダ>/RECIPE.md を
-# 読んだ後、そのパスのまま edit_file を呼んで断られた — 2/3)。一覧の印は「この行のフォルダ」と指す
-# (印の直後にある。「このフォルダ」だと壊れた行が続くと前の行のフォルダに読める — 敵対レビュー。
-# フォルダを 2 回書くと system prompt が伸びる)。RECIPE.md そのものが無い・読めないものは作り直す
+# 壊れたレシピの次の手 (一覧の印・load_recipe の ERROR)。印の理由は書いた人の文を含まない
+# (`assess_recipe(safe=True)`) ので、直すには原文を見る。直す tool と渡す path (フォルダ) を先に言い、
+# 原文の読み方は後ろに添える。一覧の印は「この行のフォルダ」と指す (印の直後にある。「このフォルダ」だと
+# 壊れた行が続くと前の行のフォルダに読める)。RECIPE.md そのものが無い・読めないものは作り直す
 BROKEN_NEXT = "edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)"
 BROKEN_REWRITE_NEXT = "save_recipe(path=この行のフォルダ) で作り直す"
-# 直せない人 (全体の層を管理者でない人が読む) には直させない — read_file → edit_recipe の ERROR の 2 手が
-# 無駄になる (敵対レビュー)
+# 直せない人 (全体の層を管理者でない人が読む) には直させない
 BROKEN_READONLY_NEXT = "直せるのは管理者なので、壊れていることをユーザーに伝える"
-# 書き込みを「指定した人だけ」にしたグループで、指定されていないメンバーが読む (2026-10-31 ken、案 A)。
+# 書き込みを「指定した人だけ」にしたグループで、指定されていないメンバーが読む。
 # グループ名は出さない (一覧の印の角括弧の中に入る — 行のフォルダで分かる)
 READONLY_GROUP_WHY = (
     "この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許した人だけ)"
@@ -79,8 +74,7 @@ READONLY_GROUP_WHY = (
 BROKEN_READONLY_GROUP_NEXT = (
     f"{READONLY_GROUP_WHY}なので、壊れていることをユーザーに伝える"
 )
-# 印に出してよいキーの名前 (キーの名前も書いた人の文 — これ以外の形は名前を出さない。ken 2026-10-30
-# 「不正なキーがあるとわかればいい」)
+# 印に出してよいキーの名前 (キーの名前も書いた人の文 — これ以外の形は名前を出さない)
 RE_SHOWN_KEY = re.compile(r"[A-Za-z0-9_-]{1,32}")
 
 # 能力「レシピ」で middleware が合成して差し込む tool (builtin_tools/recipe_tools.build_recipe_tools)
@@ -88,7 +82,7 @@ RECIPE_FUNCTION_NAMES = ("load_recipe", "save_recipe", "edit_recipe")
 
 
 def is_recipes_feature_enabled(model) -> bool:
-    """モデル (preset) の能力「レシピ」が有効か (ken 2026-10-30「スキルみたいに」「能力として」)。
+    """モデル (preset) の能力「レシピ」が有効か。
 
     meta.features.recipes に持つ (既定 ON — キー不在は有効。`is_skills_feature_enabled` と同じ形)。
     ON なら middleware が load_recipe / save_recipe / edit_recipe を合成して tools に差し込み、
@@ -521,7 +515,7 @@ def read_frontmatter(text: str) -> tuple[Optional[Frontmatter], Optional[str]]:
         return None, "frontmatter が YAML として読めない"
     except (ValueError, RecursionError):
         # 日付として読めない値 (`2026-02-30`)・深すぎる入れ子は YAMLError でなく落ちる — 一覧・load_recipe を
-        # 巻き込まない (敵対レビュー 2026-10-30)
+        # 巻き込まない
         return None, "frontmatter が YAML として読めない"
     if not isinstance(data, dict):
         return None, "frontmatter が YAML のマッピング (key: value の並び) でない"
@@ -602,7 +596,7 @@ def plain(v) -> str:
 
 
 # ---------------------------------------------------------------------------
-# requires (読み込み時に先に入れる資料。1 キーの要素の並び — ken 2026-10-30 のスキーマ)
+# requires (読み込み時に先に入れる資料。1 キーの要素の並び)
 # ---------------------------------------------------------------------------
 
 REQUIRE_KINDS = ("recipe", "read", "shell", "python")
@@ -750,7 +744,7 @@ def parse_recipe_requires(value, folder: str) -> tuple[list[RequireItem], list[s
 
 
 # ---------------------------------------------------------------------------
-# requires の参照の層の規則 (llens 依頼・ken 2026-10-30)
+# requires の参照の層の規則
 # ---------------------------------------------------------------------------
 #
 # 参照は「狭い層 → 広い層」の向きだけ。共有のレシピの requires で、読む人の /workspace (記憶・
@@ -762,7 +756,7 @@ def parse_recipe_requires(value, folder: str) -> tuple[list[RequireItem], list[s
 #   全体         全体だけ                   全体・自分のフォルダ・全員に ro の /ext    不可
 #
 # 違反は層とパスだけで決まる (読む人によらない) が、frontmatter としては正しいので「壊れている」に
-# せず**警告** (ken 2026-10-30 の最終形): その要素を実行しないことで注入を塞ぐ (`layer_warnings`)。
+# せず**警告**: その要素を実行しないことで注入を塞ぐ (`layer_warnings`)。
 # 違反した参照は stat もしない (`recipe_refs`)。
 
 # グループ・全体の層の付属の実行の不可の理由 (警告の文で同じ文面)
@@ -857,8 +851,8 @@ def _ref_group(item: RequireItem) -> Optional[str]:
 
 
 def _reader_groups(layer: Optional[Layer], member_groups) -> set:
-    """読む人が参照してよいグループ = 所属 + そのレシピ自身のグループ (そのレシピを開けている
-    = 管理者が所属していないグループのレシピを load_recipe した、は今までどおり通す)。"""
+    """読む人が参照してよいグループ = 所属 + そのレシピ自身のグループ (管理者が所属していない
+    グループのレシピを load_recipe したときも、そのグループの参照は通す)。"""
     out = set(member_groups)
     if layer is not None and layer.kind == "group":
         out.add(layer.group)
@@ -914,8 +908,7 @@ def assess_recipe(folder: str, md: Optional[dict], safe: bool = True) -> list[st
 
     「壊れている」は**frontmatter そのものの不正だけ** (と RECIPE.md が無い・普通のファイルでない) —
     `frontmatter_problems`。中の値が環境・権限・層の規則で通らないのは `reference_warnings` (警告。
-    止めない — ken 2026-10-30「依存を消しちゃうのはよくあるので、warn で実行はできるが警告がモデルに
-    入る」)。
+    止めない — 読み込めて、警告がモデルに入る)。
 
     - `md`: `{"type": "file"|"symlink"|…, "text": str|None}` (RECIPE.md が無ければ None)
     - `safe`: 書いた人の文を混ぜない理由 (一覧の印・load_recipe の ERROR — `frontmatter_problems`)"""
@@ -953,7 +946,7 @@ def broken_next(
     if not folder:
         return BROKEN_REWRITE_NEXT if md_unusable(reasons) else BROKEN_NEXT
     # フォルダ名は書いた人の文 (`"` `)` や「次の手:」も名前の規則を通る) — JSON の文字列で埋め、
-    # 引用符の外へ出られないようにする (敵対レビュー)
+    # 引用符の外へ出られないようにする
     q = json.dumps(folder, ensure_ascii=False)
     if md_unusable(reasons):
         return f"save_recipe(path={q}) で作り直す"
@@ -964,11 +957,11 @@ def broken_next(
     )
 
 
-# 廃止したキー・よくある綴り違いの案内 (近い綴りより先に出す)
+# 使えないキーのうち、代わりの書き方があるものの案内 (近い綴りより先に出す)
 RETIRED_KEYS = {
-    "on_load": "on_load は requires に変わった",
-    "tools": "tools は廃止 (使える人が限られる関数は本文の関数名で判定する)",
-    "tool_ids": "tool_ids は廃止 (使える人が限られる関数は本文の関数名で判定する)",
+    "on_load": "on_load は requires で書く",
+    "tools": "tools は書かない (使える人が限られる関数は本文の関数名で判定する)",
+    "tool_ids": "tool_ids は書かない (使える人が限られる関数は本文の関数名で判定する)",
 }
 
 
@@ -1033,7 +1026,7 @@ def frontmatter_problems(text: str, folder: str, safe: bool = False) -> list[str
 
     `safe` (一覧の印・load_recipe の ERROR): 書いた人の文を混ぜない — 行の中身・値は出さず、何が・どこが
     (行番号・何番目・キーの名前は `_shown_key` を通るものだけ) だけを言う。印は system prompt に tool の
-    文として入る (llens 経由 ken 2026-10-30)。save / edit の検査 (自分が書いたもの) は詳しいまま。"""
+    文として入る。save / edit の検査 (自分が書いたもの) は詳しいまま。"""
     fm, problem = read_frontmatter(text)
     if fm is None:
         return [_RE_YAML_LINE.sub(r"\1)", problem) if safe else problem]
@@ -1043,7 +1036,7 @@ def frontmatter_problems(text: str, folder: str, safe: bool = False) -> list[str
             if k in KNOWN_KEYS:
                 continue
             name = _shown_key(k)
-            # 廃止したキーは短く添える (tool の文 — 名前の完全一致で引く)
+            # RETIRED_KEYS のキーは案内を短く添える (tool の文 — 名前の完全一致で引く)
             retired = (
                 RETIRED_KEYS.get(str(k), "")
                 .split(" (")[0]
@@ -1221,7 +1214,7 @@ def _shown(reasons: list[str]) -> str:
 
 def broken_line(reasons: list[str], writable: bool = True, folder: str = "") -> str:
     """一覧の印 (`[壊れている: …]`)。行頭 (`- ` の直後) に置く — description は `—` の後にしか
-    出ないので、description に同じ形を書いても印にはならない (2026-10-30 llens のレビュー)。
+    出ないので、description に同じ形を書いても印にはならない。
     `folder` は書けないときの文を層で分けるためだけに使う (印にパスは出さない)。"""
     nxt = broken_next(reasons, writable=writable, place=folder)
     return f"[壊れている: {_shown(reasons)}。{nxt}]"

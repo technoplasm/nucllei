@@ -404,9 +404,8 @@ class Tools:
         """
         # 使い方の細目 (doc との使い分け・query の使い方・run_subagent / max_mb・失敗の種類・
         # リンク一覧の形等) は README_API §5.7.1。ERROR 文の次の一手は実行時の戻り値が持つ。
-        # 2026-10-30 (llens「tool の説明を削る」batch 2): 戻り値の形 (結果が自分で言う) と ERROR /
-        # 「次の手:」の約束 (llens の system prompt が全 tool 共通で持つ) を説明から外した。
-        # 「受け取った形のまま」は url の引数へ
+        # 戻り値の形は結果が自分で言い、ERROR /「次の手:」の約束は system prompt が全 tool 共通で持つ
+        # ので、説明には書かない
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
 
@@ -669,7 +668,7 @@ class Tools:
             # query で絞った結果を刻んでいるので、続きも同じ query で取る (offset は絞った後の
             # 文字位置 — query を落とすと別の位置になる。2026-10-19 llens 監査 (6))
             again = f'query="{query}", ' if query else ""
-            # url は実際の値で書く (`url=...` はその字のまま渡されうる — 2026-10-30 batch 2 の敵対レビュー)
+            # url は実際の値で書く (`url=...` はその字のまま渡されうる)
             u = f'"{url}"' if url else "..."
             head += (
                 f" (続きあり)\n続きは fetch_url(url={u}, {again}offset={end}) で取る"

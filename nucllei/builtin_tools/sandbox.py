@@ -287,7 +287,7 @@ def _acl_place_depth(rel: str) -> int:
     return 2 if rel.split("/", 1)[0] == GROUPS else 1
 
 
-# list_workspace が管理者の見ている「所属していないグループ」に添える (2026-10-30 llens 依頼)
+# list_workspace が管理者の見ている「所属していないグループ」に添える
 _NOT_MEMBER_NOTE = "所属していない (管理者なので見えている)"
 
 # sandbox が jail の env (`NUCLLEI_USER_ROLE`) で渡せるロール (sandbox の `USER_ROLES` と同じ)
@@ -296,12 +296,12 @@ _SANDBOX_USER_ROLES = frozenset({"admin", "user", "pending"})
 
 def _user_env_fields(user: dict) -> dict:
     """実行要求 (`/exec` `/exec_cell`) に足す所属とロール。sandbox が jail の env
-    `NUCLLEI_USER_GROUPS` (カンマ区切り) / `NUCLLEI_USER_ROLE` にする (2026-10-27、llens 依頼)。
+    `NUCLLEI_USER_GROUPS` (カンマ区切り) / `NUCLLEI_USER_ROLE` にする。
 
     所属は {{USER_GROUPS}} と同じ `user_group_names` (同じ順・管理者でも所属分だけ) から、
-    現行のグループ名の規則 (`is_group_dir_name`) を通らない名前を落としたもの。env はカンマ区切りで
-    機械に読ませる契約なので、#151 より前に作られた不正な名前 (カンマ・空白・記号入り) を混ぜると
-    読み手が壊れる ({{USER_GROUPS}} 側は今までどおり保存値のまま)。所属なしは `[]` (= 空文字で定義)。
+    グループ名の規則 (`is_group_dir_name`) を通らない名前を落としたもの。env はカンマ区切りで
+    機械に読ませる契約なので、規則に合わない保存値 (カンマ・空白・記号入り) を混ぜると
+    読み手が壊れる ({{USER_GROUPS}} 側は保存値のまま)。所属なしは `[]` (= 空文字で定義)。
     ロールが sandbox の知らない値なら送らない (400 で実行ごと落とさない)。"""
     from nucllei.utils.ext_acl import is_group_dir_name
     from nucllei.utils.task import user_group_names
@@ -544,7 +544,7 @@ def _read_only(abs_path: str) -> ToolError:
     admin_only = abs_path == public or abs_path.startswith(public + "/")
     group = _group_of(abs_path)
     if group is not None:
-        # 書き込みが「指定した人だけ」のグループで、指定されていないメンバー (2026-10-31 ken、案 A)
+        # 書き込みが「指定した人だけ」のグループで、指定されていないメンバー
         return ToolCallError(
             f"{abs_path} はこの利用者には読み取り専用 ({_group_ro_why(group)})",
             "この置き場には書けないとユーザーに伝える (書けるようにするのは管理者。"
@@ -687,14 +687,14 @@ def _place_itself(abs_path: str) -> ToolError:
     )
 
 
-# remove_file (2026-10-27、ken 決定・llens 依頼): 移す先は置き場ごとの `trash/` (sandbox の
+# remove_file: 移す先は置き場ごとの `trash/` (sandbox の
 # `/files/trash`)。sandbox の期限は `SANDBOX_CACHE_TTL_DAYS` (既定 30。応答の `cache_ttl_days`)。
 # workspace 直下で sandbox が使う置き場 (sandbox の `PROTECTED_DIRS` のうち trash 以外) と
 # `.` 始まりは sandbox も断る (`_check_mutable`) — 先に言い分けるために同じ範囲をここにも持つ
 _TRASH_DIR = "trash"
 _WORKSPACE_SYSTEM_DIRS = ("imports",)
-# 「ユーザーに頼む」だけでは何を頼むか system prompt に頼る — 画面で本人が消せると言う。期限は
-# sandbox の設定 (cache_ttl_days) で変わるので日数を決め打ちしない (2026-10-30 batch 3 の敵対レビュー)
+# 何を頼むかを system prompt に頼らず、画面で本人が消せると言う。期限は sandbox の設定
+# (cache_ttl_days) で変わるので日数を決め打ちしない
 _TRASH_INSIDE_NEXT = (
     "何もしなくてよい (ゴミ箱のものは移してから一定期間で自動で消える)。"
     "すぐ空けたいなら、ユーザーが画面のワークスペースの「サンドボックス」で自分で消せる"
@@ -764,8 +764,8 @@ class _AlreadyExists(Exception):
 
 def _recipe_md_refused(abs_path: str) -> ToolError:
     """write_file / edit_file で RECIPE.md を書こうとした (レシピの本体は検査を通す tool で書く)。
-    次の手は渡す path (フォルダ) を実際の値で言う — read_file で RECIPE.md を読んだ後、そのパスのまま
-    edit_file を呼ぶ (staging 2026-10-30)。レシピの tool がこのターンに無ければ能力の案内。"""
+    次の手は渡す path (フォルダ) を実際の値で言う (RECIPE.md のパスのまま edit_file を呼び直させない)。
+    レシピの tool がこのターンに無ければ能力の案内。"""
     # フォルダ名は書いた人の文 — JSON の文字列で埋める (`broken_next` と同じ)
     folder = json.dumps(posixpath.dirname(abs_path), ensure_ascii=False)
     keep = (
@@ -879,7 +879,7 @@ READ_PROXY_MOUNT_HINT = (
 )
 
 
-# edit_file (llens 依頼・ken 指示 2026-10-27)。一致は decode 後の文字列で文字どおり 1 か所
+# edit_file: 一致は decode 後の文字列で文字どおり 1 か所
 # — CRLF・空白・近いものへ寄せない。一致が無いときに CRLF の違いだけは事実の文で言う
 _EDIT_SHOW_MATCHES = 5
 # 結果に添える置き換え後の前後: 前後 2 行ずつ、全体で 10 行まで
@@ -1256,20 +1256,18 @@ class Tools:
     background にしても並列にならない (長い background 実行の裏で同系統を呼ぶと終わるまで待たされ、
     待ちが長すぎると失敗する)。"""
 
-    # /ext/groups の書ける・読むだけ (2026-10-31 ken、案 A): ここは規則だけを言い、利用者ごとの
+    # /ext/groups の書ける・読むだけ: ここは規則だけを言い、利用者ごとの
     # rw / ro は list_workspace の結果 (と書けないときの ERROR) が言う — tool の spec を利用者で
     # 変えない (preset ごとに同じ = prefix cache を割らない)。
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — `toolkit_note_anchor` (run_python) の
-    # description に 1 回だけ前置され、モデルに見える (2026-10-30 まで: 名前順の先頭 spec に付き、
-    # edit_file を足してからは edit_file の説明に付いていた)。3 実行ツールの docstring に
+    # description に 1 回だけ前置され、モデルに見える。3 実行ツールの docstring に
     # 複製していた共通事項の一本化 (2026-08-16)。開発者メモはこの # コメント側に書く。
-    # 2026-10-30 (llens「tool の説明を削る」batch 2): 毎ターン送るので、まれな場面の細目はその場面の
-    # 戻り値へ — imports/ の期限の日付・残すなら別の場所へは取り込みの結果 (`_imports_expiry_note`)、
-    # 戻し方は「無い」の ERROR (`_cache_hint`)、rm せず remove_file (例外は system prompt) は
-    # remove_file の説明、RECIPE.md を書かないのは `_recipe_md_refused` の ERROR。残したのは呼び方・
-    # 置き場の選び方に効く事実だけ (ネットワーク・/workspace の共有と消える置き場・見えないこと・
-    # /ext の書ける範囲・直列)。消える置き場の 1 句は run_* の中の FileNotFoundError には案内が
-    # 付かないので残した (敵対レビュー)。
+    # 毎ターン送るので、まれな場面の細目はその場面の戻り値が言う — imports/ の期限の日付・残すなら
+    # 別の場所へは取り込みの結果 (`_imports_expiry_note`)、戻し方は「無い」の ERROR (`_cache_hint`)、
+    # rm せず remove_file (例外は system prompt) は remove_file の説明、RECIPE.md を書かないのは
+    # `_recipe_md_refused` の ERROR。ここに書くのは呼び方・置き場の選び方に効く事実だけ (ネットワーク・
+    # /workspace の共有と消える置き場・見えないこと・/ext の書ける範囲・直列)。消える置き場の 1 句は
+    # run_* の中の FileNotFoundError には案内が付かないので要る。
     # imports/ trash/ の期限 (#149): 掃除は sandbox サービスの idle workspace 回収
     # (env `SANDBOX_CACHE_TTL_DAYS`、既定 30)。単位は直下のエントリ、時刻は max(mtime, ctime)
     # (mv で ctime が今になる = 移した日から数える)。docstring は静的なので既定で言い、実際の値は
@@ -1559,13 +1557,9 @@ class Tools:
         :param code: 実行する Python コード
         :param timeout_s: このセルの wall clock 秒数 (省略時 120、上限 600)
         """
-        # 「実行した出力だけを使う」(2026-10-30 llens staging の batch 2 比較): P10「算定要件 + Python で
-        # 計算して」で、run_python を呼ばずにコードと作った「出力」を書く回が出た (b1 0/10 → b2 2/9)。
-        # どの版の説明にもこの規則は無い (もともと起こりうる失敗)。b2 で共通注記 (環境の事実 470 字) が
-        # run_python の説明の前に付いて「実行する tool」であることが薄まった疑いはあるが、b2 は他の tool の
-        # 説明も同時に変えており 0/10 対 2/9 は偶然でも出る (敵対レビュー)。規則は tool の説明だけが持つ
-        # (llens 決定 — どの preset にも効く。llens の prompt には足さない)。対象は「コードの出力・コードで
-        # 出した値」に絞る (「計算の結果」だと暗算の足し算まで run_python に回しうる)
+        # 「実行した出力だけを使う」の規則は tool の説明だけが持つ (どの preset にも効く。llens の prompt
+        # には足さない)。対象は「コードの出力・コードで出した値」に絞る (「計算の結果」だと暗算の足し算まで
+        # run_python に回しうる)
         return await self._exec_cell(code, timeout_s, __user__, __chat_id__)
 
     async def run_python_once(
@@ -1597,9 +1591,8 @@ class Tools:
         :param command: 実行する bash コマンド (スクリプト可)
         :param timeout_s: wall clock 秒数 (省略時 120、上限 600)
         """
-        # rm の歯止め (2026-10-30 llens 経由 ken): /workspace・/ext の下を直接 rm するコマンドは送らない
-        # — 「完全に消して」に rm -rf で応える回があった。消すのは remove_file (ゴミ箱)。よくある直接の
-        # rm だけを止める (安全の境界ではない — utils/rm_guard)
+        # rm の歯止め: /workspace・/ext の下を直接 rm するコマンドは送らない。消すのは remove_file
+        # (ゴミ箱)。よくある直接の rm だけを止める (安全の境界ではない — utils/rm_guard)
         from nucllei.utils.rm_guard import blocked_rm_targets, parse_allowed
 
         blocked = blocked_rm_targets(
@@ -1640,8 +1633,7 @@ class Tools:
         :param file_id: 添付・生成物の file_id (添付一覧に出ていなくてもよい)
         :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。受け取った形のまま (組み立てない・書き換えない・ホストを補わない)
         """
-        # 説明から外した細目 (2026-10-30 llens「tool の説明を削る」batch 2) はその場面の戻り値が言う:
-        # url の `/ext/…` が sandbox から見えていればコピーせずそのパスを返す (結果)、file_id / filename
+        # 説明に書かない細目はその場面の戻り値が言う: url の `/ext/…` が sandbox から見えていればコピーせずそのパスを返す (結果)、file_id / filename
         # と同時は ERROR、imports/ の期限と「残すなら別の場所へ」は結果 (`_imports_expiry_note`)
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
@@ -1883,8 +1875,7 @@ class Tools:
         :param path: 書き込み先のファイル。sandbox の絶対パス (`/workspace/…`・`/ext/groups/<グループ名>/…`。管理者は `/ext/public/…` も)
         :param content: ファイルの中身 (テキストそのまま)
         """
-        # 説明から外した細目 (2026-10-30 llens「tool の説明を削る」batch 2): 管理者が全グループと
-        # /ext/public に書けることは toolkit 共通注記 (2026-10-19 llens 監査 (4) の要件はそちらで満たす)、
+        # 説明に書かない細目: 管理者が全グループと /ext/public に書けることは toolkit 共通注記、
         # 書けない置き場は _write_target の ERROR、大きすぎるは下の ERROR
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
@@ -1915,8 +1906,7 @@ class Tools:
         return f"{abs_path} に書き込んだ (UTF-8、{_human_size(len(data))})。"
 
     def _no_overwrite(self, abs_path: str) -> bool:
-        """valve `write_no_overwrite_paths` の置き場の下か (2026-10-31 ken「MEMORY.md の上書きは edit_file に
-        案内で」— staging で記憶の目次を write_file で丸ごと書き直し、前の行を落とす回があった)。その下の
+        """valve `write_no_overwrite_paths` の置き場の下か。その下の
         write_file は新しく作るだけ (sandbox の排他の作成 `exclusive` — 既にあれば 409。stat してから書くのと
         違い、間に他が作っても上書きしない)。run_shell のリダイレクト・python の open('w')・置き場の外の
         symlink を経た書き込みは見ない (README_API)。"""
@@ -2019,7 +2009,7 @@ class Tools:
         :param old_text: 置き換える部分。空白・改行・インデントまでファイルの中の文字どおりで、ファイルの中で 1 か所だけに一致すること
         :param new_text: 置き換え後の文字列 (空なら old_text の部分を消す)
         """
-        # 説明から外した細目 (2026-10-30 llens「削って ERROR へ」) は、その場面の戻り値が言う:
+        # 説明に書かない細目は、その場面の戻り値が言う:
         # 一致 0 / 2 か所以上・old_text 空・無い (作るなら write_file)・バイナリ・
         # 大きさ・cp932 で表せない文字は下の ERROR、文字コードを保つことは read_file の先頭行と結果の
         # 「文字コード: …」、書ける範囲は toolkit 共通注記と _write_target の ERROR
@@ -2165,7 +2155,7 @@ class Tools:
 
         :param path: 移すファイルかフォルダ。sandbox の絶対パス (`/workspace/…`・`/ext/groups/<グループ名>/…`。管理者は `/ext/public/…` も)
         """
-        # 説明から外した細目 (2026-10-30 llens「tool の説明を削る」batch 3) は結果・ERROR が言う: 移した先の
+        # 説明に書かない細目は結果・ERROR が言う: 移した先の
         # パス (置き場ごとの trash/ の直下・同じ名前なら -2 …)・消えるまでの日数・戻す mv のコマンドは結果、
         # ゴミ箱の中・置き場そのもの・. 始まりは ERROR
         if not __user__ or not __user__.get("id"):
@@ -2230,7 +2220,7 @@ class Tools:
         :param offset: 読み始めのバイト位置 (省略時 0 = 先頭)。続きは前回の next_offset をそのまま渡す
         :param max_chars: 1 回で返す最大文字数 (省略時 40000、上限 60000)
         """
-        # 説明から外した細目 (2026-10-30 llens「tool の説明を削る」batch 2) は結果・ERROR が言う: 文字コードは
+        # 説明に書かない細目は結果・ERROR が言う: 文字コードは
         # 先頭行、続きは末尾の next_offset、行の途中で切ったこと・CSV / TSV の見出しの付け直しは結果、
         # テキストでないもの・next_offset 以外の offset で文字の途中は ERROR、一部を直すなら edit_file は
         # write_file / edit_file の説明
@@ -2372,8 +2362,7 @@ class Tools:
         budget = max_chars - len(header)
 
         # next_offset は行 (CSV / TSV はレコード) の切れ目の直後 — それ以外の offset で読んだら、直前の
-        # 1 バイトで行の途中から始まったと分かるので結果に言う (説明から外した「それ以外の値は行の
-        # 途中から」— 2026-10-30 batch 2、敵対レビュー)
+        # 1 バイトで行の途中から始まったと分かるので結果に言う
         mid_start = False
         if offset == 0:
             chunk = head[start : start + need]
@@ -2422,7 +2411,7 @@ class Tools:
 
             folder = posixpath.dirname(abs_path)
             # 直せない人 (全体の層を管理者でない人・書き込みを許されていないグループのメンバーが読む)
-            # には edit_recipe を勧めない (敵対レビュー)。
+            # には edit_recipe を勧めない。
             # フォルダ名は書いた人の文 — JSON の文字列で埋める
             fix = (
                 f" 直すなら edit_recipe(path={json.dumps(folder, ensure_ascii=False)}) で直す"
@@ -2550,8 +2539,7 @@ class Tools:
         """`/ext/groups` 直下 = この user に見えるグループの置き場 (#152。ACL の `ext_visible_groups`)。
 
         管理者には所属していないグループも見えて書けるので、その行に「所属していない」を添える
-        (2026-10-30 llens 依頼: 所属の無い管理者に「グループに上げて」と頼むと、モデルが
-        {{USER_GROUPS}} より tool の結果を信じて見えるだけのグループに上げた)。所属は
+        (無いとモデルは見えるだけのグループを所属と取り違える)。所属は
         NUCLLEI_USER_GROUPS と同じ (ディレクトリ名にできる所属グループ)。"""
         try:
             admin = user.get("role") == "admin"

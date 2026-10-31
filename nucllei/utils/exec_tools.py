@@ -71,21 +71,20 @@ AWAIT_TASK_DEFAULT_TIMEOUT = 90
 AWAIT_TASK_MIN_TIMEOUT = 10
 AWAIT_TASK_MAX_TIMEOUT = 300
 
-# await_task が時間切れ (running) を返したときの note (2026-10-30 — 説明から移した。2026-10-19 llens
-# 監査の言い換え「…報告してターンを終えること」→「応答を終える」はそのまま)
+# await_task が時間切れ (running) を返したときの note
 _AWAIT_RUNNING_NOTE = (
     'status が "running" のタスクはまだ実行中 (終わったタスクの結果はこの返りにある)。'
     "次の手: running の分を待つために呼び直さず、終わった分の結果と、まだ実行中のものがあることを"
     "ユーザーに伝えて応答を終える (running の分の結果は完了時に自動で届く)。"
 )
-# check_task が実行中のタスクを返したときの note (2026-10-30 — 「回収のために呼ぶ必要はない」を説明から
-# 移した。check_task を待つために呼び続けないように、running を返したときだけ言う)
+# check_task が実行中のタスクを返したときの note (check_task を待つために呼び続けないように、
+# running を返したときだけ言う)
 _CHECK_RUNNING_NOTE = (
     "実行中のタスクの結果は完了時に自動で届く。次の手: 待つために check_task を呼び直さない"
     " (今すぐ結果が要るなら await_task で受け取る)。"
 )
 # 保持期間 (ASYNC_EXEC_RETENTION_DAYS) を過ぎて結果を消した行 (purged_at)。消した行は result が
-# NULL なので、空の成功に見せない (2026-10-30 — 説明から保持期間を外した代わり。敵対レビュー)
+# NULL なので、空の成功に見せない
 _PURGED_ERROR = "このタスクの結果は保持期間を過ぎて消えている。次の手: 結果が要るなら同じ処理をもう一度実行する。"
 
 # 1 回の呼び出しで扱える task_ids の上限(契約 M0 — wire 膨張の上限)。
@@ -361,7 +360,7 @@ def build_exec_tools(user, metadata) -> dict:
                 entry["error_kind"] = error_kind
         return entry
 
-    # 2026-10-30 (llens「tool の説明を削る」batch 3): 結果が自動で届くこと・今すぐなら await_task は
+    # 結果が自動で届くこと・今すぐなら await_task は
     # await_task の説明が 1 回だけ言う (3 つの回収 tool はいつも一緒に載る)。orphaned の意味は行の
     # error (ORPHANED_ERROR) が、task_id の出どころは不正な id の per-entry error が言う
     check_spec = {
@@ -431,8 +430,7 @@ def build_exec_tools(user, metadata) -> dict:
             out["note"] = _CHECK_RUNNING_NOTE
         return out
 
-    # 2026-10-30 (llens「tool の説明を削る」batch 3): 保持期間と再回収できること・1 回の待ちで全 id を
-    # 覆うことは外した。時間切れ (running) のときにどうするかは、running を返した結果の note が言う
+    # 時間切れ (running) のときにどうするかは、running を返した結果の note が言う
     # (_AWAIT_RUNNING_NOTE — その場面でだけ要る)
     await_spec = {
         "name": "await_task",
@@ -634,8 +632,7 @@ def build_exec_tools(user, metadata) -> dict:
                 "task_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    # 2026-10-30 batch 4: check_task / await_task と揃える (出どころは不正な id の
-                    # per-entry error が言う)
+                    # 出どころは不正な id の per-entry error が言う (check_task / await_task と同じ)
                     "description": f"停止するタスク id(最大 {TASK_IDS_MAX} 件)。",
                 },
             },

@@ -58,7 +58,7 @@
 
 	let accessControl = $state<any>({});
 
-	// 本文の欄: 編集 | プレビュー(2026-10-30 ken「実際どのように展開されるかプレビューをタブで」)
+	// 本文の欄: 編集 | プレビュー
 	let contentView = $state<'edit' | 'preview'>('edit');
 
 	// llens(#66): 編集できるのは自分の skill だけ(admin は全部)。他人の skill は閲覧のみ。

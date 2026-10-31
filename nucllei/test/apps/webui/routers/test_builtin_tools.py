@@ -282,7 +282,7 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         # 一致箇所の抜粋 (発言者 + 前後の文脈) が付く — grep_doc と同じく何がヒットしたか見せる
         assert out[0]["matches"] == [{"role": "user", "excerpt": "京都に行きたい"}]
         assert "matches_note" not in out[0]
-        # タイトルだけの一致は抜粋が空 — その旨をヒットに添える (2026-10-30 batch 5)
+        # タイトルだけの一致は抜粋が空 — その旨をヒットに添える
         out = Tools().grep_history("旅行", __user__={"id": "owner"})
         assert out[0]["matches"] == []
         assert out[0]["matches_note"] == "本文の抜粋は無い (タイトルだけの一致)"
@@ -300,7 +300,7 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
             "京都", __user__={"id": "owner"}, __chat_id__=current.id
         )
         assert [c["title"] for c in out] == ["旅行の計画"]
-        # 進行中のチャットにしか無ければ、外したことを言う (「履歴に無い」と言い切らない — 2026-10-30)
+        # 進行中のチャットにしか無ければ、外したことを言う (「履歴に無い」と言い切らない)
         out = Tools().grep_history(
             "チャット履歴", __user__={"id": "owner"}, __chat_id__=current.id
         )
@@ -324,7 +324,7 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         )
         out = Tools().grep_history("report", __user__={"id": "owner"})
         assert len(out) == 1 and len(out[0]["matches"]) == 3
-        # 上限で切ったことはヒットに添える (説明の「最大 3 件」を外した代わり — 2026-10-30 batch 5)
+        # 上限で切ったことはヒットに添える (説明は件数の上限を言わない)
         assert (
             out[0]["matches_note"]
             == "抜粋は最初の 3 件まで (他にも一致があるかもしれない)"
@@ -357,8 +357,8 @@ class TestBuiltinHistoryTool(AbstractPostgresTest):
         )
 
     def test_chat_files_spec_leaves_deleted_to_the_result(self):
-        """deleted: true の意味は、その印が出た結果の note が言う (2026-10-30 llens「tool の説明を削る」
-        batch 5 — 説明から移した。test_deleted_own_file_is_marked)。"""
+        """deleted: true の意味は、その印が出た結果の note が言う (説明には書かない。
+        test_deleted_own_file_is_marked)。"""
         from nucllei.builtin_tools.chat_files import Tools
         from nucllei.utils.tools import get_tool_specs
 
@@ -884,8 +884,8 @@ class TestAttachmentText(AbstractPostgresTest):
         from nucllei.utils.tools import get_tool_specs
 
         (spec,) = get_tool_specs(Tools())
-        # 2026-10-30 (llens「tool の説明を削る」batch 3): 続きの取り方は offset の引数へ、自分のファイルのみ・
-        # テキスト層が無いものは ERROR (file_id_error / _no_text_next) へ
+        # 続きの取り方は offset の引数が、自分のファイルのみ・テキスト層が無いものは
+        # ERROR (file_id_error / _no_text_next) が言う
         assert spec["description"] == (
             "添付・生成物の抽出テキストを file_id から区切って読む。使うのは本文がこの会話に入っていない\n"
             "file_id (大きすぎて読み込まれなかった添付・tool やサブエージェントが作ったもの・file_id だけ渡された\n"
