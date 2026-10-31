@@ -24,13 +24,20 @@ module.exports = {
 	rules: {
 		// any は意図的に多用(props/イベント payload)。型正しさは svelte-check の守備範囲
 		'@typescript-eslint/no-explicit-any': 'off',
-		// Function / {} 型を props で意図的に使っている(厳格化は #70 型付けの守備範囲)
-		'@typescript-eslint/ban-types': 'off',
-		// `_` プレフィクスは「意図的に未使用」の規約(_raw / _u 等)
+		// Function / {} 型を props で意図的に使っている(厳格化は #70 型付けの守備範囲)。
+		// typescript-eslint v8 で ban-types が 3 つに分かれたので 3 つとも切る
+		'@typescript-eslint/no-unsafe-function-type': 'off',
+		'@typescript-eslint/no-empty-object-type': 'off',
+		'@typescript-eslint/no-wrapper-object-types': 'off',
+		// `_` プレフィクスは「意図的に未使用」の規約(_raw / _u 等)。
+		// catch の束縛は見ない(v8 で既定が 'all' に変わった。空 catch と同じく「失敗してよい」の明示)
 		'@typescript-eslint/no-unused-vars': [
 			'error',
-			{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
+			{ argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }
 		],
+		// $effect の依存を読むだけの式文 (`list.length;`) や `a && b()` を使っている
+		// (v8 で recommended に入った。v6 では見ていなかった)
+		'@typescript-eslint/no-unused-expressions': 'off',
 		// while (true) のストリーム読みループは正当(SSE / ollama pull 進捗等)
 		'no-constant-condition': ['error', { checkLoops: false }],
 		// 空 catch は「失敗してよい」の明示(localStorage parse 等)

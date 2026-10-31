@@ -34,8 +34,8 @@
 		"@types/markdown-it": "^14.1.2",
 		"@types/node": "^22.20.5",
 		"@types/sortablejs": "^1.15.9",
-		"@typescript-eslint/eslint-plugin": "^6.17.0",
-		"@typescript-eslint/parser": "^6.17.0",
+		"@typescript-eslint/eslint-plugin": "^8.72.1",
+		"@typescript-eslint/parser": "^8.72.1",
 		"eslint": "^8.56.0",
 		"eslint-config-prettier": "^9.1.0",
 		"eslint-plugin-svelte": "^2.43.0",
@@ -51,7 +51,7 @@
 		"tslib": "^2.4.1",
 		"typescript": "^5.5.4",
 		"vite": "^6.4.5",
-		"vitest": "^3.2.7"
+		"vitest": "^4.1.12"
 	},
 	"type": "module",
 	"dependencies": {
