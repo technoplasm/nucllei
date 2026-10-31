@@ -502,8 +502,10 @@ sandbox tool and the file browser all call it:
   `run_shell` writes fail with the OS's "Read-only file system".
 - The directory name **is** the group name (membership from
   `Groups.get_groups_by_member_id`). Names that fail
-  `utils/group_names.validate_group_name` (#151; e.g. an older `rank:部長`) are
-  neither bound nor served, and a warning is logged.
+  `utils/group_names.validate_group_name` (#151; e.g. an older `rank:部長`, or one
+  with an instruction / mark word followed by a colon such as `次の手：…`, matched
+  like recipe folder names by `utils/label_words.has_label`) are neither bound nor
+  served, and a warning is logged.
 - The gate: invisible → **404, the same as absent** (existence is not leaked);
   `/ext/groups` and `/ext/groups/<g>/` themselves → 404 (no listing over HTTP).
   Responses under both names carry `Cache-Control: private, no-cache` (an

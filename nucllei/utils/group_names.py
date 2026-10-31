@@ -12,10 +12,14 @@
 `{{USER_GROUPS}}` の区切り(`, `)を曖昧にしないためと、シェルでパスを扱うときの事故防止。
 カンマは NFKC 後の形で判定する(全角の `，` 等も弾く)。シェルのメタ文字(`"` `$` `` ` `` 等)も
 弾く — `{{USER_GROUPS}}` が run_shell のコマンドに埋め込まれるため(こちらは ASCII の形だけ)。
+tool の文の指示・印の語 + コロン(`次の手：` 等。全角・似た形も — 判定は `label_words.has_label`)も
+弾く — グループ名はパスとして tool の結果・ERROR・`{{USER_GROUPS}}` にそのまま出るため。
 #152 はここを import して使う — 検証規則を 2 か所に書かない。
 """
 
 import unicodedata
+
+from nucllei.utils.label_words import LABEL_WORDS, has_label
 
 # ext4 のファイル名上限は 255 バイト。ディレクトリ名 = グループ名そのままなので
 # UTF-8 のバイト数で縛る(日本語なら 1 文字 3 バイト ≒ 85 文字)。
@@ -46,6 +50,14 @@ FORBIDDEN_GROUP_NAME_SEPARATORS_MESSAGE = (
     "前後の空白は自動で削ります)。"
     "テンプレート変数 {{USER_GROUPS}} の区切り(「, 」)と紛れないよう、"
     "またグループ別ディレクトリをシェルで扱うときの事故を防ぐためです。"
+)
+
+
+FORBIDDEN_GROUP_NAME_LABEL_MESSAGE = (
+    "グループ名に、指示の語のあとにコロンが続く形(「次の手：」「警告：」など)は使えません"
+    "(対象の語: " + "・".join(LABEL_WORDS) + "。全角や似た形のコロン・文字も含みます)。"
+    "グループ名はツールの結果やテンプレート変数 {{USER_GROUPS}} の中でモデルに渡り、"
+    "ツールからの指示と紛れるためです。"
 )
 
 
@@ -109,6 +121,9 @@ def validate_group_name(name: str) -> str:
     nfkc = unicodedata.normalize("NFKC", name)
     if any(ch == "," or _is_space(ch) for s in (name, nfkc) for ch in s):
         raise GroupNameError(FORBIDDEN_GROUP_NAME_SEPARATORS_MESSAGE)
+
+    if has_label(name):
+        raise GroupNameError(FORBIDDEN_GROUP_NAME_LABEL_MESSAGE)
 
     if name.startswith("."):
         # `.` と `..` もここで落ちる

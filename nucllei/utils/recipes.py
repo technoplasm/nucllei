@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import datetime as dt
 import difflib
-import functools
 import io
 import json
 import logging
@@ -41,6 +40,7 @@ from typing import Optional
 
 import yaml
 
+from nucllei.utils.label_words import defuse_labels, has_label  # noqa: F401 (再輸出)
 from nucllei.utils.tool_errors import NEXT
 
 log = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ def bad_segment(n: str) -> Optional[str]:
 def name_problem(n: str) -> Optional[str]:
     """レシピのフォルダ名の規則に合わない理由。`trash` はゴミ箱 (`<層>/trash/`) と紛れるので断る。
     バッククォートは断る (一覧・返答への指示はフォルダをコード表記で示す — 名前で囲みを閉じさせない)。
-    指示・印の語とコロン (`次の手:` 等。見た目の似た形も — `has_label`) も断る (フォルダ名はコード表記の外 — load_recipe の
+    指示・印の語とコロン (`次の手:` 等。見た目の似た形も — `label_words.has_label`) も断る (フォルダ名はコード表記の外 — load_recipe の
     前置き・警告・ERROR にもそのまま出る)。"""
     why = bad_segment(n)
     if why:
@@ -608,59 +608,6 @@ def plain(v) -> str:
     t = " ".join(str(v).split()) if v else ""
     t = t.replace("[", "［").replace("]", "］").replace("|", "｜")
     return defuse_labels(t)
-
-
-# tool の文がモデルへの指示・印に使う語 (全角・縦書き・比の記号のコロンも)。defuse_labels (plain・_shown・
-# neutral) が区切りを変え、name_problem がフォルダ名に断る
-_RE_SHOWN_WORDS = re.compile(
-    r"(返答への指示|次の手|中止|ERROR|警告|壊れている)\s*[:：︓﹕∶꞉]"
-)
-# 見た目の似た形 (互換文字・全角の英字・大小文字・語の中の空白やゼロ幅の文字・ほかのコロン) も拾うための、
-# 正規化した形の語 (`_folded` の後で照合する)
-_SHOWN_WORDS_FOLDED = tuple(
-    w.casefold()
-    for w in ("返答への指示", "次の手", "中止", "ERROR", "警告", "壊れている")
-)
-
-
-# 名前に COLON を含まず互換分解でも `:` にならないが、コロンに見える文字 (比の記号・縦書きの二点リーダー・
-# 二点の句読点・ヘブライ文字の句点・ルーン文字の句読点)
-_COLON_LIKE = frozenset("∶︰⁚׃᛬")
-
-
-@functools.lru_cache(maxsize=4096)
-def _is_colon(c: str) -> bool:
-    """コロンの仲間 (互換分解で `:` になる文字、Unicode の名前に COLON を含む文字、`_COLON_LIKE`)。"""
-    return (
-        c in _COLON_LIKE
-        or unicodedata.normalize("NFKC", c) == ":"
-        or "COLON" in unicodedata.name(c, "")
-    )
-
-
-def _folded(t: str) -> str:
-    """照合用の形: 文字ごとに NFKC、書式文字 (ゼロ幅等) と空白を落とし、コロンの仲間は `:`、casefold。"""
-    out = []
-    for c in t:
-        if unicodedata.category(c) == "Cf" or c.isspace():
-            continue
-        out.append(":" if _is_colon(c) else unicodedata.normalize("NFKC", c))
-    return "".join(out).casefold()
-
-
-def has_label(t: str) -> bool:
-    """`t` に指示・印の語 + コロンがあるか (見た目の似た形も)。"""
-    f = _folded(t)
-    return any(f"{w}:" in f for w in _SHOWN_WORDS_FOLDED)
-
-
-def defuse_labels(t: str) -> str:
-    """指示・印の語 + コロンの区切りを変える (`次の手:` → `次の手 -`)。正規表現で拾えない似た形が残って
-    いれば、値の中のコロンの仲間をすべて ` -` にする (どの語にもコロンが続かなくなる)。"""
-    t = _RE_SHOWN_WORDS.sub(r"\1 -", t)
-    if has_label(t):
-        t = "".join(" -" if _is_colon(c) else c for c in t)
-    return t
 
 
 # 行の区切りとして扱われる文字 (str.splitlines と同じ)
