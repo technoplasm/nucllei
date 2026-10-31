@@ -2295,9 +2295,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       their own memberships, not every group. **No membership is the empty
       string; the variable is still defined.** Undefined means a sandbox or
       nucllei too old to pass it. A stored name that fails the group-name rule
-      (e.g. with a comma, a space or a shell metacharacter) is left out with a
-      warning in the log, because the value is a comma-separated contract read
-      by programs; `{{USER_GROUPS}}` keeps the stored names unchanged.
+      (e.g. with a comma, a space, a shell metacharacter or an instruction word
+      and a colon) is left out of both this and `{{USER_GROUPS}}`, with a
+      warning in the log — the value is a comma-separated contract read by
+      programs, and an invalid legacy name appears nowhere model-facing.
     - `NUCLLEI_USER_ROLE` — `admin`, `user` or `pending` (the role string as
       stored). Any other role is not sent, so the variable is undefined.
       The stateful kernel is recreated (`session_reset`) when either value
@@ -3117,7 +3118,10 @@ POST /api/v1/skills/create
   locale; until 2026-10-19 it was `strftime("%A")`, English on the usual
   locale), `{{USER_NAME}}`, `{{USER_ROLE}}` (the user's role as
   stored: `admin` / `user` / …), `{{USER_GROUPS}}` (names of the groups the user
-  **is a member of**, as stored, joined with `", "`; sorted by
+  **is a member of**, as stored — only names that pass the current group-name
+  rule, the same filter as `{{USER_WRITABLE_GROUPS}}`, `NUCLLEI_USER_GROUPS` and
+  the `/ext/groups` binding; a legacy name that fails it is left out with a
+  warning —, joined with `", "`; sorted by
   `(name.casefold(), name)`; empty string if none — admins get only their own
   memberships, not every group), `{{USER_WRITABLE_GROUPS}}` (the user's member
   groups whose folder `/ext/groups/<group>/` they can write — the groups where

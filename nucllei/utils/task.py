@@ -96,7 +96,11 @@ def _group_name_sort_key(name: str) -> tuple[str, str]:
 
 
 def user_group_names(user_id: Optional[str]) -> list[str]:
-    """{{USER_GROUPS}} の元: user が**所属している**グループの名前(保存値そのまま)。
+    """{{USER_GROUPS}} の元: user が**所属している**グループの名前 (保存値のまま) のうち、今のグループ名の
+    規則を通るもの (`ext_acl.is_group_dir_name` — {{USER_WRITABLE_GROUPS}}・jail の env
+    `NUCLLEI_USER_GROUPS`・/ext/groups の bind と同じ絞り方)。規則より前に作られた通らない名前
+    (`:`・カンマ・空白・指示の語 + コロン 等) は warning を 1 行出して落とす — モデルに見せるどこにも出さない
+    (管理画面で改名すれば入る)。
 
     admin でも所属している物だけ(全グループではない)。並びは _group_name_sort_key。
     get_groups_by_member_id は user_ids の文字列 LIKE なので、実際の所属を user_ids で
@@ -105,12 +109,19 @@ def user_group_names(user_id: Optional[str]) -> list[str]:
     if not user_id:
         return []
     from nucllei.models.groups import Groups
+    from nucllei.utils.ext_acl import is_group_dir_name
 
-    names = [
-        g.name
-        for g in Groups.get_groups_by_member_id(user_id)
-        if user_id in (g.user_ids or []) and g.name
-    ]
+    names = []
+    for g in Groups.get_groups_by_member_id(user_id):
+        if user_id not in (g.user_ids or []) or not g.name:
+            continue
+        if is_group_dir_name(g.name):
+            names.append(g.name)
+        else:
+            log.warning(
+                f"group {g.id} の名前 {g.name!r} は今のグループ名の規則に合わないので"
+                " {{USER_GROUPS}} / NUCLLEI_USER_GROUPS に入れない (管理画面で改名すれば入る)"
+            )
     return sorted(names, key=_group_name_sort_key)
 
 
@@ -432,7 +443,8 @@ def prompt_template(
     """サーバー既知のプロンプト変数を展開する(system prompt・チャットの system・skill の本文・タイトル生成)。
 
     {{USER_ROLE}} は role の値そのまま(不明なら "Unknown")。{{USER_GROUPS}} は
-    user_group_names(user_id) を ", " でつないだもの(所属なし・user 不明なら空文字列)。
+    user_group_names(user_id) (今のグループ名の規則を通る名前だけ) を ", " でつないだもの
+    (所属なし・user 不明なら空文字列)。
     グループの DB 照会は {{USER_GROUPS}} が本文にあるときだけ、1 呼び出しにつき 1 回。
     {{USER_WRITABLE_GROUPS}} は user_writable_group_names(user_id, user_role) を ", " でつないだもの
     (置き場に書ける所属グループ。admin は所属グループ全部。無ければ空文字列)。
