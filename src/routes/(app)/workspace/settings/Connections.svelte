@@ -317,6 +317,7 @@
 												newConfig[newIdx] = OLLAMA_API_CONFIGS[newIdx < idx ? newIdx : newIdx + 1];
 											});
 											OLLAMA_API_CONFIGS = newConfig;
+											updateOllamaHandler();
 										}}
 									/>
 								{/each}
