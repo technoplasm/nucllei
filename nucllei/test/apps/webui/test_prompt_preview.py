@@ -208,6 +208,13 @@ class TestModelPreview(AbstractPostgresTest):
         assert tools["load_skill"]["varies"] is None
         assert tools["load_recipe"]["varies"] is None
         assert "system prompt" in tools["load_skill"]["description"]
+        # 一覧は前置きにあるので、load_recipe の説明は 1 文 (一覧の行は入らない)
+        from nucllei.builtin_tools.recipe_tools import RECIPE_INDEX_IN_PROMPT
+
+        assert tools["load_recipe"]["description"].endswith(
+            "\n\n" + RECIPE_INDEX_IN_PROMPT
+        )
+        assert "/workspace/recipes/集計" not in tools["load_recipe"]["description"]
         assert data["tools_chars"] == sum(t["chars"] for t in data["tools"])
 
     def test_listing_in_tool_description_is_marked(self, monkeypatch):

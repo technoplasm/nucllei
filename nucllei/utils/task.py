@@ -342,7 +342,7 @@ def reset_prompt_fetches() -> None:
 async def fetch_context_sections(user, model, template: str) -> dict[str, str]:
     """会話の前置きの変数のうち `template` にあるものの今の展開 ({変数: 文字列})。sandbox に聞くものは並べて聞く。
 
-    {{USER_RECIPES}} = 見出し + 一覧 (recipe_index_block。能力「レシピ」OFF・sandbox 無しは空、0 件・不通・古い
+    {{USER_RECIPES}} = 見出し + 一覧 (recipe_index_block。能力「レシピ」OFF・sandbox 無し・model 無しは空、0 件・不通・古い
     sandbox はその 1 行)。{{USER_MEMORY_INDEX}} = 記憶の目次 (無い・sandbox 無しは空、不通はその 1 行)。
     user 不明なら両方空。"""
     from nucllei.utils.frames import defuse
@@ -361,7 +361,7 @@ async def fetch_context_sections(user, model, template: str) -> dict[str, str]:
     if not uid:
         return sections
     jobs = {}
-    if want_recipes and recipes_available(model):
+    if want_recipes and model and recipes_available(model):
         jobs[USER_RECIPES_TOKEN] = get_user_recipes(user)
     if want_memory:
         jobs[USER_MEMORY_INDEX_TOKEN] = get_user_memory_index(user)
