@@ -20,46 +20,44 @@ class ERROR_MESSAGES(str, Enum):
     def __str__(self) -> str:
         return super().__str__()
 
-    DEFAULT = (
-        lambda err="": f'{"Something went wrong :/" if err == "" else "[ERROR: " + str(err) + "]"}'
-    )
+    DEFAULT = lambda err="": "問題が発生しました。" if err == "" else f"エラー: {err}"
     ENV_VAR_NOT_FOUND = "Required environment variable not found. Terminating now."
-    CREATE_USER_ERROR = "Oops! Something went wrong while creating your account. Please try again later. If the issue persists, contact support for assistance."
+    CREATE_USER_ERROR = "アカウントの作成中に問題が発生しました。しばらくしてからもう一度お試しください。解決しない場合は管理者に問い合わせてください。"
     EMAIL_MISMATCH = "Uh-oh! This email does not match the email your provider is registered with. Please check your email and try again."
-    EMAIL_TAKEN = "Uh-oh! This email is already registered. Sign in with your existing account or choose another email to start anew."
+    EMAIL_TAKEN = "このメールアドレスは既に登録されています。既存のアカウントでサインインするか、別のメールアドレスを使ってください。"
     USERNAME_TAKEN = (
         "Uh-oh! This username is already registered. Please choose another username."
     )
-    PASSWORD_TOO_LONG = "Uh-oh! The password you entered is too long. Please make sure your password is less than 72 bytes long."
+    PASSWORD_TOO_LONG = "パスワードが長すぎます。72 バイト未満にしてください (全角文字は 1 文字 3 バイトです)。"
     FILE_EXISTS = "Uh-oh! This file is already registered. Please choose another file."
 
-    ID_TAKEN = "Uh-oh! This id is already registered. Please choose another id string."
-    MODEL_ID_TAKEN = "Uh-oh! This model id is already registered. Please choose another model id string."
-
-    INVALID_TOKEN = (
-        "Your session has expired or the token is invalid. Please sign in again."
+    ID_TAKEN = "この ID は既に使われています。別の ID を指定してください。"
+    MODEL_ID_TAKEN = (
+        "このモデル ID は既に使われています。別のモデル ID を指定してください。"
     )
-    INVALID_CRED = "The email or password provided is incorrect. Please check for typos and try logging in again."
-    INVALID_EMAIL_FORMAT = "The email format you entered is invalid. Please double-check and make sure you're using a valid email address (e.g., yourname@example.com)."
+
+    INVALID_TOKEN = "セッションの有効期限が切れたか、認証情報が無効です。もう一度サインインしてください。"
+    INVALID_CRED = "メールアドレスまたはパスワードが正しくありません。入力を確かめて、もう一度サインインしてください。"
+    INVALID_EMAIL_FORMAT = "メールアドレスの形式が正しくありません。入力を確かめてください (例: yourname@example.com)。"
     INVALID_PASSWORD = (
         "現在のパスワードが正しくありません。入力を確かめて、もう一度お試しください。"
     )
-    INVALID_TRUSTED_HEADER = "Your provider has not provided a trusted header. Please contact your administrator for assistance."
+    INVALID_TRUSTED_HEADER = "認証プロバイダから信頼済みヘッダが届いていません。管理者に問い合わせてください。"
 
-    EXISTING_USERS = "You can't turn off authentication because there are existing users. If you want to disable WEBUI_AUTH, make sure your web interface doesn't have any existing users and is a fresh installation."
+    EXISTING_USERS = "既にユーザーがいるため、認証を無効にできません。WEBUI_AUTH を無効にできるのは、ユーザーが 1 人もいない新規の配備だけです。"
 
-    UNAUTHORIZED = "401 Unauthorized"
+    UNAUTHORIZED = "サインインしていないか、この操作を行う権限がありません。"
     ACCESS_PROHIBITED = (
         "この操作を行う権限がありません。必要な場合は管理者に問い合わせてください。"
     )
     ACTION_PROHIBITED = "この操作はセキュリティ上の理由で制限されています。"
 
     FILE_NOT_SENT = "FILE_NOT_SENT"
-    FILE_NOT_SUPPORTED = "Oops! It seems like the file format you're trying to upload is not supported. Please upload a file with a supported format and try again."
+    FILE_NOT_SUPPORTED = "このファイル形式には対応していません。対応している形式のファイルをアップロードしてください。"
 
-    NOT_FOUND = "We could not find what you're looking for :/"
-    USER_NOT_FOUND = "We could not find what you're looking for :/"
-    API_KEY_NOT_FOUND = "Oops! It looks like there's a hiccup. The API key is missing. Please make sure to provide a valid API key to access this feature."
+    NOT_FOUND = "見つかりませんでした。"
+    USER_NOT_FOUND = "ユーザーが見つかりませんでした。"
+    API_KEY_NOT_FOUND = "API キーがありません。"
     API_KEY_NOT_ALLOWED = "API キーでの利用は許可されていません。"
 
     MALICIOUS = "Unusual activities detected, please try again in a few minutes."
@@ -70,13 +68,13 @@ class ERROR_MESSAGES(str, Enum):
     )
     RATE_LIMIT_EXCEEDED = "API rate limit exceeded"
 
-    MODEL_NOT_FOUND = lambda name="": f"Model '{name}' was not found"
-    OPENAI_NOT_FOUND = lambda name="": "OpenAI API was not found"
-    OLLAMA_NOT_FOUND = "WebUI could not connect to Ollama"
-    CREATE_API_KEY_ERROR = "Oops! Something went wrong while creating your API key. Please try again later. If the issue persists, contact support for assistance."
-    API_KEY_CREATION_NOT_ALLOWED = "API key creation is not allowed in the environment."
+    MODEL_NOT_FOUND = lambda name="": f"モデル「{name}」が見つかりません。"
+    OPENAI_NOT_FOUND = lambda name="": "OpenAI 互換の接続が見つかりません。"
+    OLLAMA_NOT_FOUND = "Ollama に接続できませんでした。"
+    CREATE_API_KEY_ERROR = "API キーの作成中に問題が発生しました。しばらくしてからもう一度お試しください。解決しない場合は管理者に問い合わせてください。"
+    API_KEY_CREATION_NOT_ALLOWED = "この配備では API キーを作成できません。"
 
-    EMPTY_CONTENT = "The content provided is empty. Please ensure that there is text or data present before proceeding."
+    EMPTY_CONTENT = "ファイルが空です。中身のあるファイルをアップロードしてください。"
 
     DB_NOT_SQLITE = "この機能は、データベースに SQLite を使っている配備でだけ使えます。"
 
@@ -89,7 +87,7 @@ class ERROR_MESSAGES(str, Enum):
     )
 
     FILE_TOO_LARGE = (
-        lambda size="": f"Oops! The file you're trying to upload is too large. Please upload a file that is less than {size}."
+        lambda size="": f"ファイルが大きすぎます。{size} 未満のファイルをアップロードしてください。"
     )
 
     DUPLICATE_CONTENT = (

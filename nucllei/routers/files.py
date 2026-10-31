@@ -246,7 +246,7 @@ async def store_uploaded_file(
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error uploading file"),
+                detail=ERROR_MESSAGES.DEFAULT("ファイルをアップロードできませんでした"),
             )
 
     except HTTPException:
@@ -410,7 +410,7 @@ async def update_file_access_control_by_id(
     if not file:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("Error updating file access control"),
+            detail=ERROR_MESSAGES.DEFAULT("ファイルの共有範囲を更新できませんでした"),
         )
     return file
 
@@ -833,7 +833,7 @@ async def get_file_content_by_id(
             log.error("Error getting file content")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error getting file content"),
+                detail=ERROR_MESSAGES.DEFAULT("ファイルの内容を取得できませんでした"),
             )
     else:
         raise HTTPException(
@@ -902,7 +902,7 @@ async def get_html_file_content_by_id(id: str, user=Depends(get_verified_user)):
             log.error("Error getting file content")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error getting file content"),
+                detail=ERROR_MESSAGES.DEFAULT("ファイルの内容を取得できませんでした"),
             )
     else:
         raise HTTPException(
@@ -1010,7 +1010,7 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error deleting file"),
+                detail=ERROR_MESSAGES.DEFAULT("ファイルを削除できませんでした"),
             )
     else:
         raise HTTPException(
@@ -1041,19 +1041,21 @@ async def restore_file_by_id(id: str, user=Depends(get_admin_user)):
     if file.purged_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("File is purged and cannot be restored"),
+            detail=ERROR_MESSAGES.DEFAULT(
+                "このファイルは実体を破棄済みのため、復元できません"
+            ),
         )
     if file.deleted_at is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("File is not deleted"),
+            detail=ERROR_MESSAGES.DEFAULT("このファイルは削除されていません"),
         )
 
     result = Files.restore_file_by_id(id)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("Error restoring file"),
+            detail=ERROR_MESSAGES.DEFAULT("ファイルを復元できませんでした"),
         )
     return Files.get_file_by_id(id)
 
@@ -1083,12 +1085,14 @@ async def purge_file_by_id(id: str, user=Depends(get_admin_user)):
     if file.purged_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("File is already purged"),
+            detail=ERROR_MESSAGES.DEFAULT("このファイルは既に実体を破棄済みです"),
         )
     if file.deleted_at is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("File must be deleted before purge"),
+            detail=ERROR_MESSAGES.DEFAULT(
+                "実体を破棄する前に、ファイルを削除してください"
+            ),
         )
 
     try:
@@ -1098,13 +1102,13 @@ async def purge_file_by_id(id: str, user=Depends(get_admin_user)):
         log.error("Error deleting file from storage")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DEFAULT("Error deleting file from storage"),
+            detail=ERROR_MESSAGES.DEFAULT("ストレージからファイルを消せませんでした"),
         )
 
     purged = Files.purge_file_by_id(id, purged_by=user.id)
     if not purged:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("Error purging file"),
+            detail=ERROR_MESSAGES.DEFAULT("ファイルの実体を破棄できませんでした"),
         )
     return purged

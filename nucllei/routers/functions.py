@@ -120,7 +120,7 @@ async def create_new_function(
             else:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT("Error creating function"),
+                    detail=ERROR_MESSAGES.DEFAULT("拡張を作成できませんでした"),
                 )
         except Exception as e:
             log.exception(f"Failed to create a new function: {e}")
@@ -187,7 +187,7 @@ async def update_function_by_id(
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error updating function"),
+                detail=ERROR_MESSAGES.DEFAULT("拡張を更新できませんでした"),
             )
 
     except Exception as e:

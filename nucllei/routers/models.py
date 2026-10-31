@@ -164,7 +164,7 @@ async def toggle_model_by_id(request: Request, id: str, user=Depends(get_admin_u
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error updating function"),
+                detail=ERROR_MESSAGES.DEFAULT("モデルを更新できませんでした"),
             )
     else:
         raise HTTPException(

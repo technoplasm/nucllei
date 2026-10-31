@@ -88,7 +88,7 @@ async def create_new_group(form_data: GroupForm, user=Depends(get_admin_user)):
     if not group:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("Error creating group"),
+            detail=ERROR_MESSAGES.DEFAULT("グループを作成できませんでした"),
         )
     return group
 
@@ -146,7 +146,7 @@ async def update_group_by_id(
     if not group:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("Error updating group"),
+            detail=ERROR_MESSAGES.DEFAULT("グループを更新できませんでした"),
         )
     return group
 
@@ -165,7 +165,7 @@ async def delete_group_by_id(id: str, user=Depends(get_admin_user)):
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error deleting group"),
+                detail=ERROR_MESSAGES.DEFAULT("グループを削除できませんでした"),
             )
     except Exception as e:
         log.exception(f"Error deleting group {id}: {e}")

@@ -115,7 +115,7 @@ async def create_new_skill(
     if not form_data.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("Skill id is required"),
+            detail=ERROR_MESSAGES.DEFAULT("スキルの ID を指定してください"),
         )
 
     skill = Skills.get_skill_by_id(form_data.id)

@@ -197,7 +197,7 @@ async def create_new_tools(
             else:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT("Error creating tools"),
+                    detail=ERROR_MESSAGES.DEFAULT("ツールを作成できませんでした"),
                 )
         except Exception as e:
             log.exception(f"Failed to load the tool by id {form_data.id}: {e}")
@@ -281,7 +281,7 @@ async def update_tools_by_id(
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error updating tools"),
+                detail=ERROR_MESSAGES.DEFAULT("ツールを更新できませんでした"),
             )
 
     except Exception as e:
