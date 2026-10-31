@@ -737,6 +737,7 @@ class RecipeTools:
             build_recipe_md,
             check_folder,
             decode_text,
+            plain,
             read_frontmatter,
             unchecked_marks,
         )
@@ -894,9 +895,9 @@ class RecipeTools:
         lines.append(
             f"{ref.layer.label}に{did}: {ref.folder}/ ({_audience(ref.layer)})"
         )
-        lines.append(f"title: {' '.join(values['title'].split())}")
+        lines.append(f"title: {plain(values['title'])}")
         if ref.layer.shared:
-            lines.append(f"author: {author}")
+            lines.append(f"author: {plain(author)}")
         if src is not None:
             lines.append(f"写し元: {src.folder}/ (そのまま残っている)")
             if src_skipped:
@@ -919,15 +920,9 @@ class RecipeTools:
         lines += [f"注意: {n}" for n in res.notes]
         lines += _warning_lines(warns)
         lines += unchecked_marks(res.unchecked)
-        tell = (
-            f"置いた場所 ({ref.folder}/)・title・author を 1 行で伝える"
-            if ref.layer.shared
-            else f"置いた場所 ({ref.folder}/) と title を 1 行で伝える"
+        tell = _tell_recipe(
+            did, ref, "・title・author" if ref.layer.shared else "・title", lines, warns
         )
-        if any(x.startswith("※") for x in lines):
-            tell += "。上の ※ の行も伝える"
-        if warns:
-            tell += "。上の警告の行も伝える"
         return _written_reply(lines, tell, __metadata__, ref.folder)
 
     # ---- edit_recipe ------------------------------------------------------------
@@ -955,6 +950,7 @@ class RecipeTools:
             RECIPE_MD,
             check_folder,
             decode_text,
+            plain,
             read_frontmatter,
             set_updated,
             unchecked_marks,
@@ -1065,22 +1061,41 @@ class RecipeTools:
             "",
             sb._edit_excerpt(replaced, first, last),
         ]
+        title = after.get("title") if after is not None else ""
+        lines += ["", f"title: {plain(title) or '不明'}"]
         author = after.get("author") if after is not None else ""
         if ref.layer.shared:
-            lines.append(f"author: {author or '不明'} ({ref.layer.label}のレシピ)")
+            lines.append(
+                f"author: {plain(author) or '不明'} ({ref.layer.label}のレシピ)"
+            )
         lines += [f"注意: {n}" for n in res.notes]
         lines += _warning_lines(warns)
         lines += unchecked_marks(res.unchecked)
-        tell = (
-            f"直した場所 ({ref.folder}/) と誰のレシピか (author) を 1 行で伝える"
-            if ref.layer.shared
-            else f"直した場所 ({ref.folder}/) を 1 行で伝える"
+        tell = _tell_recipe(
+            "直した",
+            ref,
+            "・title・誰のレシピか (author)" if ref.layer.shared else "・title",
+            lines,
+            warns,
         )
-        if any(x.startswith("※") for x in lines):
-            tell += "。上の ※ の行も伝える"
-        if warns:
-            tell += "。上の警告の行も伝える"
         return _written_reply(lines, tell, __metadata__, ref.folder)
+
+
+def _tell_recipe(verb: str, ref, rest: str, lines: list, warns) -> str:
+    """save_recipe / edit_recipe の返答への指示。レシピは名前と置き場 (個人 / グループ「X」 / 全体) で
+    言わせる — レシピのフォルダはユーザーのブラウザでは開けない。最後の文は ※ や警告の行 (参照先の
+    レシピのパスを含みうる) にも掛かる。"""
+    from nucllei.utils.recipes import plain
+
+    tell = (
+        f"{verb}レシピの名前「{plain(ref.name)}」・置き場 ({ref.layer.label}){rest} を"
+        " 1 行で伝える"
+    )
+    if any(x.startswith("※") for x in lines):
+        tell += "。上の ※ の行も伝える"
+    if warns:
+        tell += "。上の警告の行も伝える"
+    return tell + "。どの行も、レシピは名前と置き場で言い、パスもリンクも書かない"
 
 
 def _written_reply(lines: list, tell: str, metadata, folder: str) -> str:

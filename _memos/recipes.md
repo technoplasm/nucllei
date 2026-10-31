@@ -74,6 +74,10 @@
   繰り返さない)。読み込み済み・壊れている・検査の中身・author を変えた・updated はそれぞれの ERROR /
   結果が言う。save_recipe の説明には「author は自分・requires は渡した分で作り直す (一部だけ直すなら
   edit_recipe)」を残す — 上書きした後でしか分からず、気づかずに他人の author と requires を落とすので。
+- **利用者にはレシピを名前と置き場で言う**: save_recipe / edit_recipe の `返答への指示:` は、レシピの名前
+  (フォルダ名)・置き場 (`Layer.label` = 個人 / グループ「X」 / 全体)・title (共有の層は author も) を伝えさせ、
+  最後の文で ※・警告の行も含めてレシピのパスもリンクも書かせない (フォルダはブラウザで開けない)。一覧の
+  見出し (`RECIPE_INDEX_HEADING`) も同じ規則を言う。パスは結果の本文に残す (次の tool に渡す分)。
 - **直した後は新しい版**: save_recipe / edit_recipe の成功の返答の最後に `<recipe-reset path="…">`。
   履歴を前から読み、reset でそのレシピ (フォルダ) と、それが requires に持つ要素 (owner がそのフォルダの
   もの) の印を外す。同じリクエストの印 (metadata) も同様に外す。owner は「どの要素がそのレシピのものか」を
