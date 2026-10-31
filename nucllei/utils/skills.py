@@ -51,8 +51,12 @@ def activate_skill(skill, user, model=None) -> str:
     `/command` 起動(apply_skill_command)と load_skill 起動の両方がここを通る。
     変数はサーバー既知のもののみ({{USER_NAME}} / {{USER_ROLE}} / {{USER_GROUPS}} /
     {{CURRENT_DATE}} / {{BASE_MODEL_ID}} 等。一覧は utils/task.py prompt_template。
-    ブラウザ専用変数は無し。BASE_MODEL_ID は skill を発火させたターンのモデル = model の base)、
-    毎リクエスト再展開(発火時点への固定はしない — _memos/skill-design.md「発火の有効範囲」)。
+    ブラウザ専用変数は無し。BASE_MODEL_ID は skill を発火させたターンのモデル = model の base)。
+    展開するのは発火したターンだけ: 結果 (本文と before / after の結果) はそのターンの応答に
+    load_skill の往復として保存され、次のリクエストからは履歴として届くので、本文も変数の値も
+    発火したターンのまま (`/command`・自動ロード・モデルの load_skill とも)。その応答が会話から
+    外れる (再生成・前の発言の編集) と、次の発火で今の本文を展開し直す
+    (_memos/skill-design.md「before / after」)。
 
     tool_ids の遅延取り込み(#35 step2b)は呼び出し側が担う:
     `/command` は process_chat_payload の skill_tool_ids 集約、load_skill は
