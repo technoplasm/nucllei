@@ -432,8 +432,8 @@ run_* は sandbox の実行前後の差分(`_snapshot_exports` / `_collect_expor
 どれも「どこに書いたか」で暗黙に添付が決まり、モデルが渡したつもりかどうかと食い違うことから来ていた。
 現行: run_* / write_file の結果に「生成ファイル (exports/)」は出ず、exports/ に書いても何も添付されない。渡すときは
 モデルが `fetch_from_workspace` を呼ぶ(画像・音声・動画は添付と同時に画面に表示され、戻り値が「既に表示されている。
-本文に貼り直さない」と言う。それ以外はファイル一覧に添付され、戻り値が本文に書くリンクを示す)。`/ext/…` は
-パスがそのまま URL なので呼ばずにリンクにしてよい。添付の Files の `meta.source` に由来の sandbox パスを残す。
+本文に貼り直さない」と言う。それ以外はファイル一覧に添付され、戻り値が本文に書くリンクを示す)。`/ext/…` を
+呼ばずにリンクにするかは配備の system prompt が決める (docstring は言わない)。添付の Files の `meta.source` に由来の sandbox パスを残す。
 background 完了の [task] 通知は「成果物は作業場所にある。渡すなら fetch_from_workspace を呼ぶ」の形。
 `/workspace/exports/` 自体は期限付き掃除の対象に残す(既存の写しは期限で消える)が、新しい workspace には作らず、
 ファイルブラウザからの削除・改名の保護(sandbox の `PROTECTED_DIRS`)からも外す。

@@ -2270,29 +2270,27 @@ def test_fetch_path_is_only_ever_a_sandbox_path(monkeypatch, tmp_path):
     assert env.registered == [] and env.writes == []
 
 
-def test_fetch_from_workspace_spec_mentions_both_outcomes():
+def test_fetch_from_workspace_spec_says_when_to_use_and_defers_to_result():
     """モデルに見える説明(docstring の :param より前)と引数。引数は path だけ。
-    2026-10-19: ユーザーへ渡す経路はこれ一本 (exports/ の自動添付は廃止)。`/ext/…` は
-    パスがそのまま URL なので呼ばずにリンクを書く (言い切り。「呼んだ場合は…」と LLENS の語
-    「doc の出典」は消した — 同日 llens 監査 (4))。"""
+    ユーザーへ渡す経路はこれ一本。説明は使う場面と、本文に何を書くかは戻り値が言うことだけ —
+    sandbox のパスと URL の関係は配備の system prompt の定義が持つ (説明では言い直さない)。"""
     from nucllei.builtin_tools.sandbox import Tools
     from nucllei.utils.tools import get_tool_specs
 
     description = Tools.fetch_from_workspace.__doc__.split(":param")[0]
-    assert "ユーザーに渡すときに使う" in description and "添付" in description
-    flat = description.replace("\n", "").replace("        ", "")
-    assert (
-        "`/ext/…` はパスがそのまま URL なので、呼ばずにそのパスで本文にリンクを書く。"
-        in flat
+    flat = description.replace("\n", "").replace("        ", "").strip()
+    assert flat == (
+        "sandbox で作ったファイルをユーザーに渡すときに使う。チャットに添付し、画像・音声・動画は"
+        "その場でユーザーの画面に表示される。本文に何を書くか (書かないか) は戻り値が言う。"
     )
-    assert "呼んだ場合" not in flat and "書いてよい" not in flat
+    assert "URL" not in flat and "リンク" not in flat and "/ext" not in flat
     assert "doc" not in flat and "別表記" not in flat
     assert "exports" not in description
     spec = next(
         s for s in get_tool_specs(Tools()) if s["name"] == "fetch_from_workspace"
     )
     assert list(spec["parameters"]["properties"]) == ["path"]
-    # `/ext/…` は受けるが、受け付ける例には出さない (呼ばずにリンクする物。llens 2026-10-19)
+    # `/ext/…` も受けるが、引数の説明には出さない
     assert "/ext/" not in spec["parameters"]["properties"]["path"]["description"]
     # docstring の例パスは消した (モデルが例のパスをそのまま使う。監査 (5))
     assert "例:" not in spec["parameters"]["properties"]["path"]["description"]

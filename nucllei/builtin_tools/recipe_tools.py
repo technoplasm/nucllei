@@ -736,6 +736,7 @@ class RecipeTools:
             unknown_key_problem,
             build_recipe_md,
             check_folder,
+            code_span,
             decode_text,
             plain,
             read_frontmatter,
@@ -919,9 +920,9 @@ class RecipeTools:
         lines += _warning_lines(warns)
         lines += unchecked_marks(res.unchecked)
         tell = (
-            f"置いた場所 ({ref.folder}/)・title・author を 1 行で伝える"
+            f"置いた場所 ({code_span(ref.folder + '/')})・title・author を 1 行で伝える"
             if ref.layer.shared
-            else f"置いた場所 ({ref.folder}/) と title を 1 行で伝える"
+            else f"置いた場所 ({code_span(ref.folder + '/')}) と title を 1 行で伝える"
         )
         if any(x.startswith("※") for x in lines):
             tell += "。上の ※ の行も伝える"
@@ -953,6 +954,7 @@ class RecipeTools:
         from nucllei.utils.recipes import (
             RECIPE_MD,
             check_folder,
+            code_span,
             decode_text,
             plain,
             read_frontmatter,
@@ -1074,9 +1076,9 @@ class RecipeTools:
         lines += _warning_lines(warns)
         lines += unchecked_marks(res.unchecked)
         tell = (
-            f"直した場所 ({ref.folder}/) と誰のレシピか (author) を 1 行で伝える"
+            f"直した場所 ({code_span(ref.folder + '/')}) と誰のレシピか (author) を 1 行で伝える"
             if ref.layer.shared
-            else f"直した場所 ({ref.folder}/) を 1 行で伝える"
+            else f"直した場所 ({code_span(ref.folder + '/')}) を 1 行で伝える"
         )
         if any(x.startswith("※") for x in lines):
             tell += "。上の ※ の行も伝える"
@@ -1133,7 +1135,7 @@ def _recipe_sandbox_error(e: Exception, folder: str):
 # ---------------------------------------------------------------------------
 RECIPE_TOOL_ID = "recipes"
 # 一覧を system prompt の {{USER_RECIPES}} に入れたとき、load_recipe の説明に代わりに置く 1 文
-RECIPE_INDEX_IN_PROMPT = "見えるレシピの一覧は system prompt の「見えるレシピ (path にそのまま渡す。…)」にある。"
+RECIPE_INDEX_IN_PROMPT = "見えるレシピの一覧は system prompt の「見えるレシピ (`…` の中を path にそのまま渡す。…)」にある。"
 
 
 def recipe_index_description(base: str, index_text: str) -> str:

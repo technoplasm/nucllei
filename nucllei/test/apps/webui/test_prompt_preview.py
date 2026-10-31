@@ -27,7 +27,7 @@ def _model_form(system: str, meta=None, model_id="pv"):
     }
 
 
-def _fake_recipes(monkeypatch, index="- /workspace/recipes/集計 — 月次"):
+def _fake_recipes(monkeypatch, index="- `/workspace/recipes/集計` — 月次"):
     import nucllei.env
     import nucllei.utils.recipe_index as recipe_index
 
@@ -190,7 +190,7 @@ class TestModelPreview(AbstractPostgresTest):
         data = response.json()
         text = data["system"]["text"]
         assert "- pvskill: 集計の手順" in text
-        assert "- /workspace/recipes/集計 — 月次" in text
+        assert "- `/workspace/recipes/集計` — 月次" in text
         assert asked == [TAKEN]  # 一覧は 1 回 (tool の組み立てと system prompt で共有)
         tools = {t["name"]: t for t in data["tools"]}
         # 変数があるので一覧は tool の説明に入らない = 利用者によらず固定
@@ -214,7 +214,7 @@ class TestModelPreview(AbstractPostgresTest):
         assert skill["varies"]["params"] == ["skill_id"]
         recipe = tools["load_recipe"]
         start = recipe["varies"]["description_from"]
-        assert "- /workspace/recipes/集計 — 月次" in recipe["description"][start:]
+        assert "- `/workspace/recipes/集計` — 月次" in recipe["description"][start:]
         assert "/workspace/recipes/集計" not in recipe["description"][:start]
         # 固定の文だけの system prompt は全体が固定
         assert response.json()["system"]["segments"] == [

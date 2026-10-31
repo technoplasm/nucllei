@@ -1206,11 +1206,14 @@ def reference_warnings(
 
 
 def _shown(reasons: list[str]) -> str:
-    # 理由は 2 つまで。印の角括弧を中で閉じさせない (パス・キーは利用者が書いた値)
+    # 理由は 2 つまで。印の角括弧を中で閉じさせず、バッククォートは全角にする (パス・キーは利用者が
+    # 書いた値 — 行の中のコード表記はフォルダの 1 つだけ)
     shown = "、".join(reasons[:2]) + (
         f" ほか {len(reasons) - 2} 件" if len(reasons) > 2 else ""
     )
-    return " ".join(shown.split()).replace("[", "［").replace("]", "］")
+    return (
+        " ".join(shown.split()).replace("[", "［").replace("]", "］").replace("`", "｀")
+    )
 
 
 def broken_line(reasons: list[str], writable: bool = True, folder: str = "") -> str:
@@ -1240,10 +1243,21 @@ def warning_line(reasons: list[str]) -> str:
     return f"[警告: {_shown(reasons)}。読み込めるが、その要素は実行しない]"
 
 
+def code_span(text: str) -> str:
+    """`text` をコード表記にする (`` `…` ``)。囲みは中のバッククォートの連より 1 つ長くし、中身が
+    バッククォートで始まる・終わるときは空白を 1 つ挟む (Markdown のコード表記の規則 — 中で閉じない)。"""
+    run = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * (run + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
 def index_line(folder: str, description: str, mark: str = "") -> str:
-    """一覧の 1 行: `- [印] <フォルダ> — <description>`。印 (broken_line / warning_line) は tool が
-    行頭に付け、`—` の後は書いた人の文 (plain で潰す)。壊れているレシピは description を出さない。"""
-    head = f"- {mark} {folder}" if mark else f"- {folder}"
+    """一覧の 1 行: `` - [印] `<フォルダ>` — <description> ``。フォルダはコード表記 (code_span)。
+    印 (broken_line / warning_line) は tool が行頭に付け、`—` の後は書いた人の文 (plain で潰す)。
+    壊れているレシピは description を出さない。"""
+    path = code_span(folder)
+    head = f"- {mark} {path}" if mark else f"- {path}"
     if mark.startswith("[壊れている"):
         return head
     d = plain(description)
