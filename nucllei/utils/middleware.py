@@ -2779,8 +2779,9 @@ async def process_chat_response(
             await _persist_message_snapshot(metadata, final_snapshot)
 
             # webhook(triage KEEP): 「この応答を誰も見ていなかった」場合に通知。
-            # 旧実装のプレゼンス(USER_POOL)でなく、完了時点のイベント購読者の
-            # 有無で判定する(意味的により正確)。
+            # 管理者が ENABLE_USER_WEBHOOKS を切っていれば、ユーザーが保存した
+            # URL があっても送らない。見ていたかは完了時点のイベント購読者の有無で
+            # 判定する。
             # llens(#107): agent session の子ターンは対象外 — 結果は親の tool
             # result が運ぶ。購読ゼロで走るのが正常形(タイトル抑止と同じマーカ)。
             # llens(#110 契約 M5): サーバ駆動配達の続きターン(task_resume)は
@@ -2789,6 +2790,7 @@ async def process_chat_response(
             if (
                 not events_stream.has_subscribers
                 and not metadata.get("agent_session")
+                and request.app.state.config.ENABLE_USER_WEBHOOKS
                 and (
                     not metadata.get("task_resume")
                     or metadata.get("task_resume_chain", 1) <= 1

@@ -126,6 +126,7 @@ async def _drive_tool_call_loop(
     usage_records=None,
     form_extra=None,
     model_meta=None,
+    config_extra=None,
 ):
     """process_chat_response をツール呼び出し SSE で駆動する(wire v2)。
 
@@ -149,6 +150,7 @@ async def _drive_tool_call_loop(
     マージ結果として返す(emit を観測する用)。
     form_extra: 初回の form_data に重ねるキー(生成パラメータ・messages の差し替え)。
     model_meta: 指定時は model["info"]["meta"] に置く(preset の capabilities 等)。
+    config_extra: request.app.state.config に重ねる設定値(ENABLE_USER_WEBHOOKS 等)。
     戻り値: (emit されたイベント列, 継続リクエスト数, ツール実行時の引数列)
     """
     from nucllei.utils import middleware
@@ -252,7 +254,9 @@ async def _drive_tool_call_loop(
         app=types.SimpleNamespace(
             state=types.SimpleNamespace(
                 WEBUI_NAME="llens",
-                config=types.SimpleNamespace(WEBUI_URL="http://localhost"),
+                config=types.SimpleNamespace(
+                    WEBUI_URL="http://localhost", **(config_extra or {})
+                ),
             )
         )
     )
@@ -1450,6 +1454,52 @@ def test_title_failure_after_done_does_not_error_the_response(monkeypatch):
     assert len(dones) == 1
     assert not dones[0]["data"].get("error")
     assert all("error" not in u for u in upserts)
+
+
+def _drive_unwatched_turn(monkeypatch, enable_user_webhooks):
+    """誰も見ていない(完了時点で購読ゼロの)ターンを、ユーザーの webhook URL を
+    保存した状態で 1 回流し、post_webhook へ渡った URL の列を返す。"""
+    from nucllei.utils import middleware
+    from nucllei.utils.completion_events import CompletionEventStream
+
+    monkeypatch.setattr(
+        CompletionEventStream, "has_subscribers", property(lambda self: False)
+    )
+    monkeypatch.setattr(
+        middleware.Users,
+        "get_user_webhook_url_by_id",
+        lambda user_id: "http://hook.local",
+    )
+    posted = []
+
+    async def fake_post_webhook(name, url, message, event_data):
+        posted.append(url)
+        return True
+
+    monkeypatch.setattr(middleware, "post_webhook", fake_post_webhook)
+    asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="text_basic",
+            config_extra={"ENABLE_USER_WEBHOOKS": enable_user_webhooks},
+        )
+    )
+    return posted
+
+
+def test_user_webhook_not_sent_when_admin_disabled(monkeypatch):
+    """管理者が ENABLE_USER_WEBHOOKS を切っていれば、ユーザーが URL を保存していても
+    通知を送らない(トグルは入力欄を隠すだけでなく送信も止める)。"""
+    assert _drive_unwatched_turn(monkeypatch, enable_user_webhooks=False) == []
+
+
+def test_user_webhook_sent_when_admin_enabled(monkeypatch):
+    """ENABLE_USER_WEBHOOKS が有効なら、誰も見ていない応答の完了を保存先 URL へ送る。"""
+    assert _drive_unwatched_turn(monkeypatch, enable_user_webhooks=True) == [
+        "http://hook.local"
+    ]
 
 
 def test_parse_generated_title():

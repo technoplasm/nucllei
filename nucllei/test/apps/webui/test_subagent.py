@@ -1654,7 +1654,10 @@ class TestRunSubagent(AbstractPostgresTest):
 
         monkeypatch.setattr(middleware, "post_webhook", fake_post_webhook)
 
-        tool = self._build_tool()
+        # 管理者が user webhook を有効にしていても子ターンは送らない
+        request = self._request()
+        request.app.state.config.ENABLE_USER_WEBHOOKS = True
+        tool = self._build_tool(request=request)
         result = asyncio.run(
             tool["callable"](preset_id="researcher", instruction="調査して")
         )
