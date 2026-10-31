@@ -1023,7 +1023,7 @@ class RecipeTools:
         if before is not None and before.get("author"):
             if after is None or after.get("author") != before.get("author"):
                 raise sb.ToolCallError(
-                    f"author は変えない (このレシピの author は {before.get('author')})",
+                    f"author は変えない (このレシピの author は {plain(before.get('author'))})",
                     "author の行を元のまま残して呼び直す。",
                 )
         try:

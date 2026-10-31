@@ -512,10 +512,41 @@ def test_missing_and_hidden_references_are_warnings_not_broken():
         ),
         3: ("requires の shell の付属 prep.sh がフォルダに無い", R.WARN_NEXT_MISSING),
     }
-    assert R.warning_line(w.reasons()) == (
-        "(警告: requires の read /a.md が無い、requires の recipe /ext/public/recipes/y が普通の"
+    # 一覧の印は何番目の何がどうかだけ (パス・付属の名前・グループ名は出さない)
+    assert w.index_reasons() == [
+        "requires の 1 番目の read が無い",
+        "requires の 2 番目の recipe が普通のファイルでない (dir)",
+        "requires の 3 番目の recipe は所属していないグループのもの",
+        "requires の 4 番目の shell の付属がフォルダに無い",
+    ]
+    assert R.warning_line(w.index_reasons()) == (
+        "(警告: requires の 1 番目の read が無い、requires の 2 番目の recipe が普通の"
         "ファイルでない （dir） ほか 2 件。読み込めるが、その要素は実行しない)"
     )
+    # 層の規則の違反も同じ (読む人によらない)
+    shared = "/ext/groups/EMR/recipes/x"
+    lw = R.reference_warnings(
+        shared, _with_requires("  - read: /workspace/a.md\n"), None, {}
+    )
+    assert lw.index_reasons() == [
+        "requires の 1 番目の read はこの置き場のレシピでは使えない"
+    ]
+    assert "/workspace/a.md" in lw.reasons()[0]  # load_recipe・save / edit 向けは値まで
+    # 並びは requires の順 (層の規則の違反を先に積んでも)
+    mixed = R.reference_warnings(
+        shared,
+        _with_requires(
+            "  - read: /ext/groups/EMR/無い.md\n  - read: /workspace/a.md\n"
+        ),
+        None,
+        {"/ext/groups/EMR/無い.md": None},
+    )
+    assert mixed.index_reasons() == [
+        "requires の 1 番目の read が無い",
+        "requires の 2 番目の read はこの置き場のレシピでは使えない",
+    ]
+    # 書けない人向けに次の手を差し替えても、一覧の理由は残る
+    assert R.readonly_warnings(lw, shared).index_reasons() == lw.index_reasons()
     # 所属していないグループの参照先は stat しない (見えない人のために聞かない)
     refs = R.RecipeRefs()
     R.recipe_refs(text, folder, refs, ["EMR"])
@@ -577,6 +608,9 @@ def test_index_line_neutralizes_instructions():
     # 一覧を表にしても列を割らない
     assert R.index_line("/p", "a | b") == "- `/p` — a ｜ b"
     assert R.plain("作成|集計") == "作成｜集計"
+    # 全角・縦書き・比の記号のコロンでも指示の語の区切りを変える
+    for colon in ":：︓﹕∶꞉":
+        assert R.plain(f"次の手{colon} x") == "次の手 - x"
 
 
 def test_index_line_path_is_one_code_span():

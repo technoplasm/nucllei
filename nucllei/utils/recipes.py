@@ -596,9 +596,13 @@ def plain(v) -> str:
     直後にしか付かず、description は `—` の後)。`|` も全角にする (一覧を表にして示したとき列を割らない)。"""
     t = " ".join(str(v).split()) if v else ""
     t = t.replace("[", "［").replace("]", "］").replace("|", "｜")
-    return re.sub(
-        r"(返答への指示|次の手|中止|ERROR|警告|壊れている)\s*[:：]", r"\1 -", t
-    )
+    return _RE_SHOWN_WORDS.sub(r"\1 -", t)
+
+
+# tool の文がモデルへの指示・印に使う語 (全角・縦書き・比の記号のコロンも)。plain と _shown が区切りを変える
+_RE_SHOWN_WORDS = re.compile(
+    r"(返答への指示|次の手|中止|ERROR|警告|壊れている)\s*[:：︓﹕∶꞉]"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1096,13 +1100,24 @@ WARN_NEXT_HIDDEN = (
 @dataclass
 class RefWarnings:
     """中の値が通らないもの (警告)。`items` は requires の要素の番号 -> (理由, 次の手)、
-    `recipe` はレシピ全体の警告 (使える人が限られる関数) の (理由, 次の手)。"""
+    `recipe` はレシピ全体の警告 (使える人が限られる関数) の (理由, 次の手)。
+    `brief` は requires の要素の番号 -> 一覧の印に出す理由 — 何番目の何がどうかだけで、書いた人の値
+    (パス・付属の名前・グループ名) は出さない (一覧は読む人全員の system prompt に tool の文として入る)。
+    `items` の理由は値まで言う (load_recipe の結果・save / edit の返答 — 直す人が見る)。"""
 
     items: dict = field(default_factory=dict)
     recipe: list = field(default_factory=list)
+    brief: dict = field(default_factory=dict)
 
     def reasons(self) -> list[str]:
         return [r for r, _ in self.items.values()] + [r for r, _ in self.recipe]
+
+    def index_reasons(self) -> list[str]:
+        """一覧の印の理由 (`brief`。レシピ全体の警告の関数名・グループ名は管理者の表の値なのでそのまま)。"""
+        return [
+            self.brief.get(n, f"requires の {n + 1} 番目が通らない")
+            for n in sorted(self.items)
+        ] + [r for r, _ in self.recipe]
 
     def __bool__(self) -> bool:
         return bool(self.items or self.recipe)
@@ -1157,7 +1172,9 @@ def reference_warnings(
     allowed = None if member_groups is None else _reader_groups(layer, member_groups)
     out.items.update(layer_warnings(folder, md_text))
     for n, item in enumerate(_requires_items(md_text, folder)):
+        at = f"requires の {n + 1} 番目の {item.kind}"
         if n in out.items:
+            out.brief[n] = f"{at} はこの置き場のレシピでは使えない"
             continue
         g = _ref_group(item)
         what = (
@@ -1170,6 +1187,7 @@ def reference_warnings(
                 f"requires の {what} は所属していないグループ「{g}」のもの",
                 WARN_NEXT_HIDDEN,
             )
+            out.brief[n] = f"{at} は所属していないグループのもの"
         elif item.kind in ("recipe", "read"):
             if item.ref_path not in path_types:
                 continue
@@ -1184,6 +1202,11 @@ def reference_warnings(
                 ),
                 WARN_NEXT_MISSING,
             )
+            out.brief[n] = (
+                f"{at} が無い"
+                if kind is None
+                else f"{at} が普通のファイルでない ({kind})"
+            )
         elif entries is not None:
             kind = entries.get(item.attachment)
             if kind == "file":
@@ -1195,6 +1218,11 @@ def reference_warnings(
                     else f"requires の {item.kind} の付属 {item.attachment} が普通のファイルでない ({kind})"
                 ),
                 WARN_NEXT_MISSING,
+            )
+            out.brief[n] = (
+                f"{at} の付属がフォルダに無い"
+                if kind is None
+                else f"{at} の付属が普通のファイルでない ({kind})"
             )
     if member_groups is not None:
         mine = set(member_groups)
@@ -1211,7 +1239,7 @@ def reference_warnings(
 
 
 def _shown(reasons: list[str]) -> str:
-    # 理由は 2 つまで。パス・キーは利用者が書いた値なので、括弧 `(` `)` `[` `]`・バッククォート・ダッシュ類は
+    # 理由は 2 つまで。キーの名前など利用者が書いた値が入りうるので、括弧 `(` `)` `[` `]`・バッククォート・ダッシュ類は
     # 全角にする — 印の括弧を中で閉じさせず (閉じた後ろに偽の文を足させない)、行の中のコード表記は
     # フォルダの 1 つだけ、`—` は description の前の 1 つだけ。指示・印の語は plain と同じく区切りを変える
     # (全角・縦書きのコロンも)
@@ -1224,9 +1252,6 @@ def _shown(reasons: list[str]) -> str:
 _SHOWN_WIDE = str.maketrans(
     {"(": "（", ")": "）", "[": "［", "]": "］", "`": "｀"}
     | dict.fromkeys("‒–—―⸺⸻─", "－")
-)
-_RE_SHOWN_WORDS = re.compile(
-    r"(返答への指示|次の手|中止|ERROR|警告|壊れている)\s*[:：︓﹕]"
 )
 
 
@@ -1251,6 +1276,7 @@ def readonly_warnings(warns: "RefWarnings", folder: str) -> "RefWarnings":
     return RefWarnings(
         items={n: (r, swap.get(x, x)) for n, (r, x) in warns.items.items()},
         recipe=[(r, swap.get(x, x)) for r, x in warns.recipe],
+        brief=dict(warns.brief),
     )
 
 

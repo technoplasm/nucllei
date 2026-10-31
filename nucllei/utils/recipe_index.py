@@ -226,7 +226,7 @@ async def user_recipes_text(user) -> str:
         warns = reference_warnings(
             folder, md["text"], entries, path_types, member_groups=groups
         )
-        mark = warning_line(warns.reasons()) if warns else ""
+        mark = warning_line(warns.index_reasons()) if warns else ""
         lines.append(index_line(folder, fm.get("description"), mark))
     took = time.perf_counter() - started
     log.debug(f"[recipes] index for {uid}: {len(lines)} recipes in {took:.3f}s")

@@ -3222,14 +3222,12 @@ variable the list stays in the description:
 
 ```
 - `/workspace/recipes/月次集計` — 月次の件数を集計して表にする
-- `/ext/groups/EMR/recipes/抽出` (警告: requires の read /ext/groups/EMR/notes/検査結果.md が無い。読み込めるが、その要素は実行しない) — EMR の抽出
+- `/ext/groups/EMR/recipes/抽出` (警告: requires の 1 番目の read が無い。読み込めるが、その要素は実行しない) — EMR の抽出
 - `/ext/public/recipes/共通` (壊れている: frontmatter の知らないキー on_load （requires で書く）。次の手: edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で))
 ```
 
 The folder is written as inline code on every line, marked or not
-(`utils/recipes.code_span` — the fence is one backtick longer than any run of
-backticks in the name, so a name cannot close it early); the heading says the
-path is what is inside it.
+(`utils/recipes.code_span`); the heading says the path is what is inside it.
 
 The `description` is folded to one line and cut at 120 characters (`…`); the
 words the tools use to give the model instructions or marks (`次の手:`
@@ -3239,12 +3237,13 @@ recipe tools' results; `|` so a list shown as a table keeps its columns). **A ma
 — the description only appears after `—`, so writing `(警告: …)` or
 `(壊れている: …)` in it does not make a mark. A broken recipe's line shows no
 description. Folder names have no backtick (name rule below), so the folder's
-inline code ends at its one closing backtick. Inside a reason (which can carry
-author-written paths and key names), `(` `)` `[` `]`, backticks and dashes
+inline code ends at its one closing backtick. Inside a reason, `(` `)` `[` `]`, backticks and dashes
 (`—` `―` `–` …) become full-width and the instruction / mark words are defused
 like the description's (full-width and vertical colons too) — the half-width
 parentheses that close a mark are always the tool's. Folders that break the
-name rule (below), `trash`, and names starting with `.` are not listed. Two
+name rule (below), `trash`, and names starting with `.` are not listed — a
+folder whose name contains a backtick is therefore not listed until it is
+renamed without one (e.g. `mv` in `run_shell`). Two
 marks, both **computed every time** and never stored, and both shared with
 `load_recipe`:
 
@@ -3286,6 +3285,16 @@ marks, both **computed every time** and never stored, and both shared with
   group the reader is not in (`RECIPE_RESTRICTED_TOOLS`, matched by name at word
   boundaries — naming it in a description is enough, the strict side; a `null`
   entry — personal only — is not judged). The recipe still loads; it heals by itself once the reference is back.
+  **The mark carries no author value** either — the list goes into every
+  reader's system prompt as the tool's own words, so a `requires` reason says
+  only which entry and what (`requires の 2 番目の read が無い`,
+  `requires の 3 番目の recipe は所属していないグループのもの`,
+  `requires の 1 番目の shell の付属がフォルダに無い`,
+  `requires の 1 番目の read はこの置き場のレシピでは使えない`;
+  `RefWarnings.brief`); a restricted function's warning names the function and
+  group from `RECIPE_RESTRICTED_TOOLS` (admin-set). `load_recipe`'s result and
+  the `save_recipe` / `edit_recipe` replies give the full reason with the path,
+  for whoever fixes it.
 
 **Layer rule for `requires` references** — references go
 from a narrower layer to a wider one only, so a shared recipe's hook cannot make
