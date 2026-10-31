@@ -737,6 +737,10 @@ def _list_truncated_note(res: dict, entries: list) -> list[str]:
     ]
 
 
+class _AlreadyExists(Exception):
+    """`/files/write` の `exclusive` で、既にあった (409)。"""
+
+
 def _recipe_md_refused(abs_path: str) -> ToolError:
     """write_file / edit_file で RECIPE.md を書こうとした (レシピの本体は検査を通す tool で書く)。
     次の手は渡す path (フォルダ) を実際の値で言う — read_file で RECIPE.md を読んだ後、そのパスのまま
@@ -1305,6 +1309,12 @@ class Tools:
             description="read_file が /ext の proxy の置き場 (EXT_MOUNTS の http(s) の物) を断る"
             "ときの次の手 (モデル向け。その資料を読む手段の案内)",
         )
+        write_no_overwrite_paths: str = Field(
+            default="",
+            description="write_file で上書きしない置き場 (rm_allowed_paths と同じ書式: 改行・カンマ区切りの"
+            "絶対パス、各段で * を使える。その下の既にあるファイルへの write_file を断って edit_file へ向ける。"
+            "新しく作るのは通す)。既定は無し",
+        )
         rm_allowed_paths: str = Field(
             default="",
             description="run_shell で rm してよい置き場 (改行・カンマ区切りの絶対パス。その下の rm を"
@@ -1864,8 +1874,32 @@ class Tools:
                 f"{_human_size(TEXT_MAX_BYTES)})",
                 "run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。",
             )
+        if self._no_overwrite(abs_path):
+            try:
+                await self._write_bytes(
+                    abs_path, target, ext, data, __user__, exclusive=True
+                )
+            except _AlreadyExists:
+                raise ToolCallError(
+                    f"{abs_path} は既にある (この置き場では write_file で上書きしない)",
+                    "一部を直す・足すなら edit_file (末尾に足すなら最後の行を old_text に含める。"
+                    "構成を変えるなら edit_file で該当範囲ごと置き換える — run_shell や run_python で"
+                    "書き直さない)。",
+                )
+            return f"{abs_path} に書き込んだ (UTF-8、{_human_size(len(data))})。"
         await self._write_bytes(abs_path, target, ext, data, __user__)
         return f"{abs_path} に書き込んだ (UTF-8、{_human_size(len(data))})。"
+
+    def _no_overwrite(self, abs_path: str) -> bool:
+        """valve `write_no_overwrite_paths` の置き場の下か (2026-10-31 ken「MEMORY.md の上書きは edit_file に
+        案内で」— staging で記憶の目次を write_file で丸ごと書き直し、前の行を落とす回があった)。その下の
+        write_file は新しく作るだけ (sandbox の排他の作成 `exclusive` — 既にあれば 409。stat してから書くのと
+        違い、間に他が作っても上書きしない)。run_shell のリダイレクト・python の open('w')・置き場の外の
+        symlink を経た書き込みは見ない (README_API)。"""
+        from nucllei.utils.rm_guard import below_any, parse_allowed
+
+        bases = parse_allowed(self.valves.write_no_overwrite_paths)
+        return bool(bases) and below_any(abs_path, bases)
 
     def _write_target(
         self, path: str, user: dict, allow_dir: bool = False
@@ -1919,9 +1953,16 @@ class Tools:
         return abs_path, rel, False
 
     async def _write_bytes(
-        self, abs_path: str, target: str, ext: bool, data: bytes, user: dict
+        self,
+        abs_path: str,
+        target: str,
+        ext: bool,
+        data: bytes,
+        user: dict,
+        exclusive: bool = False,
     ) -> None:
-        """`_write_target` の書き先へ `/files/write` で書く (ext は jail に bind する置き場の一覧付き)。"""
+        """`_write_target` の書き先へ `/files/write` で書く (ext は jail に bind する置き場の一覧付き)。
+        `exclusive` は新しく作るだけ (既にあれば `_AlreadyExists`)。"""
         payload = {
             "user_id": user["id"],
             "path": target,
@@ -1929,9 +1970,13 @@ class Tools:
         }
         if ext:
             payload["mounts"] = _ext_mounts(user)
+        if exclusive:
+            payload["exclusive"] = True
         try:
             await self._post("/files/write", payload, timeout_s=60)
         except Exception as e:
+            if exclusive and isinstance(e, SandboxHTTPError) and e.status == 409:
+                raise _AlreadyExists() from None
             raise _files_error(e, abs_path)
 
     async def edit_file(

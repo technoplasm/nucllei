@@ -2236,6 +2236,22 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     only what it does, how to append and the arguments; the rest (no match,
     creating, binary, size, encoding, writable places) is said by the error or
     result of that case.
+    **No-overwrite places for `write_file` (2026-10-31, ken):** the model sometimes
+    rewrote the memory index wholesale with `write_file`, dropping existing lines.
+    The sandbox valve `write_no_overwrite_paths` (same format and matching as
+    `rm_allowed_paths` below — newline / comma separated absolute paths, globs per
+    segment, paths normalised so `..` neither escapes nor sneaks in, files **below**
+    an entry, nested ones included) makes `write_file` there **create only** — it
+    writes with the sandbox's exclusive create (`/files/write` `exclusive`, `O_EXCL`;
+    no stat-then-write race) and turns the 409 into
+    「<path> は既にある (この置き場では write_file で上書きしない)。次の手: 一部を直す・足すなら edit_file (末尾に足すなら最後の行を old_text に含める。構成を変えるなら edit_file で該当範囲ごと置き換える — run_shell や run_python で書き直さない)。」
+    (a final symlink is refused by the sandbox as before). Creating a new file there
+    still works; outside the entries nothing changes; the default is empty (no
+    change). There is no escape hatch for a full rewrite (`edit_file` can replace a
+    large span). Not covered: `run_shell` redirections (`>`, `cat > … <<EOF`),
+    `python` `open(…, "w")`, `mv` / `cp` over the file, `rm` then `write_file` where
+    `rm` is allowed (`rm_allowed_paths`), or a symlink placed outside the entry that
+    points into it — a guard, not a security boundary.
     **`rm` guard on `run_shell` (2026-10-30, requested by llens):** asked to
     「完全に消して」, the model sometimes ran `rm -rf /workspace/<作業フォルダ>` (and once,
     as an admin, `rm -rf` on shared `/ext/public` recipes) instead of `remove_file`.

@@ -228,6 +228,14 @@ def _below(path: str, allowed: Iterable[str]) -> bool:
     return False
 
 
+def below_any(path: str, bases: Iterable[str]) -> bool:
+    """`path` (sandbox の絶対パス) を正規化して、`bases` (parse_allowed の結果) のどれかの下にあるか
+    (その置き場そのものは含まない。各段の glob を見る)。write_file の上書き止めと共有する。"""
+    if not path.startswith("/"):
+        return False
+    return _below(_norm(path), bases)
+
+
 def _exempt(head: str, full: str, allowed: list[str]) -> bool:
     if head == full:
         return _below(full, allowed)
