@@ -20,6 +20,14 @@ allowBuilds:
 # @floating-ui/utils). Hoist everything to the root so pnpm resolves them like npm.
 shamefullyHoist: true
 
-# 推移依存 (jspdf / mermaid) の dompurify を修正版に揃える (GHSA-cg2g-xh64-v4q7: >=3.4.4 <=3.4.16)
+# 推移依存を修正版に揃える。いずれも親の宣言範囲内 (範囲外になるものは親を上げる)
+# - dompurify (jspdf / mermaid, 親 ^3.x): GHSA-cg2g-xh64-v4q7 (>=3.4.4 <=3.4.16)
+# - devalue (@sveltejs/kit / svelte, 親 ^5.8.1): GHSA-j22f-vq7h-c4qm / GHSA-mcm9-63f2-9j32 /
+#   GHSA-x5rw-q4pp-hg5g / GHSA-r9w8-h9r3-54w4 ほか (<=5.9.2)
+# - source-map-js (postcss ^1.2.1 / sass >=0.6.2 <2.0.0): GHSA-68fv-2mgg-jv7q (<1.2.2)
+# - tar (onnxruntime-node, 親 ^7.0.1): GHSA-r292-9mhp-454m (<=7.5.20)
 overrides:
+  devalue: ^5.9.3
   dompurify: ^3.4.17
+  source-map-js: ^1.2.2
+  tar: ^7.5.21
