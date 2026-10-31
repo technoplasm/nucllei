@@ -18,6 +18,13 @@
 		<span class="underline decoration-dotted underline-offset-2">abc</span>
 		{$i18n.t('Set by the model')}
 	</span>
+	<span class="inline-flex items-center gap-1">
+		<span
+			class="px-0.5 rounded-xs line-through text-red-700 bg-red-100 dark:text-red-300 dark:bg-red-500/20"
+			>{'{{…}}'}</span
+		>
+		{$i18n.t('Not expanded here (empty)')}
+	</span>
 	<span>{$i18n.t('Everything else is the same for every user of this model.')}</span>
 	<span>
 		{$i18n.t(

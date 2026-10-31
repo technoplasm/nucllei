@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { collectChatFiles, mergeRequestFiles } from './chat-files';
+import { branchRequestFiles, collectChatFiles } from './chat-files';
 import type { ChatFile, ChatHistory } from '$lib/types/chat';
 
 const historyWith = (files: Record<string, ChatFile[]>): ChatHistory =>
@@ -112,30 +112,34 @@ describe('collectChatFiles', () => {
 	});
 });
 
-describe('mergeRequestFiles', () => {
-	it('同じ file id はメタデータが違っても 1 件に畳む(先勝ち = chat レベル側)', () => {
-		const merged = mergeRequestFiles(
-			[{ type: 'file', id: 'f1', name: 'a.pdf', status: 'uploaded' }],
-			[{ type: 'file', id: 'f1', name: 'a.pdf', size: 10, collection_name: 'file-f1' }]
-		);
-		expect(merged).toEqual([{ type: 'file', id: 'f1', name: 'a.pdf', status: 'uploaded' }]);
+describe('branchRequestFiles', () => {
+	const user = (id: string, files: ChatFile[]) => ({ id, role: 'user', files }) as any;
+
+	it('今の枝の user 発言の type file だけを会話の順に(画像・assistant の files は入れない)', () => {
+		const files = branchRequestFiles([
+			user('u1', [
+				{ type: 'file', id: 'f1', name: 'a.pdf' },
+				{ type: 'image', id: 'img1', name: 'p.png' }
+			]),
+			{ id: 'a1', role: 'assistant', files: [{ type: 'file', id: 'gen', name: 'x.csv' }] } as any,
+			user('u2', [{ type: 'file', id: 'f2', name: 'b.txt' }])
+		]);
+		expect(files.map((f) => f.id)).toEqual(['f1', 'f2']);
 	});
 
-	it('message 側は type file だけを足し、別 id は残す', () => {
-		const merged = mergeRequestFiles(
-			[{ type: 'file', id: 'f1', name: 'a.pdf' }],
-			[
-				{ type: 'image', id: 'img1', name: 'p.png' },
-				{ type: 'file', id: 'f2', name: 'b.txt' }
-			]
-		);
-		expect(merged.map((f) => f.id)).toEqual(['f1', 'f2']);
+	it('同じ file id はメタデータが違っても 1 件(先勝ち = 最初に付けた発言)', () => {
+		const files = branchRequestFiles([
+			user('u1', [{ type: 'file', id: 'f1', name: 'a.pdf', status: 'uploaded' }]),
+			user('u2', [{ type: 'file', id: 'f1', name: 'a.pdf', size: 10 }])
+		]);
+		expect(files).toEqual([{ type: 'file', id: 'f1', name: 'a.pdf', status: 'uploaded' }]);
 	});
 
 	it('入力を変更しない(複製を返す)', () => {
-		const chatFiles = [{ type: 'file', id: 'f1', name: 'a.pdf' }] as ChatFile[];
-		const merged = mergeRequestFiles(chatFiles, null);
-		merged[0].name = 'changed';
-		expect(chatFiles[0].name).toBe('a.pdf');
+		const message = user('u1', [{ type: 'file', id: 'f1', name: 'a.pdf' }]);
+		const files = branchRequestFiles([message]);
+		files[0].name = 'changed';
+		expect(message.files[0].name).toBe('a.pdf');
+		expect(branchRequestFiles(null)).toEqual([]);
 	});
 });

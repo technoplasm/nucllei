@@ -150,6 +150,10 @@ export const expandAssistantToolHistory = (
  *   (context_images)も image_url を持つ user メッセージとして再送する(#142)。
  *   tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ。
  * - 空 content のメッセージは落とす(user / tool / tool_calls 持ちは温存)。
+ * - user メッセージ(利用者の発言)には目印 `id`(その発言の id)と `files`(付いた type 'file' の
+ *   `{type, id}` だけ)を付ける。backend が会話の前置き・更新の枠と添付の `<source>` をその発言の
+ *   先頭に置く位置決めに使い、推論エンジンへ送る前に取り除く(utils/conversation_context)。
+ *   中身は運ばない — tool 結果の画像の user メッセージ(#142)には付けない。
  */
 /** flatMap 各分岐の受け皿(text / image_url パート混在のため content は unknown)。 */
 type OutboundWireMessage = {
@@ -157,6 +161,19 @@ type OutboundWireMessage = {
 	content: unknown;
 	tool_calls?: WireMessage['tool_calls'];
 	tool_call_id?: string;
+	id?: string;
+	files?: { type: 'file'; id: string }[];
+};
+
+/** user 発言の目印(id と type 'file' の添付 id)。 */
+const userMarkers = (message: any): Pick<OutboundWireMessage, 'id' | 'files'> => {
+	const files = (message.files ?? [])
+		.filter((file: any) => file?.type === 'file' && typeof file?.id === 'string' && file.id)
+		.map((file: any) => ({ type: 'file' as const, id: file.id }));
+	return {
+		...(typeof message.id === 'string' && message.id ? { id: message.id } : {}),
+		...(files.length > 0 ? { files } : {})
+	};
 };
 
 export const buildWireMessages = (
@@ -192,12 +209,16 @@ export const buildWireMessages = (
 										url: file.url
 									}
 								}))
-						]
+						],
+						...userMarkers(message)
 					}
 				];
 			}
 			if (message.role === 'assistant') {
 				return expandAssistantToolHistory(message.content, message?.content_blocks);
+			}
+			if (message.role === 'user') {
+				return [{ role: 'user', content: message.content, ...userMarkers(message) }];
 			}
 			return [{ role: message.role, content: message.content }];
 		})

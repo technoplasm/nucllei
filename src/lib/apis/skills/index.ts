@@ -1,6 +1,6 @@
 import { apiFetch } from '$lib/apis/fetch';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
-import type { PreviewText } from '$lib/apis/models';
+import type { PreviewText, PreviewWarning } from '$lib/apis/models';
 
 // Skill は Prompt の後継(issue #35)。llens(#43): 可読キーは id 一本(旧 command)。
 // id が /command 発火キー兼 PK でバックエンドが先頭 `/` なしに正規化する。表示名は name(旧 title)。
@@ -194,6 +194,7 @@ export type SkillPreview = {
 	before: (SkillHook & { n: number })[];
 	content: PreviewText;
 	after: (SkillHook & { n: number })[];
+	warnings: PreviewWarning[];
 };
 
 export const previewSkill = async (body: {

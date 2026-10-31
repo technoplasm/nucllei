@@ -16,7 +16,7 @@ import type { Model } from '$lib/stores';
 import { createMessagesList, getPromptVariables } from '$lib/utils';
 import { buildWireMessages, parseStopSequences } from '$lib/utils/chat-messages';
 import { stripLocalTurn } from '$lib/utils/history-graft';
-import { mergeRequestFiles } from '$lib/utils/chat-files';
+import { branchRequestFiles } from '$lib/utils/chat-files';
 import { consumeCompletionStream, getActiveTaskIds } from '$lib/utils/completion-streams';
 import type { ChatFile, ChatHistory, ChatMessage } from '$lib/types/chat';
 import { generateOpenAIChatCompletion } from '$lib/apis/openai';
@@ -340,11 +340,10 @@ export class ChatSend {
 		const session = this.#session;
 
 		const responseMessage = _history.messages[responseMessageId];
-		const userMessage =
-			responseMessage.parentId !== null ? _history.messages[responseMessage.parentId] : undefined;
 
-		// file.id 基準で合流(メタデータ違いの同一 file を 2 件送らない — chat-files.ts)
-		const files: ChatFile[] = mergeRequestFiles(session.chatFiles, userMessage?.files);
+		// 今の枝の user 発言に付いた添付だけ(別の枝の分は送らない。file.id 基準で重複なし — chat-files.ts)
+		const branchMessages = createMessagesList(_history, responseMessageId);
+		const files: ChatFile[] = branchRequestFiles(branchMessages);
 
 		this.#scrollToBottom();
 		this.#eventTarget.dispatchEvent(
@@ -366,10 +365,7 @@ export class ChatSend {
 		// (chat-messages.ts buildWireMessages)— vitest で契約を固定している
 		// チャットの system prompt の変数はサーバが展開する (BE の payload.expand_chat_system_message —
 		// 日時・曜日・利用者はサーバの値が正)。ここでは素のまま送る
-		const messages = buildWireMessages(
-			createMessagesList(_history, responseMessageId),
-			session.params?.system || null
-		);
+		const messages = buildWireMessages(branchMessages, session.params?.system || null);
 
 		const abortController = new AbortController();
 		this.#completionAbortControllers.push(abortController);

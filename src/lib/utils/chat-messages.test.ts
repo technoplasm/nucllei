@@ -389,6 +389,65 @@ describe('buildWireMessages', () => {
 		});
 	});
 
+	it('user 発言に目印 id と files(type file の id だけ)を付ける — 画像付きでも', () => {
+		const messages = buildWireMessages(
+			[
+				{
+					id: 'u1',
+					role: 'user',
+					content: '読んで',
+					files: [
+						{ type: 'file', id: 'f1', name: 'a.pdf', file: { data: { content: '本文' } } },
+						{ type: 'image', id: 'img', url: '/api/v1/files/img/content' }
+					]
+				},
+				{ id: 'a1', role: 'assistant', content: 'はい' },
+				{ id: 'u2', role: 'user', content: '続けて' }
+			],
+			'S'
+		);
+		expect(messages).toEqual([
+			{ role: 'system', content: 'S' },
+			{
+				role: 'user',
+				content: [
+					{ type: 'text', text: '読んで' },
+					{ type: 'image_url', image_url: { url: '/api/v1/files/img/content' } }
+				],
+				id: 'u1',
+				files: [{ type: 'file', id: 'f1' }]
+			},
+			{ role: 'assistant', content: 'はい' },
+			{ role: 'user', content: '続けて', id: 'u2' }
+		]);
+	});
+
+	it('tool 結果の画像の user メッセージには目印を付けない', () => {
+		const messages = buildWireMessages(
+			[
+				{ id: 'u1', role: 'user', content: '図を見て' },
+				{
+					id: 'a1',
+					role: 'assistant',
+					content: '見ました',
+					content_blocks: [
+						{
+							type: 'tool_calls',
+							calls: [{ id: 'c1', function: { name: 'view_image', arguments: '{}' } }],
+							results: [{ tool_call_id: 'c1', content: '提示しました。', context_images: ['abc'] }]
+						},
+						{ type: 'text', content: '見ました' }
+					]
+				}
+			],
+			null
+		);
+		const users = messages.filter((m) => m.role === 'user');
+		expect(users[0].id).toBe('u1');
+		expect(users[1]).not.toHaveProperty('id');
+		expect(users[1]).not.toHaveProperty('files');
+	});
+
 	it('空 content の assistant は落とす・user は空でも残す', () => {
 		const messages = buildWireMessages(
 			[

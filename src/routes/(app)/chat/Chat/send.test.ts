@@ -291,6 +291,31 @@ describe('ChatSend — タイトル生成の要求', () => {
 	});
 });
 
+// 送る files は今の枝の user 発言に付いた添付だけ(チャット全体の一覧 chatFiles ではない)。
+// 中身の <source> は BE がその発言の先頭に入れる(wire の目印 — chat-messages.ts)
+describe('ChatSend — 送る添付', () => {
+	it('今の枝の user 発言の type file だけを送り、別の枝・chatFiles の分は送らない', async () => {
+		const ctx = makeSend();
+		chatId.set('chat-1');
+		(ctx.session as Record<string, unknown>).chat = { title: 't' };
+		ctx.session.chatFiles = [{ type: 'file', id: 'other-branch' }] as never;
+		const branch = [
+			{ id: 'u1', role: 'user', content: 'a', files: [{ type: 'file', id: 'f1' }] },
+			{ id: 'a1', role: 'assistant', content: 'b' },
+			{ id: 'u2', role: 'user', content: 'c', files: [{ type: 'image', id: 'img' }] }
+		];
+		vi.mocked(createMessagesList).mockReturnValue(branch as never);
+		vi.mocked(generateOpenAIChatCompletion).mockResolvedValue({ body: {} } as never);
+		await ctx.send.sendPrompt(ctx.session.history, 'hi', 'u1');
+		const body = vi.mocked(generateOpenAIChatCompletion).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		expect(body.files).toEqual([{ type: 'file', id: 'f1' }]);
+		expect(vi.mocked(buildWireMessages).mock.calls[0][0]).toBe(branch);
+	});
+});
+
 // ken の実機(モバイル)で、サーバーは正常に完走したターンに
 // error: {content: 'TypeError: network error'} が保存された。SSE の切断は応答の失敗では
 // ない — message.error に書かない(書くと再アタッチ後の done で completed → 保存に乗る)

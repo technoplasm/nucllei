@@ -26,7 +26,7 @@
 		after: () => string;
 	} = $props();
 
-	// {{BASE_MODEL_ID}}・{{SKILLS}}・{{USER_RECIPES}} の元にする preset。既定はこの skill を割り当てた
+	// {{BASE_MODEL_ID}}・{{SKILLS}} の元にする preset。既定はこの skill を割り当てた
 	// 最初の preset(無ければ無し — それらは Unknown / 空)
 	const presets = $derived(
 		($models ?? []).filter((m: any) => (m?.info?.meta?.skillIds ?? []).includes(skillId))
@@ -124,8 +124,8 @@
 	</div>
 	<div class="text-xs text-content-muted">
 		{$i18n.t(
-			'Expanded as you, as it is put into the chat when loaded: the results of Run before, the skill content, then the results of Run after. Run before / Run after are not run here; only what would run is listed. Without a model, {{baseModel}} is Unknown and {{skills}} / {{recipes}} are empty.',
-			{ baseModel: '{{BASE_MODEL_ID}}', skills: '{{SKILLS}}', recipes: '{{USER_RECIPES}}' }
+			'Expanded as you, as it is put into the chat when loaded: the results of Run before, the skill content, then the results of Run after. Run before / Run after are not run here; only what would run is listed. Without a model, {{baseModel}} is Unknown and {{skills}} is empty.',
+			{ baseModel: '{{BASE_MODEL_ID}}', skills: '{{SKILLS}}' }
 		)}
 	</div>
 
@@ -147,8 +147,21 @@
 					})}
 				</div>
 			</div>
+			{#each preview.warnings as warning (warning.variable)}
+				<div class="text-xs text-red-600 dark:text-red-400">
+					{$i18n.t(
+						'{{variable}} is not expanded in skills (it becomes empty). It belongs in the conversation preamble of a model.',
+						{ variable: warning.variable }
+					)}
+				</div>
+			{/each}
 			<div class="rounded-lg border border-line px-2 py-1.5">
-				<ExpandedText value={preview.content} />
+				<ExpandedText
+					value={preview.content}
+					misplacedTitle={$i18n.t(
+						'Not expanded in skills — it belongs in the conversation preamble of a model.'
+					)}
+				/>
 			</div>
 		</section>
 		{@render hookList(preview.after, $i18n.t('Run after'))}

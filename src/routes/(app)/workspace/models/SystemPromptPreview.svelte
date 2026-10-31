@@ -145,8 +145,21 @@
 					{size(preview.system.text, preview.system.chars)}
 				</div>
 			</div>
+			{#each preview.warnings.filter((w) => w.where === 'system') as warning (warning.variable)}
+				<div class="text-xs text-red-600 dark:text-red-400">
+					{$i18n.t(
+						'{{variable}} is not expanded in the system prompt (it becomes empty). Write it in the conversation preamble.',
+						{ variable: warning.variable }
+					)}
+				</div>
+			{/each}
 			<div class="rounded-lg border border-line px-2 py-1.5">
-				<ExpandedText value={preview.system} />
+				<ExpandedText
+					value={preview.system}
+					misplacedTitle={$i18n.t(
+						'Not expanded in the system prompt — write it in the conversation preamble.'
+					)}
+				/>
 			</div>
 		</section>
 	{:else if loading}

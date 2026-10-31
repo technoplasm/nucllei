@@ -20,6 +20,7 @@
 	import FunctionsSelector from './FunctionsSelector.svelte';
 	import Capabilities from './Capabilities.svelte';
 	import SystemPromptPreview from './SystemPromptPreview.svelte';
+	import PreamblePreview from './PreamblePreview.svelte';
 	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -39,8 +40,9 @@
 
 	// 基本設定 | プロンプト | 高度なパラメータ(Admin > Users の様式)
 	let selectedTab = $state('general');
-	// プロンプトタブの System Prompt 欄: 編集 | プレビュー
+	// プロンプトタブの System Prompt 欄・会話の前置き欄: それぞれ 編集 | プレビュー
 	let systemView = $state<'edit' | 'preview'>('edit');
+	let contextView = $state<'edit' | 'preview'>('edit');
 
 	let loading = $state(false);
 	let loaded = $state(false);
@@ -716,60 +718,125 @@
 									</div>
 								</div>
 
-								<div class="flex items-center justify-between gap-2 px-1 mb-1">
-									<div class="text-sm font-semibold">{$i18n.t('System Prompt')}</div>
+								{#snippet viewToggle(
+									label: string,
+									current: 'edit' | 'preview',
+									onSelect: (view: 'edit' | 'preview') => void
+								)}
 									<div
 										class="inline-flex gap-0.5 p-0.5 bg-surface-muted rounded-lg"
 										role="group"
-										aria-label={$i18n.t('System Prompt')}
+										aria-label={label}
 									>
 										{#each [{ view: 'edit', icon: 'i-lucide-pencil', label: $i18n.t('Edit') }, { view: 'preview', icon: 'i-lucide-eye', label: $i18n.t('Preview') }] as segment (segment.view)}
-											{@const active = systemView === segment.view}
+											{@const active = current === segment.view}
 											<button
 												class="flex items-center gap-1.5 px-3 py-0.5 text-xs font-medium rounded-md transition {active
 													? 'bg-surface-raised text-content shadow-sm'
 													: 'text-content-muted hover:text-content'}"
 												type="button"
 												aria-pressed={active}
-												onclick={() => (systemView = segment.view as 'edit' | 'preview')}
+												onclick={() => onSelect(segment.view as 'edit' | 'preview')}
 											>
 												<span class="{segment.icon} size-3.5 block"></span>
 												{segment.label}
 											</button>
 										{/each}
 									</div>
-								</div>
-								<!-- エディタは隠すだけ(unmount すると CodeEditor の中身を作り直す) -->
+								{/snippet}
+								{@const previewModelForm = () => ({
+									...$state.snapshot(info),
+									id: id || info.id,
+									name: name || info.name
+								})}
+
+								<!-- System Prompt (上) と会話の前置き (下) で残りの高さを分ける (前置きだけプレビュー中は前置きを広く) -->
 								<div
-									class="flex-1 min-h-0 rounded-xs border border-line overflow-auto {systemView ===
-									'edit'
-										? ''
-										: 'hidden'}"
+									class="{contextView === 'preview' && systemView === 'edit'
+										? 'flex-[2]'
+										: 'flex-[3]'} min-h-48 flex flex-col"
 								>
-									<CodeEditor
-										value={info.params.system ?? ''}
-										lang="markdown"
-										lineWrapping={true}
-										onChange={(value: string) => {
-											info.params.system = value;
-										}}
-										onSave={() => {
-											submitHandler();
-										}}
-									/>
-								</div>
-								{#if systemView === 'preview'}
-									<div class="flex-1 min-h-0 overflow-auto px-1">
-										<SystemPromptPreview
-											model={() => ({
-												...$state.snapshot(info),
-												id: id || info.id,
-												name: name || info.name
-											})}
-											hasFilters={filterIds.length > 0}
+									<div class="flex items-center justify-between gap-2 px-1 mb-1">
+										<div class="text-sm font-semibold">{$i18n.t('System Prompt')}</div>
+										{@render viewToggle($i18n.t('System Prompt'), systemView, (view) => {
+											systemView = view;
+										})}
+									</div>
+									<!-- エディタは隠すだけ(unmount すると CodeEditor の中身を作り直す) -->
+									<div
+										class="flex-1 min-h-0 rounded-xs border border-line overflow-auto {systemView ===
+										'edit'
+											? ''
+											: 'hidden'}"
+									>
+										<!-- id は 2 つのエディタで別に (CodeEditor は code-textarea-{id} に描く) -->
+										<CodeEditor
+											id="model-system"
+											value={info.params.system ?? ''}
+											lang="markdown"
+											lineWrapping={true}
+											onChange={(value: string) => {
+												info.params.system = value;
+											}}
+											onSave={() => {
+												submitHandler();
+											}}
 										/>
 									</div>
-								{/if}
+									{#if systemView === 'preview'}
+										<div class="flex-1 min-h-0 overflow-auto px-1">
+											<SystemPromptPreview
+												model={previewModelForm}
+												hasFilters={filterIds.length > 0}
+											/>
+										</div>
+									{/if}
+								</div>
+
+								<div
+									class="{contextView === 'preview' && systemView === 'edit'
+										? 'flex-[3]'
+										: 'flex-[2]'} min-h-40 flex flex-col mt-3"
+								>
+									<div class="flex items-center justify-between gap-2 px-1">
+										<div class="text-sm font-semibold">{$i18n.t('Conversation preamble')}</div>
+										{@render viewToggle($i18n.t('Conversation preamble'), contextView, (view) => {
+											contextView = view;
+										})}
+									</div>
+									<div
+										class="px-1 mt-0.5 mb-1 text-xs text-content-muted {contextView === 'edit'
+											? ''
+											: 'hidden'}"
+									>
+										{$i18n.t(
+											'Goes at the head of the first message, after the system prompt, and stays the same for the whole conversation. Write {{memory}} and {{recipes}} here (they are expanded only here); date, time and user variables belong in the system prompt.',
+											{ memory: '{{USER_MEMORY_INDEX}}', recipes: '{{USER_RECIPES}}' }
+										)}
+									</div>
+									<div
+										class="flex-1 min-h-0 rounded-xs border border-line overflow-auto {contextView ===
+										'edit'
+											? ''
+											: 'hidden'}"
+									>
+										<!-- Ctrl+S は CodeEditor が document で拾うので、保存は System Prompt のエディタの onSave 1 つだけ -->
+										<CodeEditor
+											id="model-context"
+											value={info.params.context ?? ''}
+											lang="markdown"
+											lineWrapping={true}
+											onChange={(value: string) => {
+												info.params.context = value;
+											}}
+										/>
+									</div>
+									{#if contextView === 'preview'}
+										<div class="flex-1 min-h-0 overflow-auto px-1">
+											<PreamblePreview model={previewModelForm} />
+										</div>
+									{/if}
+								</div>
 							{:else if selectedTab === 'advanced'}
 								<div class="my-2">
 									<AdvancedParams

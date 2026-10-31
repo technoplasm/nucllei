@@ -11,7 +11,7 @@
 //   見えるのに、当のチャットのペインは空」という非対称になる(添付永続化を逃した
 //   生成物はモデルが本文に貼った URL だけが痕跡になる)。
 // 旧チャットの data: URL 画像は id が無いため対象外(従来どおりメッセージ内でのみ表示)。
-import type { ChatFile, ChatHistory } from '$lib/types/chat';
+import type { ChatFile, ChatHistory, ChatMessage } from '$lib/types/chat';
 
 export type ChatFileListItem = {
 	id: string;
@@ -88,27 +88,22 @@ export const collectChatFiles = (
 	return items;
 };
 
-// 送信直前に completion へ載せる files の合流(chat レベル添付 + 直前 user メッセージの
-// type 'file')。dedupe は collectChatFiles と同じく file.id 基準 — JSON 全体の一致で
-// 判定すると、同じ file がメタデータ違い(status / size / collection_name の有無等)で
-// 2 件残り、BE がその本文を system に 2 回注入する(実測 2,031 → 3,529 字)。
-// 先勝ち(chat レベル側の entry を残す)。id の無い entry は従来どおり完全一致でのみ畳む。
-export const mergeRequestFiles = (
-	chatFiles: ChatFile[] | null | undefined,
-	messageFiles: ChatFile[] | null | undefined
-): ChatFile[] => {
-	const merged: ChatFile[] = [];
+// 送信直前に completion へ載せる files: 今の枝の user 発言に付いた type 'file' だけ(会話の順。
+// 別の枝の添付は入れない)。dedupe は collectChatFiles と同じく file.id 基準 — 先勝ち(最初に付けた
+// 発言の entry を残す)。中身の `<source>` は BE がその発言の先頭に入れる(wire の目印 `files` —
+// chat-messages.ts buildWireMessages)。id の無い entry は完全一致でのみ畳む。
+export const branchRequestFiles = (messagesList: ChatMessage[] | null | undefined): ChatFile[] => {
+	const files: ChatFile[] = [];
 	const seen = new Set<string>();
-	for (const file of [
-		...(chatFiles ?? []),
-		...(messageFiles ?? []).filter((item) => item?.type === 'file')
-	]) {
-		const key = file?.id ? `id:${file.id}` : `json:${JSON.stringify(file)}`;
-		if (seen.has(key)) {
-			continue;
+	for (const message of messagesList ?? []) {
+		if (message?.role !== 'user') continue;
+		for (const file of message.files ?? []) {
+			if (file?.type !== 'file') continue;
+			const key = file.id ? `id:${file.id}` : `json:${JSON.stringify(file)}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			files.push(JSON.parse(JSON.stringify(file)));
 		}
-		seen.add(key);
-		merged.push(JSON.parse(JSON.stringify(file)));
 	}
-	return merged;
+	return files;
 };
