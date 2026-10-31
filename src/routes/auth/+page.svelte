@@ -14,6 +14,7 @@
 	import { generateInitialsImage } from '$lib/utils';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import ContactFooter from '$lib/components/common/ContactFooter.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -42,7 +43,6 @@
 	/** @param {import('$lib/stores').SessionUser | null} sessionUser */
 	const setSessionUser = async (sessionUser) => {
 		if (sessionUser) {
-			console.log(sessionUser);
 			toast.success($i18n.t(`You're now logged in.`));
 			// llens(#70 B1): セッションは httpOnly cookie(signin レスポンスで設定済み)に一本化。
 			// localStorage への永続化は廃止。
@@ -381,6 +381,8 @@
 								</button>
 							</div>
 						{/if}
+
+						<ContactFooter class="mt-8" />
 					</div>
 				{/if}
 			</div>

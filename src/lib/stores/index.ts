@@ -240,6 +240,9 @@ type Config = {
 	// 配備層(WEBUI_VERSION / WEBUI_COPYRIGHT env。空なら License タブで非表示)
 	webui_version?: string;
 	copyright?: string;
+	// ログイン画面・承認待ち/無効化の画面の案内(WEBUI_FOOTER_TEXT / WEBUI_CONTACT_EMAIL env。空なら非表示)
+	footer_text?: string;
+	contact_email?: string;
 	version: string;
 	default_locale: string;
 	// 共有 PC のアイドルタイムアウト秒数(= 既存 SESSION_IDLE_TIMEOUT。無期限なら null)。

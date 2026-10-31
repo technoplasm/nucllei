@@ -154,7 +154,8 @@ restart. Set it only for that one boot and unset it again.
 **Naming families**: `APP_*` refers to the Nucllei product itself (`APP_VERSION`);
 `WEBUI_*` is the deployment layer on top — branding and site behavior
 (`WEBUI_NAME`, `WEBUI_VERSION`, `WEBUI_COPYRIGHT` show _your harness's_ identity in
-the UI, next to the Nucllei product version).
+the UI, next to the Nucllei product version; `WEBUI_FOOTER_TEXT` / `WEBUI_CONTACT_EMAIL`
+tell locked-out users whom to ask).
 
 **Renamed / removed 2026-10-03** (no aliases — the old names are dead; update
 compose/env files):
@@ -208,6 +209,8 @@ is read per request (edits apply without a restart):
 | `WEBUI_URL`                                                                                                                 | RC   | `http://localhost:3000`                       | public base URL (webhooks, links)                                                         |
 | `WEBUI_NAME`                                                                                                                | env  | `Nucllei`                                     | brand name shown in the UI                                                                |
 | `WEBUI_VERSION` / `WEBUI_COPYRIGHT`                                                                                         | env  | `""`                                          | deployment-layer version / copyright on the License tab (empty = hidden)                  |
+| `WEBUI_FOOTER_TEXT`                                                                                                         | env  | `""`                                          | plain-text notice under the sign-in card and the pending/disabled page (empty = hidden)   |
+| `WEBUI_CONTACT_EMAIL`                                                                                                       | env  | `""`                                          | contact email after the footer text; `mailto:` link if address-shaped (empty = hidden)    |
 | `ENABLE_FORWARD_USER_INFO_HEADERS`                                                                                          | env  | `false`                                       | send `X-Nucllei-User-{Name,Id,Email,Role}` to the upstream engine                         |
 | `CORS_ALLOW_ORIGIN`                                                                                                         | env  | `*`                                           | `;`-separated origins; empty = same-origin only (no CORS, no warning)                     |
 | `ENABLE_PWA`                                                                                                                | env  | `false`                                       | serve an installable `/manifest.json` (name follows `WEBUI_NAME`); off returns `{}`       |
@@ -1497,6 +1500,10 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
 - `GET /health` → `{"status":true}`; `GET /health/db` (does a DB roundtrip). Unauthenticated.
 - `GET /api/config` — instance metadata (name, version, auth features, locale;
   with a session also default models, audio config, file limits, permissions).
+  The unauthenticated part also carries `footer_text` / `contact_email`
+  (`WEBUI_FOOTER_TEXT` / `WEBUI_CONTACT_EMAIL`, `""` when unset).
+  The UI renders `footer_text` as text (no HTML / Markdown, newlines kept) and
+  links `contact_email` with `mailto:` only when it has an address shape.
   `GET /api/version`.
 - Audio: `POST /api/v1/audio/transcriptions` (STT; multipart `file`, plus optional
   `prompt` — context such as a term list, like the OpenAI field of the same name; only the

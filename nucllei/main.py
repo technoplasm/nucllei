@@ -186,6 +186,8 @@ from nucllei.env import (
     VERSION,
     WEBUI_NAME,
     WEBUI_COPYRIGHT,
+    WEBUI_CONTACT_EMAIL,
+    WEBUI_FOOTER_TEXT,
     WEBUI_VERSION,
     WEBUI_SECRET_KEY,
     WEBUI_SESSION_COOKIE_SAME_SITE,
@@ -1042,6 +1044,9 @@ async def get_app_config(request: Request):
         # 配備層(WEBUI_*)— version キーは本体(Nucllei)なので別名で返す
         "webui_version": WEBUI_VERSION,
         "copyright": WEBUI_COPYRIGHT,
+        # ログイン画面・承認待ち/無効化の画面の案内(未認証で読める位置。空なら非表示)
+        "footer_text": WEBUI_FOOTER_TEXT,
+        "contact_email": WEBUI_CONTACT_EMAIL,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
         # llens: アイドルタイムアウトの秒数(= 既存 SESSION_IDLE_TIMEOUT。設定項目は増やさない)。

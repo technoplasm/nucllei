@@ -96,6 +96,12 @@ WEBUI_VERSION = os.environ.get("WEBUI_VERSION", "")
 #  Functions, is copyright © PRISM-HU. All rights reserved."
 WEBUI_COPYRIGHT = os.environ.get("WEBUI_COPYRIGHT", "")
 
+# ログイン画面と承認待ち/無効化の画面に出す配備側の案内(空なら非表示)。
+# WEBUI_FOOTER_TEXT は平文(HTML / Markdown として解釈しない。改行は保つ)。
+# WEBUI_CONTACT_EMAIL はメールアドレスの形なら mailto リンク、そうでなければ平文で出す。
+WEBUI_FOOTER_TEXT = os.environ.get("WEBUI_FOOTER_TEXT", "")
+WEBUI_CONTACT_EMAIL = os.environ.get("WEBUI_CONTACT_EMAIL", "").strip()
+
 # llens: 外部照会を避けるためローカル static を指す(旧 upstream は openwebui.com の
 # 外部 URL だった)。使用箇所は webhook 通知(Teams payload)のアイコンのみ。
 WEBUI_FAVICON_URL = "/static/favicon.png"

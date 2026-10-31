@@ -4,6 +4,7 @@
 	import { getPendingMessage, userSignOut } from '$lib/apis/auths';
 	import { user, WEBUI_NAME } from '$lib/stores';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
+	import ContactFooter from '$lib/components/common/ContactFooter.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -64,6 +65,8 @@
 					)}
 				</div>
 			{/if}
+
+			<ContactFooter class="mt-4 text-center" />
 
 			<div class=" mt-6 mx-auto relative group w-fit">
 				<button
