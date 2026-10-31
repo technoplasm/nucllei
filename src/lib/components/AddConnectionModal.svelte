@@ -81,7 +81,7 @@
 
 		if (!ollama && !url) {
 			loading = false;
-			toast.error('URL is required');
+			toast.error($i18n.t('URL is required'));
 			return;
 		}
 

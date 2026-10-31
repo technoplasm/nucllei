@@ -44,7 +44,7 @@
 						);
 
 						if (res) {
-							toast.success('Config imported successfully');
+							toast.success($i18n.t('Config imported successfully'));
 						}
 						// 旧コードは FileReader に value を設定していて input がリセットされなかった
 						inputElement.value = '';

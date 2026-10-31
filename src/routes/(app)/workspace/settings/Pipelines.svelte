@@ -122,7 +122,7 @@
 			const file = pipelineFiles[0];
 
 			const res = await uploadPipeline(file, selectedPipelinesUrlIdx).catch(() => {
-				toast.error('Something went wrong :/');
+				toast.error($i18n.t('Something went wrong :/'));
 				return null;
 			});
 
@@ -381,7 +381,7 @@
 															{:else if (valves_spec.properties[property]?.type ?? null) === 'boolean'}
 																<div class="flex justify-between items-center">
 																	<div class="text-xs text-content-muted">
-																		{valves[property] ? 'Enabled' : 'Disabled'}
+																		{valves[property] ? $i18n.t('Enabled') : $i18n.t('Disabled')}
 																	</div>
 
 																	<div class=" pr-2">

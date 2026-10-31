@@ -42,17 +42,17 @@ class ERROR_MESSAGES(str, Enum):
     INVALID_CRED = "The email or password provided is incorrect. Please check for typos and try logging in again."
     INVALID_EMAIL_FORMAT = "The email format you entered is invalid. Please double-check and make sure you're using a valid email address (e.g., yourname@example.com)."
     INVALID_PASSWORD = (
-        "The password provided is incorrect. Please check for typos and try again."
+        "現在のパスワードが正しくありません。入力を確かめて、もう一度お試しください。"
     )
     INVALID_TRUSTED_HEADER = "Your provider has not provided a trusted header. Please contact your administrator for assistance."
 
     EXISTING_USERS = "You can't turn off authentication because there are existing users. If you want to disable WEBUI_AUTH, make sure your web interface doesn't have any existing users and is a fresh installation."
 
     UNAUTHORIZED = "401 Unauthorized"
-    ACCESS_PROHIBITED = "You do not have permission to access this resource. Please contact your administrator for assistance."
-    ACTION_PROHIBITED = (
-        "The requested action has been restricted as a security measure."
+    ACCESS_PROHIBITED = (
+        "この操作を行う権限がありません。必要な場合は管理者に問い合わせてください。"
     )
+    ACTION_PROHIBITED = "この操作はセキュリティ上の理由で制限されています。"
 
     FILE_NOT_SENT = "FILE_NOT_SENT"
     FILE_NOT_SUPPORTED = "Oops! It seems like the file format you're trying to upload is not supported. Please upload a file with a supported format and try again."
@@ -60,7 +60,7 @@ class ERROR_MESSAGES(str, Enum):
     NOT_FOUND = "We could not find what you're looking for :/"
     USER_NOT_FOUND = "We could not find what you're looking for :/"
     API_KEY_NOT_FOUND = "Oops! It looks like there's a hiccup. The API key is missing. Please make sure to provide a valid API key to access this feature."
-    API_KEY_NOT_ALLOWED = "Use of API key is not enabled in the environment."
+    API_KEY_NOT_ALLOWED = "API キーでの利用は許可されていません。"
 
     MALICIOUS = "Unusual activities detected, please try again in a few minutes."
 
@@ -78,7 +78,7 @@ class ERROR_MESSAGES(str, Enum):
 
     EMPTY_CONTENT = "The content provided is empty. Please ensure that there is text or data present before proceeding."
 
-    DB_NOT_SQLITE = "This feature is only available when running with SQLite databases."
+    DB_NOT_SQLITE = "この機能は、データベースに SQLite を使っている配備でだけ使えます。"
 
     INVALID_URL = (
         "Oops! The URL you provided is invalid. Please double-check and try again."
