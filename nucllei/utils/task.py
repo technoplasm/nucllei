@@ -383,7 +383,7 @@ def prompt_template(
     (置き場に書ける所属グループ。admin は所属グループ全部。無ければ空文字列)。
     {{SKILLS}} は model (preset) で load_skill できる skill の一覧 (見出し + `- <id>: <説明>` —
     load_skill の説明に入れていたものと同じ。能力「スキル」OFF・0 件・model 無しなら空)。
-    {{USER_RECIPES}} は見えるレシピの一覧 (見出し + 行頭の印付きの行。0 件はその 1 文。能力「レシピ」
+    {{USER_RECIPES}} は見えるレシピの一覧 (見出し + path の直後に印の付く行。0 件はその 1 文。能力「レシピ」
     OFF・sandbox 無し・model 無しなら空) で、非同期の入口が先に取ったものを入れる。
     {{USER_MEMORY_INDEX}} は利用者の記憶の目次 (utils/memory_index — 無ければ空。`agent_session` (サブエージェントの
     子ターン) では空)。中身は利用者が書いたものなので最後に展開する (中の `{{…}}` を展開しない)。

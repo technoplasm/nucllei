@@ -40,6 +40,8 @@ from typing import Optional
 
 import yaml
 
+from nucllei.utils.tool_errors import NEXT
+
 log = logging.getLogger(__name__)
 
 WORKSPACE = "/workspace"
@@ -60,14 +62,14 @@ INDEX_DESCRIPTION_CHARS = 120
 
 # 壊れたレシピの次の手 (一覧の印・load_recipe の ERROR)。印の理由は書いた人の文を含まない
 # (`assess_recipe(safe=True)`) ので、直すには原文を見る。直す tool と渡す path (フォルダ) を先に言い、
-# 原文の読み方は後ろに添える。一覧の印は「この行のフォルダ」と指す (印の直後にある。「このフォルダ」だと
+# 原文の読み方は後ろに添える。一覧の印は「この行のフォルダ」と指す (印の直前にある。「このフォルダ」だと
 # 壊れた行が続くと前の行のフォルダに読める)。RECIPE.md そのものが無い・読めないものは作り直す
 BROKEN_NEXT = "edit_recipe(path=この行のフォルダ) で直す (原文はその中の RECIPE.md を read_file で)"
 BROKEN_REWRITE_NEXT = "save_recipe(path=この行のフォルダ) で作り直す"
 # 直せない人 (全体の層を管理者でない人が読む) には直させない
 BROKEN_READONLY_NEXT = "直せるのは管理者なので、壊れていることをユーザーに伝える"
 # 書き込みを許されていないグループのメンバーが読む。
-# グループ名は出さない (一覧の印の角括弧の中に入る — 行のフォルダで分かる)
+# グループ名は出さない (一覧の印の括弧の中に入る — 行のフォルダで分かる)
 READONLY_GROUP_WHY = "この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許したメンバーだけ)"
 BROKEN_READONLY_GROUP_NEXT = (
     f"{READONLY_GROUP_WHY}なので、壊れていることをユーザーに伝える"
@@ -194,10 +196,13 @@ def bad_segment(n: str) -> Optional[str]:
 
 
 def name_problem(n: str) -> Optional[str]:
-    """レシピのフォルダ名の規則に合わない理由。`trash` はゴミ箱 (`<層>/trash/`) と紛れるので断る。"""
+    """レシピのフォルダ名の規則に合わない理由。`trash` はゴミ箱 (`<層>/trash/`) と紛れるので断る。
+    バッククォートは断る (一覧・返答への指示はフォルダをコード表記で示す — 名前で囲みを閉じさせない)。"""
     why = bad_segment(n)
     if why:
         return why
+    if "`" in n:
+        return "バッククォート (`) を含む"
     if unicodedata.normalize("NFC", n) != n:
         return "NFC でない"
     if n == TRASH:
@@ -587,10 +592,10 @@ def set_updated(text: str, d: dt.date) -> str:
 def plain(v) -> str:
     """利用者が書いた frontmatter の値を一覧の 1 行に出す形にする。改行を潰し、tool の文が
     モデルへの指示・印に使う語 (`返答への指示:` `次の手:` `中止:` `ERROR:` `警告:` `壊れている:`) は区切りを
-    変える。角括弧 `[` `]` は全角にする (一覧の印 `[壊れている: …]` / `[警告: …]` と同じ形を作らせない —
-    印は行頭にしか付かないが、見た目でも紛れないように)。"""
+    変える。角括弧 `[` `]` は全角にする (印と紛れる括弧書きを見た目でも作らせない — 一覧の印は path の
+    直後にしか付かず、description は `—` の後)。`|` も全角にする (一覧を表にして示したとき列を割らない)。"""
     t = " ".join(str(v).split()) if v else ""
-    t = t.replace("[", "［").replace("]", "］")
+    t = t.replace("[", "［").replace("]", "］").replace("|", "｜")
     return re.sub(
         r"(返答への指示|次の手|中止|ERROR|警告|壊れている)\s*[:：]", r"\1 -", t
     )
@@ -1206,22 +1211,33 @@ def reference_warnings(
 
 
 def _shown(reasons: list[str]) -> str:
-    # 理由は 2 つまで。印の角括弧を中で閉じさせず、バッククォートは全角にする (パス・キーは利用者が
-    # 書いた値 — 行の中のコード表記はフォルダの 1 つだけ)
+    # 理由は 2 つまで。パス・キーは利用者が書いた値なので、括弧 `(` `)` `[` `]`・バッククォート・ダッシュ類は
+    # 全角にする — 印の括弧を中で閉じさせず (閉じた後ろに偽の文を足させない)、行の中のコード表記は
+    # フォルダの 1 つだけ、`—` は description の前の 1 つだけ。指示・印の語は plain と同じく区切りを変える
+    # (全角・縦書きのコロンも)
     shown = "、".join(reasons[:2]) + (
         f" ほか {len(reasons) - 2} 件" if len(reasons) > 2 else ""
     )
-    return (
-        " ".join(shown.split()).replace("[", "［").replace("]", "］").replace("`", "｀")
-    )
+    return _RE_SHOWN_WORDS.sub(r"\1 -", " ".join(shown.split()).translate(_SHOWN_WIDE))
+
+
+_SHOWN_WIDE = str.maketrans(
+    {"(": "（", ")": "）", "[": "［", "]": "］", "`": "｀"}
+    | dict.fromkeys("‒–—―⸺⸻─", "－")
+)
+_RE_SHOWN_WORDS = re.compile(
+    r"(返答への指示|次の手|中止|ERROR|警告|壊れている)\s*[:：︓﹕]"
+)
 
 
 def broken_line(reasons: list[str], writable: bool = True, folder: str = "") -> str:
-    """一覧の印 (`[壊れている: …]`)。行頭 (`- ` の直後) に置く — description は `—` の後にしか
-    出ないので、description に同じ形を書いても印にはならない。
+    """一覧の印 (`(壊れている: 理由。次の手: …)`)。path の直後に置く — description は `—` の後にしか
+    出ないので、description に同じ形を書いても印にはならない。直し方は他の tool の結果と同じく
+    `次の手:` の後 (壊れている行は description が無く印で終わるので、`次の手:` から行末までが次の手)。
+    理由の中の `次の手:` は `_shown` が区切りを変える。
     `folder` は書けないときの文を層で分けるためだけに使う (印にパスは出さない)。"""
     nxt = broken_next(reasons, writable=writable, place=folder)
-    return f"[壊れている: {_shown(reasons)}。{nxt}]"
+    return f"(壊れている: {_shown(reasons)}。{NEXT}{nxt})"
 
 
 def readonly_warnings(warns: "RefWarnings", folder: str) -> "RefWarnings":
@@ -1239,8 +1255,8 @@ def readonly_warnings(warns: "RefWarnings", folder: str) -> "RefWarnings":
 
 
 def warning_line(reasons: list[str]) -> str:
-    """一覧の印 (`[警告: …]`)。行頭に置く。壊れているとは言い分ける (読み込める)。"""
-    return f"[警告: {_shown(reasons)}。読み込めるが、その要素は実行しない]"
+    """一覧の印 (`(警告: …)`)。path の直後に置く。壊れているとは言い分ける (読み込める)。"""
+    return f"(警告: {_shown(reasons)}。読み込めるが、その要素は実行しない)"
 
 
 def code_span(text: str) -> str:
@@ -1253,12 +1269,12 @@ def code_span(text: str) -> str:
 
 
 def index_line(folder: str, description: str, mark: str = "") -> str:
-    """一覧の 1 行: `` - [印] `<フォルダ>` — <description> ``。フォルダはコード表記 (code_span)。
-    印 (broken_line / warning_line) は tool が行頭に付け、`—` の後は書いた人の文 (plain で潰す)。
-    壊れているレシピは description を出さない。"""
+    """一覧の 1 行: `` - `<フォルダ>` (印) — <description> ``。フォルダはコード表記 (code_span)。
+    印 (broken_line / warning_line) は tool が path の直後 = description より前に付け (description から
+    作れない位置)、`—` の後は書いた人の文 (plain で潰す)。壊れているレシピは description を出さない。"""
     path = code_span(folder)
-    head = f"- {mark} {path}" if mark else f"- {path}"
-    if mark.startswith("[壊れている"):
+    head = f"- {path} {mark}" if mark else f"- {path}"
+    if mark.startswith("(壊れている"):
         return head
     d = plain(description)
     if len(d) > INDEX_DESCRIPTION_CHARS:
