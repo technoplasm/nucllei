@@ -212,10 +212,9 @@ def test_no_space_is_507(env, monkeypatch):
     def full(*a, **k):
         raise OSError(errno.ENOSPC, "No space left on device")
 
-    monkeypatch.setattr(pathlib.Path, "write_bytes", full)
+    monkeypatch.setattr(mod, "_open_dirs", full)
     r = _post(c, "/files/write", path="big.bin", b64=_b64("x"))
     assert r.status_code == 507
-    monkeypatch.setattr(mod, "_open_dirs", full)
     r = _post(c, "/files/write", path="big.bin", b64=_b64("x"), nofollow=True)
     assert r.status_code == 507
     r = _post(c, "/files/mkdir", path="d")

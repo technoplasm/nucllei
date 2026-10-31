@@ -134,6 +134,7 @@ def test_exec_and_exec_cell_report_cache_ttl_without_exports(monkeypatch, tmp_pa
 
     monkeypatch.setenv("SANDBOX_CACHE_TTL_DAYS", "12")
     monkeypatch.setattr(os, "chown", lambda *a, **k: None)
+    monkeypatch.setattr(os, "fchown", lambda *a, **k: None)
     c = _client(monkeypatch, tmp_path)
     mod = sys.modules["sandbox_main_files_test"]
     (tmp_path / "u1" / ".exec").mkdir(parents=True)

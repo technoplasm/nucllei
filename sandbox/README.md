@@ -123,7 +123,7 @@ jail からの見え方は **rw / ro / 見えない の 3 値**:
 
 | jail のパス (= URL) | 一般ユーザー | admin | コンテナ側 |
 |---|---|---|---|
-| `/ext/groups/<グループ名>/` | メンバーは rw、それ以外は**見えない** (bind しない) | 全グループ rw | `/ext/groups/<グループ名>` |
+| `/ext/groups/<グループ名>/` | メンバーは rw (nucllei でグループの書き込みを「指定した人だけ」にしたら、指定されていないメンバーは ro)、それ以外は**見えない** (bind しない) | 全グループ rw | `/ext/groups/<グループ名>` |
 | `/ext/public/` | ro | rw | `/ext/public` |
 
 - **ACL は nucllei が決める** (`nucllei/utils/ext_acl.py` 1 か所。nucllei の `README_API.md` §3.8)。
@@ -194,8 +194,11 @@ nucllei は `/exec` `/exec_cell` に `user_groups` `user_role` を付け、sandb
   無害だが、サービス (コンテナの名前空間 = 全グループが在る) が `/files/*` でそれを辿ると抜けられる。
   `/files/*` の `/ext/...` は包含判定の基準を**その bind のディレクトリ**にし、経路の各段を dir fd から
   `O_NOFOLLOW` で開き直す (openat 系。resolve → 判定 → open の TOCTOU も無い)。symlink に当たれば 400。
-  workspace 側の `/files/*` は従来どおり `_safe_path` (resolve して workspace の外なら 400) で、
-  workspace に置いた「グループの置き場を指す symlink」もそこで弾かれる。
+  workspace 側の `/files/*` は `_safe_path` (resolve して workspace の外なら 400) で、
+  workspace に置いた「グループの置き場を指す symlink」もそこで弾かれる。読み書きそのものは解決後の
+  パスを同じ fd 経路で開く (resolve の後に途中の段を symlink に差し替えられても外へ出ない)。
+  `/exec` が workspace に置く物 (`imports/` の取り込み・`.exec/` のスクリプト) も fd 経路で書き、
+  jail が `imports/` `trash/` `.exec/` を symlink に差し替えていたら workspace の用意で作り直す。
   jail 内 uid は全ユーザー共通の 65534。
   - 残懸念 (受容済み): nsjail 脱出ができた場合、同一 uid のため他ユーザーの workspace
     が DAC では守られない。対策としては per-user uid オフセット割当があるが、

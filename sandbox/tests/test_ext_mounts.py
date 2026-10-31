@@ -321,6 +321,47 @@ def test_files_ro_is_403_and_unbound_is_404(monkeypatch, tmp_path):
         assert r.status_code == 400, p
 
 
+def test_read_only_group_is_ro_bind_and_403(monkeypatch, tmp_path):
+    """グループも ro で渡せる (nucllei 側で書き込みを「指定した人だけ」にしたグループの、指定されて
+    いないメンバー — 2026-10-31 案 A)。jail は --bindmount_ro、`/files/*` の書き込みは 403、読みは通る。
+    ro で置き場がまだ無ければ作らずに飛ばす (書ける人が最初に書いたときに作られる)。"""
+    mod, ext = _load(monkeypatch, tmp_path)
+    (ext / "groups" / "EMR" / "a.md").write_text("emr")
+    binds = mod._prepare_mounts(
+        mod._validate_mounts(_mounts(mod, _M("/ext/groups/EMR", False)))
+    )
+    assert binds == [(str(ext / "groups" / "EMR"), "/ext/groups/EMR", False)]
+    got = _binds_of(mod._jail_base(pathlib.Path("/workspaces/u"), 60, binds))
+    assert ("--bindmount_ro", f"{ext}/groups/EMR:/ext/groups/EMR") in got
+    assert not any(flag == "--bindmount" and "groups" in b for flag, b in got)
+    assert mod._prepare_mounts([("/ext/groups/NEW", False)]) == []
+    assert not (ext / "groups" / "NEW").exists()
+
+    c = _client(mod, tmp_path)
+    ro = [_M("/ext/groups/EMR", False)]
+    for ep, extra in (
+        ("/files/write", {"b64": _b64(b"x")}),
+        ("/files/mkdir", {}),
+        ("/files/trash", {}),
+    ):
+        r = c.post(
+            ep,
+            json={
+                "user_id": "u1",
+                "path": "/ext/groups/EMR/a.md",
+                "mounts": ro,
+                **extra,
+            },
+        )
+        assert r.status_code == 403, (ep, r.text)
+    assert (ext / "groups" / "EMR" / "a.md").read_text() == "emr"
+    r = c.post(
+        "/files/read",
+        json={"user_id": "u1", "path": "/ext/groups/EMR/a.md", "mounts": ro},
+    )
+    assert r.status_code == 200
+
+
 def test_symlink_to_other_group_is_not_followed(monkeypatch, tmp_path):
     """jail 内で `/ext/groups/EMR/` に他グループを指す symlink を作られても、サービス側
     (コンテナの名前空間には全グループが在る) はそれを辿らない。"""
@@ -381,6 +422,85 @@ def test_workspace_symlink_to_group_dir_is_refused(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # /exec /exec_cell
 # ---------------------------------------------------------------------------
+def test_exec_does_not_write_through_symlinked_system_dirs(monkeypatch, tmp_path):
+    """jail が `.exec` / `imports` を symlink に差し替えても、/exec はサービスの権限で辿って外
+    (ro の bind・他のグループの置き場) に書かない。`_workspace` は差し替えられた置き場を作り直す。"""
+    mod, ext = _load(monkeypatch, tmp_path)
+    c = _client(mod, tmp_path)
+    ws = tmp_path / "workspaces" / "u1"
+    ws.mkdir(parents=True)
+    (ws / ".exec").symlink_to(ext / "groups" / "OTHER")
+    (ws / "imports").mkdir()
+    monkeypatch.setattr(mod, "_nsjail_cmd", lambda *a, **k: ["true"])
+    before = sorted(p.name for p in (ext / "groups" / "OTHER").iterdir())
+    r = c.post("/exec", json={"user_id": "u1", "lang": "shell", "code": "x"})
+    assert r.status_code == 400, r.text
+    (ws / ".exec").unlink()
+    (ws / ".exec").mkdir()
+    (ws / "imports").rmdir()
+    (ws / "imports").symlink_to(ext / "groups" / "OTHER")
+    r = c.post(
+        "/exec",
+        json={
+            "user_id": "u1",
+            "lang": "shell",
+            "code": "x",
+            "imports": [{"name": "in.txt", "b64": _b64(b"evil")}],
+        },
+    )
+    assert r.status_code == 400, r.text
+    assert sorted(p.name for p in (ext / "groups" / "OTHER").iterdir()) == before
+
+    mod._ensure_ws_dirs(ws)
+    for name in ("imports", "trash", ".exec"):
+        assert (ws / name).is_dir() and not (ws / name).is_symlink(), name
+    assert sorted(p.name for p in (ext / "groups" / "OTHER").iterdir()) == before
+
+
+def test_files_write_and_read_do_not_follow_a_swap_after_resolve(monkeypatch, tmp_path):
+    """symlink を辿る既定の `/files/write` `/files/read` (workspace) も、resolve の後に途中の段を
+    symlink に差し替えられたら外へ書かない・外を読まない (読み書きは解決後のパスの fd 経路)。"""
+    mod, ext = _load(monkeypatch, tmp_path)
+    c = _client(mod, tmp_path)
+    ws = tmp_path / "workspaces" / "u1"
+    (ws / "d").mkdir(parents=True)
+    (ws / "d" / "secret.txt").write_text("mine")
+    real_safe_path = mod._safe_path
+
+    def racing_safe_path(w, rel):
+        p = real_safe_path(w, rel)
+        # resolve の直後に jail が d を他のグループへの symlink に差し替えた
+        (ws / "d").rename(ws / "d-old")
+        (ws / "d").symlink_to(ext / "groups" / "OTHER")
+        return p
+
+    monkeypatch.setattr(mod, "_safe_path", racing_safe_path)
+    r = c.post(
+        "/files/write",
+        json={"user_id": "u1", "path": "d/secret.txt", "b64": _b64(b"evil")},
+    )
+    assert r.status_code == 400, r.text
+    assert (ext / "groups" / "OTHER" / "secret.txt").read_text() == "other-secret"
+    (ws / "d").unlink()
+    (ws / "d-old").rename(ws / "d")
+    r = c.post("/files/read", json={"user_id": "u1", "path": "d/secret.txt"})
+    assert r.status_code == 400, r.text
+    assert "other-secret" not in r.text
+    # 差し替えが無ければ workspace の中の symlink は辿って読み書きできる
+    monkeypatch.setattr(mod, "_safe_path", real_safe_path)
+    (ws / "d").unlink()
+    (ws / "d-old").rename(ws / "d")
+    (ws / "link").symlink_to(ws / "d")
+    r = c.post(
+        "/files/write",
+        json={"user_id": "u1", "path": "link/new.txt", "b64": _b64(b"ok")},
+    )
+    assert r.status_code == 200, r.text
+    assert (ws / "d" / "new.txt").read_text() == "ok"
+    r = c.post("/files/read", json={"user_id": "u1", "path": "link/secret.txt"})
+    assert r.status_code == 200 and base64.b64decode(r.json()["b64"]) == b"mine"
+
+
 def test_exec_passes_binds_and_rejects_bad_mounts(monkeypatch, tmp_path):
     mod, ext = _load(monkeypatch, tmp_path)
     c = _client(mod, tmp_path)

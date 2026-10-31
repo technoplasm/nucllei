@@ -453,10 +453,20 @@ def _ensure_workspace(user_id: str) -> Path:
         _run(["mount", "-o", "loop,discard", str(img), str(ws)])
         os.chown(ws, JAIL_UID, JAIL_UID)
 
-    for d in (ws / "imports", ws / TRASH_DIR, ws / ".exec"):
-        if not d.exists():
-            _mkdir_owned(str(d))
+    _ensure_ws_dirs(ws)
     return ws
+
+
+def _ensure_ws_dirs(ws: Path) -> None:
+    """workspace の直下の置き場 (imports/ trash/ .exec/) を用意する。jail が symlink に差し替えた物は
+    作り直す (サービスは root で書くので、辿ると ro の bind や他のグループの置き場に書いてしまう)。"""
+    for d in (ws / "imports", ws / TRASH_DIR, ws / ".exec"):
+        mode = _lstat_mode(d)
+        if stat.S_ISLNK(mode):
+            d.unlink()
+            mode = 0
+        if mode == 0:
+            _mkdir_owned(str(d))
 
 
 def _mount_lock(user_id: str) -> asyncio.Lock:
@@ -493,6 +503,21 @@ async def _workspace(user_id: str) -> Path:
         _touch_last_used(user_id)
     _ws_registry[user_id] = time.monotonic()  # mount 完了後 event loop 上で touch
     return ws
+
+
+def _unlink_exec_script(ws: Path, name: str) -> None:
+    """`/exec` が置いた `.exec/<name>` を消す (`.exec` を開くのは O_NOFOLLOW — 実行中に jail が
+    symlink に差し替えていたら消さない。次の `_workspace` が作り直す)。"""
+    try:
+        dfd = _open_dirs(str(ws), [".exec"], f".exec/{name}")
+    except (HTTPException, OSError):
+        return
+    try:
+        os.unlink(name, dir_fd=dfd)
+    except OSError:
+        pass
+    finally:
+        os.close(dfd)
 
 
 def _safe_path(ws: Path, rel: str) -> Path:
@@ -1768,25 +1793,27 @@ async def exec_code(req: ExecRequest, request: Request):
                 raise HTTPException(400, f"invalid b64 for input: {name}")
             if len(data) > limit:
                 raise _too_large(len(data), limit)
-            dest = ws / "imports" / name
-            try:
-                dest.write_bytes(data)
-            except OSError as e:
-                if _nospace(e):
-                    raise HTTPException(507, QUOTA_FULL_DETAIL)
-                raise
-            os.chown(dest, JAIL_UID, JAIL_UID)
+            # fd 経路 (経路も末端も symlink を辿らない — jail が置き場を symlink にしても外へ書かない)
+            await asyncio.to_thread(
+                _fs_write,
+                _Target(str(ws), ["imports", name], f"imports/{name}", "workspace", ""),
+                data,
+                None,
+                False,
+            )
 
         ext = "py" if req.lang == "python" else "sh"
-        script = ws / ".exec" / f"{uuid.uuid4().hex[:8]}.{ext}"
-        try:
-            script.write_text(req.code, encoding="utf-8")
-        except OSError as e:
-            if _nospace(e):
-                raise HTTPException(507, QUOTA_FULL_DETAIL)
-            raise
-        os.chown(script, JAIL_UID, JAIL_UID)
-        jail_script = f"/workspace/.exec/{script.name}"
+        script_name = f"{uuid.uuid4().hex[:8]}.{ext}"
+        await asyncio.to_thread(
+            _fs_write,
+            _Target(
+                str(ws), [".exec", script_name], f".exec/{script_name}", "workspace", ""
+            ),
+            req.code.encode("utf-8"),
+            None,
+            True,
+        )
+        jail_script = f"/workspace/.exec/{script_name}"
         if req.lang == "python":
             argv = [f"{VENV_BIN}/python", "-u", jail_script]
         else:
@@ -1814,7 +1841,7 @@ async def exec_code(req: ExecRequest, request: Request):
                 await proc.wait()
                 out, out_trunc, err, err_trunc, exit_code = b"", False, b"", False, -9
         finally:
-            script.unlink(missing_ok=True)
+            _unlink_exec_script(ws, script_name)
         duration_s = round(time.monotonic() - t0, 2)
 
         return {
@@ -1914,7 +1941,8 @@ async def exec_cell(req: CellRequest, request: Request):
 # (openat 系)。jail 内で作った `/ext/groups/EMR/x -> ../OTHER/secret` のような symlink を
 # サービス側 (コンテナの名前空間 = 全グループが在る) で辿って他グループへ抜ける穴を塞ぐため。
 # resolve() してから包含判定する方式は判定と open の間に差し替えられる (TOCTOU) ので使わない。
-# workspace 相対の `path` (`/` 始まりでない) は従来どおり `_safe_path`。
+# workspace 相対の `path` (`/` 始まりでない) は `_safe_path` で workspace の中の symlink を辿って
+# 解決し、実際の読み書きは解決後のパスをこの fd 経路で行う (`_resolved_ws_target`)。
 
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
@@ -2078,7 +2106,8 @@ def _is_ext_path(path: str) -> bool:
 # O_NOFOLLOW で開く (`_open_dirs`)。経路のどこにも symlink を許さず、末端の symlink も辿らない
 # (削除・改名は symlink そのものに効く)。`/files/ls` `/files/stat` `/files/delete`
 # `/files/rename` `/files/mkdir` は常にこれ、`/files/read` `/files/write` は `/ext/...` と
-# `nofollow: true` のときこれ (workspace 相対の既定は従来どおり `_safe_path` — tool の挙動を変えない)。
+# `nofollow: true` のときこれ (workspace 相対の既定は `_safe_path` で workspace の中の symlink を辿って
+# 解決し、解決後のパスをこの経路で開く — 解決と open の間の差し替えでは外へ出ない)。
 
 # 容量切れ (workspace の quota = loopback ext4 の満杯)。HTTP 507 で返し、呼び手 (nucllei) が
 # 「ファイルブラウザで整理できる」と言い分ける
@@ -2098,6 +2127,14 @@ class _Target(NamedTuple):
     path: str  # 要求のパス (エラー文用)
     kind: str  # "workspace" | "ext"
     prefix: str  # 応答のパスの頭 (workspace は ""、ext は bind の jail パス)
+
+
+def _resolved_ws_target(ws: Path, p: Path, path: str) -> _Target:
+    """`_safe_path` で解決済みの `p` を、workspace の root からのセグメントの `_Target` にする
+    (symlink を辿る既定の `/files/read` `/files/write` が、実際の読み書きは fd 経路で行うため)。"""
+    root = ws.resolve()
+    segs = [] if p == root else list(p.relative_to(root).parts)
+    return _Target(str(root), segs, path, "workspace", "")
 
 
 def _ws_segs(path: str) -> list[str]:
@@ -2605,13 +2642,9 @@ async def files_read(req: ReadRequest):
     p = _safe_path(ws, req.path)
     if not p.is_file():
         raise HTTPException(404, f"not a file: {req.path}")
-
-    def read() -> dict:
-        with open(p, "rb") as f:
-            st = os.fstat(f.fileno())
-            return _read_body(f, st, p.name, limit, req.offset, req.length)
-
-    return await asyncio.to_thread(read)
+    # 読むのも解決後のパスを fd 経路で (resolve の後に差し替えられても外を読まない)
+    t = _resolved_ws_target(ws, p, req.path)
+    return await asyncio.to_thread(_fs_read, t, limit, req.offset, req.length)
 
 
 @app.post("/files/write")
@@ -2636,17 +2669,12 @@ async def files_write(req: WriteRequest):
         return {"ok": True, **res, "cache_ttl_days": CACHE_TTL_REPORTED}
     ws = await _workspace(req.user_id)
     p = _safe_path(ws, req.path)
-    try:
-        # 無い親は 1 段ずつ作って jail のユーザーの物にする (`p.parent.mkdir(parents=True)` は
-        # root 所有で作り、jail がその中で rm / mv できなかった)。p は resolve 済みで ws の中
-        await asyncio.to_thread(_makedirs_owned, ws.resolve(), p.parent, req.path)
-        p.write_bytes(data)
-    except OSError as e:
-        if _nospace(e):
-            raise HTTPException(507, QUOTA_FULL_DETAIL)
-        raise
-    os.chown(p, JAIL_UID, JAIL_UID)
-    return {"ok": True, "size": len(data), "cache_ttl_days": CACHE_TTL_REPORTED}
+    # workspace の中の symlink は辿る (resolve 済みの p)。書くのは解決後のパスを 1 段ずつ O_NOFOLLOW で
+    # 開く fd 経路 — resolve と書き込みの間に jail が途中の段を symlink に差し替えても外 (ro の bind・
+    # 他のグループの置き場) へは書かない (400)。無い親は jail のユーザーの物として作る
+    t = _resolved_ws_target(ws, p, req.path)
+    res = await asyncio.to_thread(_fs_write, t, data, None, False)
+    return {"ok": True, "size": res["size"], "cache_ttl_days": CACHE_TTL_REPORTED}
 
 
 # ---------------------------------------------------------------------------
