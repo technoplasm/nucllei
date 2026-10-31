@@ -45,7 +45,8 @@
 	// imports/ は Files の写し(#149)、exports/ は以前の自動添付の置き場(2026-10-19 廃止、残った写しは
 	// 期限で消える)、trash/ は /workspace の「削除」の移し先。3 つとも
 	// 直下のエントリ(ファイルでもフォルダでも 1 つ)が max(mtime, ctime) から cache_ttl_days 日で
-	// 中身ごと消える(sandbox の `_sweep_entries`)。mv は mtime を変えず ctime を今にする
+	// 中身ごと消える(sandbox の `_sweep_entries`)。mv は mtime を変えず ctime を今にする。
+	// 共有の置き場(/ext/public・/ext/groups/<g>)の trash/ も同じ期限で消える
 	const TRASH = `${WORKSPACE}/trash`;
 	const CACHE_DIRS = [`${WORKSPACE}/imports`, `${WORKSPACE}/exports`];
 	const EXPIRING_DIRS = [...CACHE_DIRS, TRASH];
@@ -78,6 +79,15 @@
 		places
 			.filter((p) => path === p.path || path.startsWith(`${p.path}/`))
 			.sort((a, b) => b.path.length - a.path.length)[0] ?? null;
+	// その場所の置き場のゴミ箱(`/workspace/trash`・`/ext/groups/<g>/trash` など)
+	const trashOf = (path: string) => {
+		const p = placeOf(path);
+		return p ? `${p.path}/trash` : null;
+	};
+	const inTrash = (path: string) => {
+		const t = trashOf(path);
+		return !!t && inside(path, t);
+	};
 
 	const place = $derived(placeOf(dir));
 	const rw = $derived(!!place?.rw && !!listing?.rw);
@@ -296,7 +306,8 @@
 	// ---- 表示の補助 ----
 	const expiresAt = (e: SandboxEntry) => {
 		const ttl = listing?.cache_ttl_days ?? 0;
-		if (!ttl || !e.mtime || !EXPIRING_DIRS.includes(parentOf(e.path))) {
+		const parent = parentOf(e.path);
+		if (!ttl || !e.mtime || !(EXPIRING_DIRS.includes(parent) || parent === trashOf(e.path))) {
 			return null;
 		}
 		return Math.max(e.mtime, e.ctime ?? 0) + ttl * 86400;
@@ -406,13 +417,13 @@
 	};
 
 	// ---- 削除 ----
-	// /workspace の中(trash/ の外)はサーバー(sandbox の /files/delete)が trash/ の直下へ移す
-	// (選び間違いを取り返せるように。同名は -2, -3…)。trash/ の中は permanent で完全に消す。
-	// /ext は常に完全に消える
+	// 置き場の trash/ の外は、サーバーがその置き場の trash/ の直下へ移す(モデルの remove_file と
+	// 同じ。選び間違いを取り返せるように。同名は -2, -3…)。trash/ の中は permanent で完全に消す。
+	// /ext の symlink は移せないのでリンクそのものを消す(リンク先は残る)
 	let deleteTarget = $state<SandboxEntry | null>(null);
 	let showDeleteConfirm = $state(false);
 	const movesToTrash = (e: SandboxEntry | null) =>
-		!!e && inside(e.path, WORKSPACE) && !inside(e.path, TRASH);
+		!!e && !inTrash(e.path) && (e.type !== 'symlink' || inside(e.path, WORKSPACE));
 
 	const confirmDelete = async () => {
 		const target = deleteTarget;
@@ -422,7 +433,7 @@
 		busy = true;
 		try {
 			const res = await deleteSandboxPath(target.path, {
-				permanent: inside(target.path, TRASH)
+				permanent: inTrash(target.path)
 			});
 			if (res.trashed && res.path) {
 				toast.success($i18n.t('Moved {{NAME}} to the trash', { NAME: res.path }));
@@ -540,16 +551,18 @@
 	bind:show={showDeleteConfirm}
 	title={movesToTrash(deleteTarget)
 		? $i18n.t('Move {{NAME}} to the trash?', { NAME: deleteTarget?.name ?? '' })
-		: inside(deleteTarget?.path ?? '', TRASH)
+		: inTrash(deleteTarget?.path ?? '')
 			? $i18n.t('Delete {{NAME}} permanently?', { NAME: deleteTarget?.name ?? '' })
 			: $i18n.t('Delete {{NAME}}?', { NAME: deleteTarget?.name ?? '' })}
 	message={movesToTrash(deleteTarget)
 		? listing?.cache_ttl_days
 			? $i18n.t(
-					'It will be moved to /workspace/trash/ and deleted automatically {{COUNT}} days later. Until then you can move it back.',
-					{ COUNT: listing.cache_ttl_days }
+					'It will be moved to {{TRASH}} and deleted automatically {{COUNT}} days later. Until then you can move it back.',
+					{ TRASH: `${trashOf(deleteTarget?.path ?? '')}/`, COUNT: listing.cache_ttl_days }
 				)
-			: $i18n.t('It will be moved to /workspace/trash/. You can move it back from there.')
+			: $i18n.t('It will be moved to {{TRASH}}. You can move it back from there.', {
+					TRASH: `${trashOf(deleteTarget?.path ?? '')}/`
+				})
 		: deleteTarget?.type === 'dir'
 			? $i18n.t('The folder and everything inside it will be deleted. This cannot be undone.')
 			: $i18n.t('This cannot be undone.')}
@@ -830,7 +843,7 @@
 										>{e.name}</span
 									>
 									<span class="block text-xs text-content-subtle truncate">
-										{entryMeta(e)}{#if e.path === TRASH && e.type === 'dir'}{' · '}{listing.cache_ttl_days
+										{entryMeta(e)}{#if e.path === trashOf(e.path) && e.type === 'dir'}{' · '}{listing.cache_ttl_days
 												? $i18n.t('Deleted items, removed {{COUNT}} days after they are moved here', {
 														COUNT: listing.cache_ttl_days
 													})
@@ -902,15 +915,16 @@
 					{ COUNT: listing.cache_ttl_days }
 				)}
 			</div>
-		{:else if place?.kind === 'workspace' && inside(dir, TRASH)}
+		{:else if place && inTrash(dir)}
 			<div class="text-xs text-content-subtle px-0.5 pb-1">
 				ⓘ {listing?.cache_ttl_days
 					? $i18n.t(
-							'Deleting in /workspace moves items here. Each item directly in this folder is deleted with everything inside {{COUNT}} days after it was moved here. Deleting here removes it permanently.',
-							{ COUNT: listing.cache_ttl_days }
+							'Deleting in {{PLACE}} moves items here. Each item directly in this folder is deleted with everything inside {{COUNT}} days after it was moved here. Deleting here removes it permanently.',
+							{ PLACE: place.path, COUNT: listing.cache_ttl_days }
 						)
 					: $i18n.t(
-							'Deleting in /workspace moves items here. Deleting here removes it permanently.'
+							'Deleting in {{PLACE}} moves items here. Deleting here removes it permanently.',
+							{ PLACE: place.path }
 						)}
 			</div>
 		{/if}

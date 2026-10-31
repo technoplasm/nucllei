@@ -1439,8 +1439,9 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
 - **削除**(2026-10-07、2026-10-08 に sandbox 側へ移設): `/workspace` の中(`trash/` の外)は `trash/` の直下への移動。
   移すのは **sandbox の `/files/delete` の既定**(llens が API の delete で消して trash に入らなかった件 — ken 決定 案 A)。
   同名があれば `-2` `-3`…(拡張子の前。llens の運用と同じ)、応答 `{trashed: true, path}` の移した先を toast に出す。
-  `permanent: true`・`trash/` の中・`/ext` は完全削除 — 画面は `trash/` の中でだけ `permanent: true` を送る
-  (確認ダイアログの文言で区別)。古い sandbox は `permanent` を無視して常に完全削除(`trashed: false`)。`trash/` は `imports/` `exports/` と同じく
+  `/ext`(`/ext/public`・`/ext/groups/<g>`)は remove_file と同じ `/files/trash` でその置き場の `trash/` の直下へ移す
+  (末端の symlink は `/files/trash` が移さないのでリンクだけ消す)。`permanent: true`・置き場の `trash/` の中は完全削除
+  — router が置き場の `trash/` の中なら `permanent` にする(画面も `trash/` の中でだけ送り、確認ダイアログの文言で区別)。古い sandbox は `permanent` を無視して常に完全削除(`trashed: false`)。`trash/` は `imports/` `exports/` と同じく
   sandbox が作り、消せない・改名できない。移しただけでは容量は空かないので、507 の文言と使用量の tooltip は「trash を空に」。
 - 回帰: `nucllei/test/apps/webui/routers/test_sandbox_files.py`、`sandbox/tests/test_files_browser.py`。
 - 未了: 実機(sandbox コンテナ)での確認・画面の目視は統合側。workspace 相対の tool 経路(`_safe_path`)の

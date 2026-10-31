@@ -604,7 +604,7 @@ class TestSandboxFiles(AbstractPostgresTest):
                 },
             },
         )
-        # 古い sandbox (`trashed` を返さない = 常に完全削除)
+        # sandbox が移さなかった (`trashed` を返さない) ときは trashed: false
         assert self._post(MEMBER, "/delete", {"path": "/workspace/a.md"}).json() == {
             "ok": True,
             "trashed": False,
@@ -623,16 +623,18 @@ class TestSandboxFiles(AbstractPostgresTest):
             "trashed": True,
             "path": "/workspace/trash/a-2.md",
         }
-        # permanent はそのまま渡す (trash の中で消すときに画面が送る)
+        # trash/ の中は完全に消す (permanent を送らなくても)
         fake.responses["/files/delete"] = {"ok": True, "trashed": False}
-        r = self._post(
-            MEMBER, "/delete", {"path": "/workspace/trash/a.md", "permanent": True}
-        )
-        assert r.json() == {"ok": True, "trashed": False}
-        assert (fake.calls[-1][1]["path"], fake.calls[-1][1]["permanent"]) == (
-            "trash/a.md",
-            True,
-        )
+        for body in (
+            {"path": "/workspace/trash/a.md", "permanent": True},
+            {"path": "/workspace/trash/a.md"},
+        ):
+            r = self._post(MEMBER, "/delete", body)
+            assert r.json() == {"ok": True, "trashed": False}
+            assert (fake.calls[-1][1]["path"], fake.calls[-1][1]["permanent"]) == (
+                "trash/a.md",
+                True,
+            )
         r = self._post(
             MEMBER,
             "/rename",
@@ -662,6 +664,71 @@ class TestSandboxFiles(AbstractPostgresTest):
         fake.responses["/files/delete"] = fake.error(400, "protected directory")
         r = self._post(MEMBER, "/delete", {"path": "/workspace/imports"})
         assert r.status_code == 400 and r.json()["detail"] == "protected directory"
+
+    def test_delete_in_ext_moves_to_place_trash(self, monkeypatch):
+        """`/ext` の削除も remove_file と同じく、その置き場の trash/ の直下へ移す (`/files/trash`)。
+        trash/ の中・trash/ そのものは完全に消す。読むだけの場所は 403 のまま。"""
+        moved = {"ok": True, "trashed": True, "cache_ttl_days": 30}
+        fake = FakeSandbox(
+            monkeypatch,
+            {
+                "/files/trash": lambda p: {
+                    **moved,
+                    "path": p["path"].rsplit("/", 1)[0] + "/trash/x-2.md",
+                },
+                "/files/delete": {"ok": True, "trashed": False},
+            },
+        )
+        r = self._post(MEMBER, "/delete", {"path": "/ext/groups/EMR/sub/x.md"})
+        assert r.json() == {
+            "ok": True,
+            "trashed": True,
+            "path": "/ext/groups/EMR/sub/trash/x-2.md",
+        }
+        path, payload = fake.calls[-1]
+        assert (path, payload["path"]) == ("/files/trash", "/ext/groups/EMR/sub/x.md")
+        assert {"path": "/ext/groups/EMR", "rw": True} in payload["mounts"]
+        # `trash` という名前でも置き場の直下でなければゴミ箱ではない
+        self._post(MEMBER, "/delete", {"path": "/ext/groups/EMR/sub/trash/x.md"})
+        assert fake.calls[-1][0] == "/files/trash"
+        r = self._post(ADMIN, "/delete", {"path": "/ext/public/x.md"})
+        assert r.json()["trashed"] is True
+        assert fake.calls[-1][:1] == ("/files/trash",)
+
+        # 置き場の trash/ の中・trash/ そのものは完全に消す
+        for user, target in (
+            (MEMBER, "/ext/groups/EMR/trash/x.md"),
+            (MEMBER, "/ext/groups/EMR/trash"),
+            (ADMIN, "/ext/public/trash/x.md"),
+        ):
+            r = self._post(user, "/delete", {"path": target})
+            assert r.json() == {"ok": True, "trashed": False}, target
+            path, payload = fake.calls[-1]
+            assert (path, payload["path"], payload["permanent"]) == (
+                "/files/delete",
+                target,
+                True,
+            )
+
+        # 末端の symlink は /files/trash が移さない — リンクそのものを消す
+        fake.responses["/files/trash"] = fake.error(
+            400, "is a symlink: /ext/groups/EMR/link"
+        )
+        r = self._post(MEMBER, "/delete", {"path": "/ext/groups/EMR/link"})
+        assert r.json() == {"ok": True, "trashed": False}
+        assert [c[0] for c in fake.calls[-2:]] == ["/files/trash", "/files/delete"]
+        assert fake.calls[-1][1]["permanent"] is True
+        # 他の失敗はそのまま (完全削除に落とさない)
+        fake.responses["/files/trash"] = fake.error(404, "not found: x")
+        n = len(fake.calls)
+        r = self._post(MEMBER, "/delete", {"path": "/ext/groups/EMR/gone.md"})
+        assert r.status_code == 404
+        assert [c[0] for c in fake.calls[n:]] == ["/files/trash"]
+
+        # 読むだけの場所は sandbox を呼ばずに 403
+        n = len(fake.calls)
+        r = self._post(MEMBER, "/delete", {"path": "/ext/public/x.md"})
+        assert r.status_code == 403 and len(fake.calls) == n
 
 
 # ---------------------------------------------------------------------------

@@ -69,6 +69,8 @@ router = APIRouter()
 
 WORKSPACE_ROOT = "/workspace"
 EXT_ROOT = "/ext"
+# 置き場ごとのゴミ箱(sandbox の `TRASH_DIR`・remove_file と同じ名前)
+TRASH_DIR = "trash"
 
 _TIMEOUT_S = 60
 
@@ -473,19 +475,40 @@ class DeleteForm(BaseModel):
     permanent: bool = False
 
 
+def _in_trash(place: _Place) -> bool:
+    """置き場(`/workspace`・`/ext/public`・`/ext/groups/<g>`)の `trash/` そのものかその中か。"""
+    segs = [s for s in place.path.split("/") if s]
+    depth = 1 if place.kind == "workspace" else (3 if segs[1] == "groups" else 2)
+    return len(segs) > depth and segs[depth] == TRASH_DIR
+
+
+def _is_symlink_refusal(e: HTTPException) -> bool:
+    return e.status_code == 400 and "is a symlink" in str(e.detail)
+
+
 @router.post("/delete")
 async def delete_path(form: DeleteForm, user=Depends(get_verified_user)):
-    """削除。`/workspace` の中(`trash/` の外)は sandbox が既定で `/workspace/trash/` の直下へ移す
-    (同名は `-2` `-3`…)— 応答 `{ok, trashed: true, path: "/workspace/trash/<名前>"}`。
-    `permanent: true`・`trash/` の中・`/ext` は完全に消す(`{ok, trashed: false}`)。
-    `trashed` を返さない古い sandbox は常に完全削除なので `false` として返す。"""
+    """削除。置き場の `trash/` の外は、その置き場の `trash/` の直下へ移す(remove_file と同じ
+    移し方。同名は `-2` `-3`…)— 応答 `{ok, trashed: true, path: "<置き場>/trash/<名前>"}`。
+    `/workspace` は sandbox の `/files/delete` の既定、`/ext` は `/files/trash`。
+    `trash/` の中と `permanent: true` は完全に消す(`{ok, trashed: false}`)。`/ext` の末端の
+    symlink は `/files/trash` が移さないので、リンクそのものを消す(リンク先は触らない)。"""
     _require_sandbox()
     place = _resolve(user, form.path)
     _require_rw(place)
+    permanent = form.permanent or _in_trash(place)
+    if place.kind == "ext" and not permanent:
+        try:
+            res = await _call(user, "/files/trash", {"path": place.sandbox_path})
+            return {"ok": True, "trashed": True, "path": res["path"]}
+        except HTTPException as e:
+            if not _is_symlink_refusal(e):
+                raise
+            permanent = True
     res = await _call(
         user,
         "/files/delete",
-        {"path": place.sandbox_path, "permanent": form.permanent},
+        {"path": place.sandbox_path, "permanent": permanent},
     )
     if res.get("trashed") and res.get("path"):
         return {"ok": True, "trashed": True, "path": _to_jail(place, res["path"])}

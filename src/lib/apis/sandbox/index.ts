@@ -135,8 +135,9 @@ export const uploadSandboxFile = (dir: string, file: File, overwrite = false) =>
 	});
 };
 
-// /workspace の中(trash/ の外)はサーバーが /workspace/trash/ の直下へ移す(同名は -2, -3…)—
-// trashed: true と移した先の path を返す。permanent・trash/ の中・/ext は完全に消す(trashed: false)
+// 置き場の trash/ の外はサーバーがその置き場の trash/ の直下へ移す(/workspace/trash・
+// /ext/groups/<g>/trash・/ext/public/trash。同名は -2, -3…)— trashed: true と移した先の path を返す。
+// permanent・trash/ の中・/ext の symlink は完全に消す(trashed: false)
 export const deleteSandboxPath = (path: string, options: { permanent?: boolean } = {}) =>
 	postJson<{ ok: boolean; trashed: boolean; path?: string }>('/delete', {
 		path,
