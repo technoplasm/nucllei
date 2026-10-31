@@ -7,6 +7,7 @@ from alembic import context
 from nucllei.internal.db import Base
 from nucllei.models import (  # noqa: F401
     auths,
+    chat_file_state,
     chats,
     configs,
     executions,

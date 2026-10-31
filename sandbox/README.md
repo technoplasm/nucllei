@@ -380,12 +380,15 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     最大 `length` バイト (`length` 省略は末尾まで) だけを返し、`{name, size, offset, length, b64, mtime}`
     (`size` はファイル全体、`offset` `length` は返した範囲)。上限は**読む量**に掛かる (ファイル全体の
     大きさでは断らない)。負の値は 400
-- `POST /files/write` — `{user_id, path, b64, mounts?, expected_mtime?, exclusive?, nofollow?}`
-  → `{ok, size, cache_ttl_days}` 書き込み (workspace 外へのパスは拒否)。fd で辿る版 (下記) では
-  `mtime` も返す
-  - `expected_mtime` (#150): `read` / `stat` で得た mtime と今の mtime が違えば **409**
+- `POST /files/write` — `{user_id, path, b64, mounts?, expected_mtime?, expected_size?, exclusive?, nofollow?}`
+  → `{ok, size, mtime, cache_ttl_days}` 書き込み (workspace 外へのパスは拒否)
+  - `expected_mtime`: `read` / `stat` / `write` で得た mtime と今の mtime が違えば **409**
     `{detail: {message: "modified" | "deleted", mtime}}` (開いた後に jail の実行等が書き換えた・消した)。
-    `exclusive`: 既に在れば 409 (新規作成)。`nofollow`: workspace 相対でも経路の symlink を辿らない
+    `expected_size` も渡せば大きさも比べる (違えば同じ 409 `modified`。mtime の刻みの中の別の書き込み・
+    mtime を戻された物を拾う。`expected_mtime` と一緒のときだけ効く)。
+    `exclusive`: 既に在れば 409 (新規作成)。`nofollow`: workspace 相対でも経路の symlink を辿らない。
+    nucllei の `write_file` は既にあるファイルを、同じ会話で読んだ・書いた版のときだけ上書きする —
+    記録が無ければ `exclusive`、有れば `expected_mtime` + `expected_size` で送る
   - 容量切れ (ENOSPC / EDQUOT) は **507** (`/exec` の imports 書き込みも同じ)。nucllei の tool は
     「Workspace のファイルブラウザで整理できる」を添える
 - **生のバイト列 `/files/raw`** — base64-in-JSON を使わないストリーミングの口。ファイルブラウザの
@@ -593,7 +596,7 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 | `run_python_once(code, timeout_s?)` | stateless 使い捨て Python (`/exec`)。状態非依存の単発用 |
 | `run_shell(command, timeout_s?)` | stateless bash 実行 (coreutils, jq, ripgrep, pandoc, weasyprint, unzip/zip, nkf, file, poppler-utils, ffmpeg, soffice (LibreOffice headless), antiword, catdoc/xls2csv/catppt, 下記「レガシーデータ」「OCR・画像・研究データ」の道具) |
 | `send_to_workspace(filename?, file_id?, url?)` | チャット添付 (`file_id`) / URL (`url`: 絶対 URL、または同一サーバの `/ext/…`) を `/workspace/imports/` に取り込み、絶対パスを返す。URL は nucllei の共有 resolver で解決 (下記) |
-| `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (nucllei の `SANDBOX_TEXT_MAX_SIZE_MB`) |
+| `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・既定 1MB 上限 (nucllei の `SANDBOX_TEXT_MAX_SIZE_MB`)。既にあるファイルを上書きできるのは同じ会話で読んだ・書いた版のときだけ (nucllei の README_API) |
 | `edit_file(path, old_text, new_text)` | テキストファイルの一部を直す (`/files/stat` → `/files/read` → `/files/write`)。`old_text` がちょうど 1 か所一致するときだけ `new_text` に置き換え、0 か所・2 か所以上・`old_text` 空は断る (追記の専用引数は無い)。読んだ文字コード (BOM 付き UTF-8 / UTF-8 / cp932) のまま書き戻す。`path` の範囲と上限は `write_file` と同じ |
 | `remove_file(path)` | ファイル・フォルダ (中身ごと) をその置き場のゴミ箱の直下へ移す (`/files/trash`)。`/workspace/…` → `/workspace/trash/`、`/ext/groups/<g>/…` → `/ext/groups/<g>/trash/`、`/ext/public/…` → `/ext/public/trash/`。完全には消さない。同名は `-2` `-3`…。ゴミ箱の中・ゴミ箱そのもの・置き場の root・`.` 始まり・`/workspace/imports` と末端の symlink は断る。`path` の範囲は `write_file` と同じ |
 | `load_recipe(path)` / `save_recipe(…)` / `edit_recipe(path, old_text, new_text)` | (sandbox のツールではなく、モデルの能力「レシピ」で入る別の tool。sandbox の API を使うのでここに載せる) レシピ (`<層>/recipes/<名前>/RECIPE.md`) を読み込む・作る・直す。読み出しと検査は `/recipes/folder`、前の版は `/files/trash` (`name`) で `<層>/trash/<名前>.RECIPE.md` へ、書き込みは `/files/write`。一覧は `/recipes/index` (`{{USER_RECIPES}}` か `load_recipe` の説明に差し込む)。判定と引数は nucllei の README_API |

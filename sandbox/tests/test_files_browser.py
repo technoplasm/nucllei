@@ -184,6 +184,91 @@ def test_write_with_expected_mtime(env):
     assert r.status_code == 409 and r.json()["detail"]["message"] == "deleted"
 
 
+def test_write_with_expected_size(env):
+    """`expected_size` も渡せば大きさも比べる (同じ mtime の別の書き込み・mtime を戻された物)。
+    `expected_mtime` の無い `expected_size` は効かない。"""
+    mod, c, ws, _ = env
+    st = _post(c, "/files/stat", path="notes.md").json()
+    r = _post(
+        c,
+        "/files/write",
+        path="notes.md",
+        b64=_b64("v2"),
+        expected_mtime=st["mtime"],
+        expected_size=st["size"] + 1,
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == {"message": "modified", "mtime": st["mtime"]}
+    assert (ws / "notes.md").read_bytes() != b"v2"
+    r = _post(
+        c,
+        "/files/write",
+        path="notes.md",
+        b64=_b64("v2"),
+        expected_mtime=st["mtime"],
+        expected_size=st["size"],
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["size"] == 2 and isinstance(r.json()["mtime"], float)
+    assert (ws / "notes.md").read_text() == "v2"
+    # mtime を戻しても大きさが違えば拾う
+    old_ns = (ws / "notes.md").stat().st_mtime_ns
+    (ws / "notes.md").write_text("v3-longer")
+    os.utime(ws / "notes.md", ns=(old_ns, old_ns))
+    r = _post(
+        c,
+        "/files/write",
+        path="notes.md",
+        b64=_b64("v4"),
+        expected_mtime=old_ns / 1e9,
+        expected_size=2,
+    )
+    assert r.status_code == 409 and r.json()["detail"]["message"] == "modified"
+    assert (ws / "notes.md").read_text() == "v3-longer"
+
+
+def test_conditional_writes_of_the_same_version_do_not_both_pass(env, monkeypatch):
+    """同じ版を見た 2 つの条件付き書き込みは、比べてから書くまでの間に割り込めない (片方は 409)。"""
+    import threading
+    import time as _time
+
+    mod, c, ws, _ = env
+    p = ws / "notes.md"
+    seen = p.stat().st_mtime_ns / 1e9
+    real = mod._lstat_at
+
+    def slow_lstat(name, dfd):
+        st = real(name, dfd)
+        _time.sleep(0.2)  # 比べる前に相手が書き終えられる窓
+        return st
+
+    monkeypatch.setattr(mod, "_lstat_at", slow_lstat)
+    results = []
+
+    def write(text):
+        t = mod._resolved_ws_target(ws, ws / "notes.md", "notes.md")
+        try:
+            mod._fs_write(t, text.encode(), seen, False, 4)
+            results.append("ok")
+        except mod.HTTPException as e:
+            results.append(e.status_code)
+
+    threads = [threading.Thread(target=write, args=(x,)) for x in ("aaaaa", "bbbbbb")]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert sorted(results, key=str) == [409, "ok"]
+
+
+def test_write_reports_mtime_on_every_path(env):
+    """既定の経路 (workspace の中の symlink を辿る) の応答にも `mtime` がある。"""
+    mod, c, ws, _ = env
+    r = _post(c, "/files/write", path="plain.txt", b64=_b64("x"))
+    assert r.status_code == 200, r.text
+    assert r.json()["mtime"] == (ws / "plain.txt").stat().st_mtime_ns / 1e9
+
+
 def test_write_exclusive(env):
     mod, c, ws, _ = env
     r = _post(c, "/files/write", path="new/x.txt", b64=_b64("x"), exclusive=True)

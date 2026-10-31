@@ -122,7 +122,9 @@ def test_files_write_reports_cache_ttl(monkeypatch, tmp_path):
             json={"user_id": "u1", "path": "imports/a.txt", "b64": "eA=="},
         )
         assert r.status_code == 200, r.text
-        assert r.json() == {"ok": True, "size": 1, "cache_ttl_days": want}
+        body = r.json()
+        assert isinstance(body.pop("mtime"), float)
+        assert body == {"ok": True, "size": 1, "cache_ttl_days": want}
 
 
 def test_exec_and_exec_cell_report_cache_ttl_without_exports(monkeypatch, tmp_path):

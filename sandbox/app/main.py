@@ -14,6 +14,7 @@ import re
 import stat
 import struct
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -1572,10 +1573,13 @@ class WriteRequest(BaseModel):
     b64: str
     mounts: list[MountIn] = Field(default_factory=list)
     file_limit_bytes: Optional[int] = None
-    # ファイルブラウザ (#150) 用。`expected_mtime` (`/files/read` `/files/stat` が返した値) と
-    # 今の mtime が違えば 409 (外で変更された)、`exclusive` は既に在れば 409 (新規作成)。
+    # 条件付きの書き込み (ファイルブラウザ・nucllei の write_file / edit_file)。`expected_mtime`
+    # (`/files/read` `/files/stat` `/files/write` が返した値) と今の mtime が違えば 409 (外で変更された)。
+    # `expected_size` も渡せば大きさも比べる (mtime の刻みの中の別の書き込み・mtime を戻された物を拾う。
+    # `expected_mtime` と一緒のときだけ効く)。`exclusive` は既に在れば 409 (新規作成)。
     # `nofollow` は workspace 相対のパスでも経路の symlink を辿らない (`/ext/...` は常に辿らない)
     expected_mtime: Optional[float] = None
+    expected_size: Optional[int] = None
     exclusive: bool = False
     nofollow: bool = False
 
@@ -2373,8 +2377,35 @@ def _conflict(message: str, mtime: Optional[float]) -> HTTPException:
     return HTTPException(409, {"message": message, "mtime": mtime})
 
 
+# 条件付きの書き込み (`expected_mtime`) の「比べる → 開く → 書く」をパスごとに 1 本にする (同じ版を
+# 見た 2 つの書き込みが両方とも通らない)。条件を付けない書き手 (jail の実行・既定の `/files/write`) は
+# 待たない。パスの文字列で引くので、別名 (bind の向こうの同じ物) は同じ錠にならない
+_WRITE_LOCKS = [threading.Lock() for _ in range(64)]
+
+
+def _write_lock(t: _Target) -> threading.Lock:
+    return _WRITE_LOCKS[hash((t.base, *t.segs)) % len(_WRITE_LOCKS)]
+
+
 def _fs_write(
-    t: _Target, data: bytes, expected_mtime: Optional[float], exclusive: bool
+    t: _Target,
+    data: bytes,
+    expected_mtime: Optional[float],
+    exclusive: bool,
+    expected_size: Optional[int] = None,
+) -> dict:
+    if expected_mtime is None:
+        return _fs_write_unlocked(t, data, None, exclusive, None)
+    with _write_lock(t):
+        return _fs_write_unlocked(t, data, expected_mtime, exclusive, expected_size)
+
+
+def _fs_write_unlocked(
+    t: _Target,
+    data: bytes,
+    expected_mtime: Optional[float],
+    exclusive: bool,
+    expected_size: Optional[int],
 ) -> dict:
     segs = t.segs
     if not segs:
@@ -2391,7 +2422,9 @@ def _fs_write(
             if exclusive and st is not None:
                 raise _conflict("already exists", _mtime(st))
             if expected_mtime is not None and (
-                st is None or not _same_mtime(_mtime(st), expected_mtime)
+                st is None
+                or not _same_mtime(_mtime(st), expected_mtime)
+                or (expected_size is not None and st.st_size != expected_size)
             ):
                 # 開いた後に外 (jail の実行・別のタブ) で変更・削除された
                 raise _conflict(
@@ -2664,7 +2697,7 @@ async def files_write(req: WriteRequest):
     ):
         t = await _fs_target(req.user_id, req.path, req.mounts, write=True)
         res = await asyncio.to_thread(
-            _fs_write, t, data, req.expected_mtime, req.exclusive
+            _fs_write, t, data, req.expected_mtime, req.exclusive, req.expected_size
         )
         return {"ok": True, **res, "cache_ttl_days": CACHE_TTL_REPORTED}
     ws = await _workspace(req.user_id)
@@ -2674,7 +2707,7 @@ async def files_write(req: WriteRequest):
     # 他のグループの置き場) へは書かない (400)。無い親は jail のユーザーの物として作る
     t = _resolved_ws_target(ws, p, req.path)
     res = await asyncio.to_thread(_fs_write, t, data, None, False)
-    return {"ok": True, "size": res["size"], "cache_ttl_days": CACHE_TTL_REPORTED}
+    return {"ok": True, **res, "cache_ttl_days": CACHE_TTL_REPORTED}
 
 
 # ---------------------------------------------------------------------------

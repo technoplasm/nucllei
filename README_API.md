@@ -2245,27 +2245,81 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       `SANDBOX_TEXT_MAX_SIZE_MB`. The result is
       「<path> の N 行目 (N〜M 行目) を置き換えた (文字コード: …、size)。」
       followed by the edited lines with line numbers (2 lines of context each
-      side, at most 10 lines). A write by someone else between the read and the
-      write is not detected (the sandbox has no conditional write).
+      side, at most 10 lines). `edit_file` does **not** require an earlier read
+      in the chat (it reads the file itself and replaces only the one span the
+      model copied). A write by someone else between its own read and write is
+      refused: the write carries the stat's version (`/files/write`
+      `expected_mtime` + `expected_size`) and a 409 becomes
+      「<path> は edit_file が読んでから書くまでの間に変わった。何も書いていない。次の手: 同じ edit_file を 1 回だけ呼び直す。」
+      (a sandbox that returns no `mtime` gets an unconditional write). A
+      successful edit counts as "written in this chat" for `write_file` (below).
       `write_file`'s and `read_file`'s docstrings point at `edit_file` for
       partial edits, and `read_file`'s cp932 label says `edit_file` keeps cp932.
       `edit_file`'s own description says
       only what it does, how to append and the arguments; the rest (no match,
       creating, binary, size, encoding, writable places) is said by the error or
       result of that case.
-      **No-overwrite places for `write_file`:** the sandbox valve `write_no_overwrite_paths` (same format and matching as
-      `rm_allowed_paths` below — newline / comma separated absolute paths, globs per
-      segment, paths normalised so `..` neither escapes nor sneaks in, files **below**
-      an entry, nested ones included) makes `write_file` there **create only** — it
-      writes with the sandbox's exclusive create (`/files/write` `exclusive`, `O_EXCL`;
-      no stat-then-write race) and turns the 409 into
-      「<path> は既にある (この置き場では write_file で上書きしない)。次の手: 一部を直す・足すなら edit_file (末尾に足すなら最後の行を old_text に含める。構成を変えるなら edit_file で該当範囲ごと置き換える — run_shell や run_python で書き直さない)。」
-      (a final symlink is refused by the sandbox). Creating a new file there
-      works; outside the entries nothing changes; the default is empty. There is no escape hatch for a full rewrite (`edit_file` can replace a
-      large span). Not covered: `run_shell` redirections (`>`, `cat > … <<EOF`),
-      `python` `open(…, "w")`, `mv` / `cp` over the file, `rm` then `write_file` where
-      `rm` is allowed (`rm_allowed_paths`), or a symlink placed outside the entry that
-      points into it — a guard, not a security boundary.
+      **Overwrite rule for `write_file`** (every place: `/workspace`,
+      `/ext/groups/<g>`, `/ext/public`): an **existing** file is overwritten only
+      when this chat has already read or written that path and the file is still
+      that version. Creating a new file is always allowed. The rule is the first
+      sentence of `write_file`'s description:
+      「テキストファイルを sandbox に書く。既にあるファイルを上書きできるのは、この会話で read_file で読んだか write_file / edit_file で書いた後だけ (その後に変わっていれば断る)。」
+      **What counts as read / written**, each recorded with the version
+      (`mtime` + `size`) the sandbox returned or, for an unconditional write
+      whose response has no `mtime`, a `/files/stat` right after it:
+      `read_file` (any page; the version is the stat taken before reading, so a
+      change during the read leaves the older version and a later overwrite
+      asks for a re-read), `write_file`, `edit_file`, `load_recipe` (each
+      `RECIPE.md` it loaded and each `requires` `read:` file it read), the files
+      `save_recipe` / `edit_recipe` wrote (`RECIPE.md`, and attachments copied
+      with `from_path`), and `send_to_workspace`'s import destinations
+      (`/workspace/imports/<name>`). Not tracked: writes by `run_python` /
+      `run_shell`.
+      **Key**: the normalised absolute jail path (`..`, `.` and repeated `/`
+      folded — the same resolver `read_file` / `write_file` use), per chat and
+      user. **Where**: with a `chat_id`, the DB table `chat_file_state`
+      (`chat_id`, `user_id`, `path`, `mtime`, `size`, `via`, `updated_at`) —
+      it survives turns, regenerations and branches (one record per chat, not per
+      branch), continuation / background turns use the same chat, and a
+      subagent's child turn keeps its own under the child chat's id (it does not
+      see or add to the parent's). Soft-deleting a chat keeps the rows; clone and
+      import do not carry them. Without a `chat_id` (headless), the record lives
+      in that one request's `__metadata__` (the tool loop's follow-ups share it)
+      and the next request starts empty.
+      **Flow**: no record → `/files/write` with `exclusive` (`O_EXCL`; a file
+      created meanwhile is not overwritten) → 「<path> を新しく作った (UTF-8、size)。」;
+      a 409 → 「<path> は既にあり、この会話ではまだ読んでいないので上書きしない。次の手: 一部を直す・足すなら edit_file を使う (末尾に足すなら最後の行を old_text に含める)。丸ごと書き直すなら、先に read_file で今の中身を読んでから write_file を呼び直す。run_shell や run_python で書き直さない。」
+      — or, for an extension `read_file` refuses (image / PDF / Office /
+      binary), 「<path> は既にあり、この会話ではまだ読んでいないので上書きしない。次の手: 置き換えてよいかユーザーに確かめてから、remove_file でゴミ箱へ移して write_file で作り直す。」.
+      A record → `/files/write` with `expected_mtime` + `expected_size` (the
+      recorded version) → 「<path> を上書きした (UTF-8、size)。」; 409 `modified`
+      → 「<path> はこの会話で読んだ・書いた後に変わっている (別の会話・画面のファイルブラウザ・run_shell / run_python・同じ置き場のほかの人など)。上書きしていない。次の手: read_file で今の中身を読み直し、変わった分を踏まえて書く (一部だけなら edit_file)。」
+      (the record stays; the next `read_file` replaces it); 409 `deleted` →
+      retried with `exclusive` → 「<path> を新しく作った (この会話で読んだ後に消されていた。UTF-8、size)。」,
+      or the `modified` error if someone created it in between. Every success
+      records the version from the write's response. A record without a version
+      (a sandbox that returns no `mtime`) still lets a new file be created; an
+      existing one gets
+      「sandbox が古く、上書きしてよいかを確かめられない (sandbox の更新が要る)。次の手: 一部を直すなら edit_file を使う。丸ごと書き直す必要があるなら、そうユーザーに伝える。」.
+      A sandbox that does not know `expected_size` ignores it and compares
+      `mtime` only.
+      The `RECIPE.md` refusal and the size cap come first. Both conditional
+      forms write on the sandbox's no-symlink path (neither the route nor the
+      leaf is followed — the same path `read_file` / `edit_file` read), so a
+      symlink is refused rather than written through. The previous version is
+      not kept (no trash copy).
+      **Limits** — a guard, not a security boundary: the sandbox compares and
+      writes in one call under a per-path lock (two conditional writes do not
+      both pass), but a writer outside that protocol (`run_shell` /
+      `run_python` in the jail, an unconditional `/files/write`) writing between
+      the compare and the `open` is not seen; two writes in the same coarse mtime tick with the same size are not
+      told apart; a regenerated answer may overwrite a file only the discarded
+      answer read (the record is per chat).
+      There is no valve for this rule. A valve update that sends
+      `write_no_overwrite_paths` gets 200 and the key is dropped, not stored
+      (unknown keys are ignored — the sandbox `Valves` must not set
+      `extra="forbid"`).
       **`rm` guard on `run_shell`:** before sending a command to the sandbox,
       `run_shell` looks for a plain `rm`
       **command word** (at the start, after `;` `&&` `||` `|` `&` a newline `(` `$(` or a

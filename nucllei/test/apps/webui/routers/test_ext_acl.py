@@ -471,7 +471,7 @@ class TestSandboxToolAcl(AbstractPostgresTest):
         out = _text(
             tool.write_file("/ext/groups/EMR/recipes/r.md", "hi", __user__=MEMBER)
         )
-        assert out.startswith("/ext/groups/EMR/recipes/r.md に書き込んだ"), out
+        assert out.startswith("/ext/groups/EMR/recipes/r.md を新しく作った"), out
         path, payload = tool.calls[0]
         assert (
             path == "/files/write" and payload["path"] == "/ext/groups/EMR/recipes/r.md"
@@ -503,7 +503,7 @@ class TestSandboxToolAcl(AbstractPostgresTest):
 
         tool = _tool({"/files/write": {"ok": True}})
         out = _text(tool.write_file("/ext/public/x.md", "x", __user__=ADMIN))
-        assert "書き込んだ" in out
+        assert "を新しく作った" in out
 
     def test_edit_file(self):
         """edit_file は write_file と同じ ACL — 書けない置き場は sandbox に問い合わせず
@@ -1076,7 +1076,7 @@ class TestGroupWriters(AbstractPostgresTest):
         # 書ける人は通る (mounts は rw)
         tool = _tool({"/files/write": {"ok": True}})
         out = _text(tool.write_file("/ext/groups/CHART/a.md", "x", __user__=WRITER))
-        assert "書き込んだ" in out
+        assert "を新しく作った" in out
         assert {"path": "/ext/groups/CHART", "rw": True} in tool.calls[0][1]["mounts"]
         # sandbox の 403 (ro の bind) も同じ文
         from nucllei.builtin_tools.sandbox import SandboxHTTPError, _files_error

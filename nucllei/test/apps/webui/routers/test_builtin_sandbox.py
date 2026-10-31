@@ -255,6 +255,30 @@ class TestSandboxBuiltinRegistration(AbstractPostgresTest):
             module = req.app.state.TOOLS["builtin_sandbox"]
             assert module.valves.default_timeout_s == 30
 
+    def test_removed_write_no_overwrite_valve_is_accepted_and_dropped(self):
+        """撤去した valve `write_no_overwrite_paths` を送る古い配備 (llens の sync) も 200 で受け、
+        保存値には残さない (送った他の valve は効く)。上書きの条件は valve でなく全部の置き場の規則。"""
+        from nucllei.builtin_tools.sandbox import Tools as SandboxTools
+        from nucllei.models.tools import Tools as ToolsTable
+
+        assert "write_no_overwrite_paths" not in SandboxTools.Valves.model_fields
+        with sandbox_env("http://sandbox.test:8000") as pkg:
+            pkg.sync_builtin_tools()
+            with mock_webui_user(id="admin1", role="admin"):
+                upd = self.fast_api_client.post(
+                    self.create_url("/id/builtin_sandbox/valves/update"),
+                    json={
+                        "write_no_overwrite_paths": "/workspace/memory",
+                        "default_timeout_s": 40,
+                    },
+                )
+                assert upd.status_code == 200, upd.text
+                assert "write_no_overwrite_paths" not in upd.json()
+                assert upd.json()["default_timeout_s"] == 40
+            stored = ToolsTable.get_tool_valves_by_id("builtin_sandbox")
+            assert "write_no_overwrite_paths" not in stored
+            assert stored["default_timeout_s"] == 40
+
     def test_destination_is_env_only_and_unreachable_from_db(self):
         """向き先は env `SANDBOX_URL` のみ。DB からは変えられない (2026-09-05)。
 
@@ -917,7 +941,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
 
         # exports/ も普通の置き場 — 書くだけで添付しない (自動添付は 2026-10-19 に廃止)
         out = _arun(tool.write_file("/workspace/exports/r.html", "<p>", __user__=user))
-        assert out == "/workspace/exports/r.html に書き込んだ (UTF-8、3B)。"
+        assert out == "/workspace/exports/r.html を新しく作った (UTF-8、3B)。"
 
     def test_workspace_paths_are_absolute_in_and_out(self):
         """3 本とも /workspace/ の絶対パスだけを受け、戻り値も絶対。sandbox の wire
@@ -949,7 +973,7 @@ class TestSandboxToolBehaviour(AbstractPostgresTest):
             out = _arun(tool.write_file(given, "x", __user__=user))
             assert tool.calls[0][0] == "/files/write"
             assert tool.calls[0][1]["path"] == rel, given
-            assert f"{absolute} に書き込んだ" in out, given
+            assert f"{absolute} を新しく作った" in out, given
 
             tool = _sandbox(responses)
             out = _arun(tool.fetch_from_workspace(given, __user__=user))

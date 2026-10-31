@@ -764,6 +764,128 @@ class _AlreadyExists(Exception):
     """`/files/write` の `exclusive` で、既にあった (409)。"""
 
 
+class _Modified(Exception):
+    """`/files/write` の `expected_mtime` で、今の版が違った (409 `modified`)。"""
+
+
+class _Deleted(Exception):
+    """`/files/write` の `expected_mtime` で、ファイルが無くなっていた (409 `deleted`)。"""
+
+
+def _conflict_message(e: "SandboxHTTPError") -> str:
+    """409 の本文 `{"detail": {"message": …, "mtime": …}}` の message (読めなければ "")。"""
+    try:
+        detail = json.loads(e.detail).get("detail")
+    except (ValueError, AttributeError):
+        return ""
+    return detail.get("message", "") if isinstance(detail, dict) else ""
+
+
+# ---- この会話で読んだ・書いた版 (write_file の上書きの条件) -------------------------------
+# 既にあるファイルを write_file で上書きできるのは、同じ会話でそのパスを読んだか書いた後で、その版
+# (sandbox の mtime + 大きさ) から変わっていないときだけ。記録するのは read_file・write_file・
+# edit_file・load_recipe (RECIPE.md と requires の read:)・save_recipe / edit_recipe が書いた物・
+# send_to_workspace の取り込み先。キーは jail の絶対パス (正規化後)。持つ場所は
+# chat_id があれば DB (`models/chat_file_state` — 会話 × 利用者)、無ければ (headless) その
+# 1 リクエストの `__metadata__` の dict (tool ループの追撃も同じ dict)。`__metadata__` が無い
+# 呼び出しは何も持たない (上書きは常に断る)。
+_FILE_STATE_KEY = "_sandbox_file_state"
+
+
+def _stamp_of(res) -> tuple[Optional[float], Optional[int]]:
+    """sandbox の応答 (`/files/stat` `/files/write` 等) の (mtime, size)。無ければ None。"""
+    if not isinstance(res, dict):
+        return None, None
+    mtime, size = res.get("mtime"), res.get("size")
+    ok_m = isinstance(mtime, (int, float)) and not isinstance(mtime, bool)
+    ok_s = isinstance(size, int) and not isinstance(size, bool)
+    return (float(mtime) if ok_m else None), (size if ok_s else None)
+
+
+def _state_where(metadata, user) -> tuple[Optional[str], Optional[dict], str]:
+    """(DB の chat_id, headless の dict, user_id)。どちらも None なら持たない。"""
+    uid = (user or {}).get("id") or ""
+    if not isinstance(metadata, dict) or not uid:
+        return None, None, uid
+    chat_id = metadata.get("chat_id")
+    if isinstance(chat_id, str) and chat_id:
+        return chat_id, None, uid
+    store = metadata.get(_FILE_STATE_KEY)
+    if not isinstance(store, dict):
+        store = metadata[_FILE_STATE_KEY] = {}
+    return None, store, uid
+
+
+async def file_state_get(metadata, user, abs_path: str):
+    """この会話で `abs_path` を読んだ・書いた記録 (`FileStamp`) か None。読めなければ None (上書きを断る側)。"""
+    from nucllei.models.chat_file_state import ChatFileStates, FileStamp
+
+    chat_id, store, uid = _state_where(metadata, user)
+    if store is not None:
+        hit = store.get(f"{uid}\n{abs_path}")
+        return FileStamp(**hit) if isinstance(hit, dict) else None
+    if chat_id is None:
+        return None
+    try:
+        return await asyncio.to_thread(ChatFileStates.get, chat_id, uid, abs_path)
+    except Exception as e:
+        log.error(f"[sandbox] file state read failed for {abs_path}: {e!r}")
+        return None
+
+
+async def file_state_put(
+    metadata, user, abs_path: str, mtime: Optional[float], size: Optional[int], via: str
+) -> None:
+    """`abs_path` の版を記録する (置き換え)。失敗はログだけ (次の上書きが断られる側に倒れる)。"""
+    from nucllei.models.chat_file_state import ChatFileStates
+
+    chat_id, store, uid = _state_where(metadata, user)
+    if store is not None:
+        store[f"{uid}\n{abs_path}"] = {"mtime": mtime, "size": size, "via": via}
+        return
+    if chat_id is None:
+        return
+    try:
+        await asyncio.to_thread(
+            ChatFileStates.put, chat_id, uid, abs_path, mtime, size, via
+        )
+    except Exception as e:
+        log.error(f"[sandbox] file state write failed for {abs_path}: {e!r}")
+
+
+def _not_read_yet(abs_path: str) -> ToolError:
+    """既にあるファイルを、この会話で読んでいないのに write_file で上書きしようとした。"""
+    fact = f"{abs_path} は既にあり、この会話ではまだ読んでいないので上書きしない"
+    if _read_ext(abs_path) in _READ_IMAGE_EXTS | _READ_BINARY_EXTS:
+        return ToolCallError(
+            fact,
+            "置き換えてよいかユーザーに確かめてから、remove_file でゴミ箱へ移して write_file で作り直す。",
+        )
+    return ToolCallError(
+        fact,
+        "一部を直す・足すなら edit_file を使う (末尾に足すなら最後の行を old_text に含める)。"
+        "丸ごと書き直すなら、先に read_file で今の中身を読んでから write_file を呼び直す。"
+        "run_shell や run_python で書き直さない。",
+    )
+
+
+def _changed_since_read(abs_path: str) -> ToolError:
+    """この会話で読んだ・書いた後に、ほかで変わった (write_file の上書きを断る)。"""
+    return ToolFailure(
+        f"{abs_path} はこの会話で読んだ・書いた後に変わっている (別の会話・画面のファイルブラウザ・"
+        "run_shell / run_python・同じ置き場のほかの人など)。上書きしていない",
+        "read_file で今の中身を読み直し、変わった分を踏まえて書く (一部だけなら edit_file)。",
+    )
+
+
+def _sandbox_without_versions() -> ToolError:
+    """sandbox が版 (mtime) を返さない — 上書きしてよいかを確かめられない。"""
+    return ToolFailure(
+        "sandbox が古く、上書きしてよいかを確かめられない (sandbox の更新が要る)",
+        "一部を直すなら edit_file を使う。丸ごと書き直す必要があるなら、そうユーザーに伝える。",
+    )
+
+
 def _recipe_md_refused(abs_path: str) -> ToolError:
     """write_file / edit_file で RECIPE.md を書こうとした (レシピの本体は検査を通す tool で書く)。
     次の手は渡す path (フォルダ) を実際の値で言う (RECIPE.md のパスのまま edit_file を呼び直させない)。
@@ -1334,12 +1456,6 @@ class Tools:
             description="read_file が /ext の proxy の置き場 (EXT_MOUNTS の http(s) の物) を断る"
             "ときの次の手 (モデル向け。その資料を読む手段の案内)",
         )
-        write_no_overwrite_paths: str = Field(
-            default="",
-            description="write_file で上書きしない置き場 (rm_allowed_paths と同じ書式: 改行・カンマ区切りの"
-            "絶対パス、各段で * を使える。その下の既にあるファイルへの write_file を断って edit_file へ向ける。"
-            "新しく作るのは通す)。既定は無し",
-        )
         rm_allowed_paths: str = Field(
             default="",
             description="run_shell で rm してよい置き場 (改行・カンマ区切りの絶対パス。その下の rm を"
@@ -1653,10 +1769,10 @@ class Tools:
         # 値の形を見て別の引数に読み替えない (url= に UUID / sandbox のパス、file_id= に URL が
         # 来ても救済しない。それぞれの解決が失敗し、受ける形を固定文で返す)。
         if url:
-            return await self._import_url(url, __user__)
+            return await self._import_url(url, __user__, __metadata__)
         if file_id:
             return await self._import_one(
-                file_id, __user__["id"], limit=_limit(__user__)
+                file_id, __user__["id"], limit=_limit(__user__), metadata=__metadata__
             )
         # 添付一覧から (filename の部分一致、省略時は全件)
         report = []
@@ -1667,7 +1783,7 @@ class Tools:
             if filename and (not fname or filename.lower() not in fname.lower()):
                 continue
             line, failure, exp = await self._import_file(
-                fid, fname, __user__["id"], _limit(__user__)
+                fid, fname, __user__["id"], _limit(__user__), __metadata__
             )
             imported += bool(line)
             quota_full = quota_full or failure == _QUOTA_FULL
@@ -1693,7 +1809,12 @@ class Tools:
         return out
 
     async def _import_file(
-        self, fid: str, fname, user_id: str, limit: Optional[int] = None
+        self,
+        fid: str,
+        fname,
+        user_id: str,
+        limit: Optional[int] = None,
+        metadata: Optional[dict] = None,
     ) -> tuple[str, str, Optional[date]]:
         """file (Files のレコード) 1 件を `/workspace/imports/` に書く。
         戻り値は (成功の報告行, "", 写しの期限日 or None) か ("", 失敗の理由, None)。所有者でないファイルは取り込まない —
@@ -1731,6 +1852,9 @@ class Tools:
                 size_413, eff = _too_large_413(e, limit)
                 return "", _too_large_file(size_413, eff), None
             return "", "取り込みに失敗した", None
+        await self._record_written(
+            metadata, {"id": user_id}, f"{WORKSPACE_ROOT}/imports/{name}", res, "import"
+        )
         return (
             f"- {name} ({_human_size(len(data))}) → {WORKSPACE_ROOT}/imports/{name}",
             "",
@@ -1743,6 +1867,7 @@ class Tools:
         user_id: str,
         url: str | None = None,
         limit: Optional[int] = None,
+        metadata: Optional[dict] = None,
     ) -> str:
         """引数で直に指された file 1 件を取り込む (file_id= / url= の配信口 URL)。
 
@@ -1750,7 +1875,9 @@ class Tools:
         (モデルが渡した言い方。None なら `file_id <値>`)。file が引けないときは全 tool 共通の
         `ref_errors.file_id_error` (file_id= の値が id の形でないときだけ受ける形の文を添える)。
         """
-        line, failure, expires = await self._import_file(fid, None, user_id, limit)
+        line, failure, expires = await self._import_file(
+            fid, None, user_id, limit, metadata
+        )
         if failure == _NO_FILE:
             from nucllei.utils.ref_errors import file_id_error
 
@@ -1769,7 +1896,9 @@ class Tools:
         return "取り込み結果:\n" + line + _imports_expiry_note(expires)
 
     # ---- send_to_workspace の url ソース ---------------------------------------
-    async def _import_url(self, u: str, user: dict) -> str:
+    async def _import_url(
+        self, u: str, user: dict, metadata: Optional[dict] = None
+    ) -> str:
         """`url` を **URL として** 共有 resolver (`utils/image_refs`) で解決して取り込む。
         受ける形はスキーム付きの絶対 URL と、同一サーバの相対 URL (`/` 始まり = このサーバの
         URL として、サーバが実際に持つ経路に当てる)。値の形から別の意味には読み替えない。
@@ -1811,7 +1940,9 @@ class Tools:
         # fragment は付いていても同じ file に当たる (`file_id_of_url` の規則)
         file_id = file_id_of_url(u)
         if file_id:
-            return await self._import_one(file_id, user_id, u, limit=_limit(user))
+            return await self._import_one(
+                file_id, user_id, u, limit=_limit(user), metadata=metadata
+            )
 
         # user は ACL (/ext/groups・/ext/public。#152) に使う — 見えない置き場は jail にも無い
         mounted = await mounted_path_for_url(u, user)
@@ -1857,6 +1988,9 @@ class Tools:
                         _without_sandbox_next("url"),
                     )
                 raise ToolFailure("sandbox へ書き込めない")
+        await self._record_written(
+            metadata, user, f"{WORKSPACE_ROOT}/imports/{name}", res, "import"
+        )
         return (
             "取り込み結果:\n"
             f"- {name} ({_human_size(size)}) → "
@@ -1869,9 +2003,11 @@ class Tools:
         path: str,
         content: str,
         __user__: Optional[dict] = None,
+        __metadata__: Optional[dict] = None,
     ) -> str:
         """
-        テキストファイルを sandbox に書く (既存ファイルは上書き)。HTML・Markdown・CSV・設定ファイルなど
+        テキストファイルを sandbox に書く。既にあるファイルを上書きできるのは、この会話で read_file で読んだか
+        write_file / edit_file で書いた後だけ (その後に変わっていれば断る)。HTML・Markdown・CSV・設定ファイルなど
         本文をそのまま渡したいときに使い、run_python の文字列や run_shell のヒアドキュメントに埋め込まない
         (クォート・エスケープの事故が起きる)。既存ファイルの一部だけを直すなら edit_file を使う。
 
@@ -1879,7 +2015,13 @@ class Tools:
         :param content: ファイルの中身 (テキストそのまま)
         """
         # 説明に書かない細目: 管理者が全グループと /ext/public に書けることは toolkit 共通注記、
-        # 書けない置き場は _write_target の ERROR、大きすぎるは下の ERROR
+        # 書けない置き場は _write_target の ERROR、大きすぎるは下の ERROR、まだ読んでいない・読んだ後に
+        # 変わった・バイナリの置き換えは上書きの ERROR (_not_read_yet / _changed_since_read)。
+        # 上書きの条件 (この会話で読んだ・書いた版のまま) は全部の置き場に同じ。記録が無ければ排他の作成
+        # (`exclusive` — 既にあれば 409。stat してから書くのと違い、間に作られた物も上書きしない)、
+        # 有れば条件付きの上書き (`expected_mtime` + `expected_size` — 違えば 409)。どちらも sandbox の
+        # 1 回の呼び出しの中で比べて書く (経路も末端も symlink を辿らない)。run_shell のリダイレクト・
+        # python の open('w') は見ない (README_API)
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         abs_path, target, ext = self._write_target(path, __user__)
@@ -1892,31 +2034,47 @@ class Tools:
                 f"{_human_size(TEXT_MAX_BYTES)})",
                 "run_python で内容を生成してファイルに書く (write_file は上書きなので分けて書けない)。",
             )
-        if self._no_overwrite(abs_path):
+        size = _human_size(len(data))
+        known = await file_state_get(__metadata__, __user__, abs_path)
+        # 版の無い記録 (sandbox が mtime を返さなかった) は比べられない — 新しく作るのだけ通す
+        unversioned = known is not None and known.mtime is None
+        if unversioned:
+            known = None
+        deleted = False
+        if known is not None:
             try:
-                await self._write_bytes(
+                res = await self._write_bytes(
+                    abs_path,
+                    target,
+                    ext,
+                    data,
+                    __user__,
+                    expected_mtime=known.mtime,
+                    expected_size=known.size,
+                )
+            except _Modified:
+                raise _changed_since_read(abs_path)
+            except _Deleted:
+                deleted = True
+        if known is None or deleted:
+            try:
+                res = await self._write_bytes(
                     abs_path, target, ext, data, __user__, exclusive=True
                 )
             except _AlreadyExists:
-                raise ToolCallError(
-                    f"{abs_path} は既にある (この置き場では write_file で上書きしない)",
-                    "一部を直す・足すなら edit_file (末尾に足すなら最後の行を old_text に含める。"
-                    "構成を変えるなら edit_file で該当範囲ごと置き換える — run_shell や run_python で"
-                    "書き直さない)。",
-                )
-            return f"{abs_path} に書き込んだ (UTF-8、{_human_size(len(data))})。"
-        await self._write_bytes(abs_path, target, ext, data, __user__)
-        return f"{abs_path} に書き込んだ (UTF-8、{_human_size(len(data))})。"
-
-    def _no_overwrite(self, abs_path: str) -> bool:
-        """valve `write_no_overwrite_paths` の置き場の下か。その下の
-        write_file は新しく作るだけ (sandbox の排他の作成 `exclusive` — 既にあれば 409。stat してから書くのと
-        違い、間に他が作っても上書きしない)。run_shell のリダイレクト・python の open('w')・置き場の外の
-        symlink を経た書き込みは見ない (README_API)。"""
-        from nucllei.utils.rm_guard import below_any, parse_allowed
-
-        bases = parse_allowed(self.valves.write_no_overwrite_paths)
-        return bool(bases) and below_any(abs_path, bases)
+                if deleted:
+                    # 記録が有って消されていた後に、誰かが作った
+                    raise _changed_since_read(abs_path)
+                if unversioned:
+                    raise _sandbox_without_versions()
+                raise _not_read_yet(abs_path)
+        mtime, written = _stamp_of(res)
+        await file_state_put(__metadata__, __user__, abs_path, mtime, written, "write")
+        if deleted:
+            return f"{abs_path} を新しく作った (この会話で読んだ後に消されていた。UTF-8、{size})。"
+        if known is None:
+            return f"{abs_path} を新しく作った (UTF-8、{size})。"
+        return f"{abs_path} を上書きした (UTF-8、{size})。"
 
     def _write_target(
         self, path: str, user: dict, allow_dir: bool = False
@@ -1978,9 +2136,14 @@ class Tools:
         data: bytes,
         user: dict,
         exclusive: bool = False,
-    ) -> None:
-        """`_write_target` の書き先へ `/files/write` で書く (ext は jail に bind する置き場の一覧付き)。
-        `exclusive` は新しく作るだけ (既にあれば `_AlreadyExists`)。"""
+        expected_mtime: Optional[float] = None,
+        expected_size: Optional[int] = None,
+    ) -> dict:
+        """`_write_target` の書き先へ `/files/write` で書き、sandbox の応答 (`mtime` `size`) を返す
+        (ext は jail に bind する置き場の一覧付き)。`exclusive` は新しく作るだけ (既にあれば
+        `_AlreadyExists`)。`expected_mtime` (+ `expected_size`) は今の版がそれのときだけ上書きする
+        (違えば `_Modified`、無くなっていれば `_Deleted`。`expected_size` を知らない sandbox は
+        mtime だけで比べる)。"""
         payload = {
             "user_id": user["id"],
             "path": target,
@@ -1990,12 +2153,50 @@ class Tools:
             payload["mounts"] = _ext_mounts(user)
         if exclusive:
             payload["exclusive"] = True
+        if expected_mtime is not None:
+            payload["expected_mtime"] = expected_mtime
+            if expected_size is not None:
+                payload["expected_size"] = expected_size
         try:
-            await self._post("/files/write", payload, timeout_s=60)
+            res = await self._post("/files/write", payload, timeout_s=60)
         except Exception as e:
-            if exclusive and isinstance(e, SandboxHTTPError) and e.status == 409:
-                raise _AlreadyExists() from None
+            if isinstance(e, SandboxHTTPError) and e.status == 409:
+                if exclusive:
+                    raise _AlreadyExists() from None
+                if expected_mtime is not None:
+                    if _conflict_message(e) == "deleted":
+                        raise _Deleted() from None
+                    raise _Modified() from None
             raise _files_error(e, abs_path)
+        return res if isinstance(res, dict) else {}
+
+    async def _record_written(
+        self, metadata, user: dict, abs_path: str, res, via: str
+    ) -> None:
+        """条件を付けずに書いた物 (取り込み・レシピ) を「この会話で書いた」として記録する。版は書いた
+        応答の値、無ければ (版を返さない sandbox) stat の値。stat できなければ記録しない。"""
+        if not isinstance(metadata, dict):
+            return
+        mtime, size = _stamp_of(res)
+        if mtime is None:
+            acl = _acl_rel(abs_path)
+            if acl is not None:
+                payload = {"user_id": user["id"], "path": abs_path}
+                payload["mounts"] = _ext_mounts(user)
+            else:
+                payload = {
+                    "user_id": user["id"],
+                    "path": abs_path[len(WORKSPACE_ROOT) + 1 :],
+                }
+            try:
+                st = await self._post("/files/stat", payload, timeout_s=30)
+            except Exception as e:
+                log.warning(f"[sandbox] stat after write failed for {abs_path}: {e!r}")
+                return
+            if not st.get("exists") or st.get("type") != "file":
+                return
+            mtime, size = _stamp_of(st)
+        await file_state_put(metadata, user, abs_path, mtime, size, via)
 
     async def edit_file(
         self,
@@ -2003,6 +2204,7 @@ class Tools:
         old_text: str,
         new_text: str,
         __user__: Optional[dict] = None,
+        __metadata__: Optional[dict] = None,
     ) -> str:
         """
         sandbox の既存のテキストファイルの一部を書き換える: old_text とちょうど 1 か所だけ一致する部分を
@@ -2129,9 +2331,27 @@ class Tools:
                 f"{_human_size(TEXT_MAX_BYTES)})",
                 _EDIT_TOO_LARGE_NEXT,
             )
-        # 読んでから書くまでの間に他 (別の会話・ファイルブラウザ・run_*) が書いた分は検出しない
-        # (sandbox の /files/write に条件付き書き込みが無い。直す範囲は 1 か所なので割り切る)
-        await self._write_bytes(abs_path, target, ext, out, __user__)
+        # 読んでから書くまでの間に他 (別の会話・ファイルブラウザ・run_*) が書いた分は、stat の版を
+        # 条件にした書き込みで断る (この会話で読んだかは問わない — 直すのは一致した 1 か所だけ)。
+        # 版を返さない sandbox では条件を付けずに書く
+        seen_mtime, seen_size = _stamp_of(st)
+        try:
+            res = await self._write_bytes(
+                abs_path,
+                target,
+                ext,
+                out,
+                __user__,
+                expected_mtime=seen_mtime,
+                expected_size=seen_size if seen_mtime is not None else None,
+            )
+        except (_Modified, _Deleted):
+            raise ToolFailure(
+                f"{abs_path} は edit_file が読んでから書くまでの間に変わった。何も書いていない",
+                "同じ edit_file を 1 回だけ呼び直す。",
+            )
+        mtime, written = _stamp_of(res)
+        await file_state_put(__metadata__, __user__, abs_path, mtime, written, "edit")
 
         first = text.count("\n", 0, pos) + 1
         # 末尾の改行は次の行を始めない (`"b\n"` に置き換えたら 1 行)
@@ -2214,6 +2434,7 @@ class Tools:
         offset: int = 0,
         max_chars: int = READ_FILE_DEFAULT_CHARS,
         __user__: Optional[dict] = None,
+        __metadata__: Optional[dict] = None,
     ) -> Rendered:
         """
         sandbox のテキストファイル (UTF-8・cp932) を読む。1 回に max_chars 字まで、行の切れ目で区切って
@@ -2427,6 +2648,10 @@ class Tools:
                 + fix
                 + " load_recipe が無いモデルではレシピが無効。"
             )
+        # どのページを読んでも「読んだ」(write_file の上書きの条件)。版は読む前の stat の値 — 読んでいる間に
+        # 変わっていれば古い方が残り、後の上書きは「変わっている」で読み直しになる
+        mtime, whole = _stamp_of(st)
+        await file_state_put(__metadata__, __user__, abs_path, mtime, whole, "read")
         return _read_rendered(abs_path, body)
 
     def _image_hint(self) -> str:

@@ -262,7 +262,7 @@ def test_index_warning_disappears_when_reference_comes_back(sbx):
     out = run(
         tool.write_file("/ext/groups/EMR/notes/検査結果.md", "戻した", __user__=USER)
     )
-    assert "書き込んだ" in out
+    assert "を新しく作った" in out
     assert _recipes_text() == "- `/ext/groups/EMR/recipes/抽出` — 月次の集計"
 
 
@@ -1359,7 +1359,7 @@ def test_write_and_edit_file_refuse_recipe_md_but_allow_attachments(sbx):
     out = run(
         tool.write_file("/workspace/recipes/集計/q.sql", "select 1", __user__=USER)
     )
-    assert "書き込んだ" in out
+    assert "を新しく作った" in out
 
 
 def test_read_file_adds_load_recipe_hint(sbx):

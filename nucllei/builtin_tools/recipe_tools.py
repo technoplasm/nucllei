@@ -70,6 +70,14 @@ def _sb():
     return sandbox
 
 
+class _FolderFiles(dict):
+    """`/recipes/folder` の {rel: bytes}。`stamps` は {rel: (mtime, size)} (sandbox が返した版)。"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stamps: dict = {}
+
+
 def _ref_or_error(path: str):
     from nucllei.utils.recipes import RecipePathError, parse_recipe_path
     from nucllei.utils.tool_errors import ToolCallError
@@ -88,6 +96,12 @@ class _Marks:
     folders: set = field(default_factory=set)
     keys: dict = field(default_factory=dict)
     broken: list = field(default_factory=list)  # 最後に壊れていたレシピの理由
+    # この呼び出しで読み込んだ RECIPE.md の (絶対パス, mtime, size) — 「この会話で読んだ」の記録
+    # (sandbox の write_file の上書きの条件) に足す。requires の read: は read_file が自分で記録する
+    seen: list = field(default_factory=list)
+    metadata: Optional[dict] = (
+        None  # load_recipe の __metadata__ (requires の read: に渡す)
+    )
 
     def reset(self, folder: str) -> None:
         """`folder` のレシピを直した — そのレシピと、それが requires に持つ要素の印を外す (次の
@@ -331,8 +345,12 @@ class RecipeTools:
     def _write_target(self, path: str, user: dict, allow_dir: bool = False):
         return self._sb_tools()._write_target(path, user, allow_dir)
 
-    async def _write_bytes(self, abs_path, target, ext, data, user) -> None:
-        await self._sb_tools()._write_bytes(abs_path, target, ext, data, user)
+    async def _write_bytes(self, abs_path, target, ext, data, user) -> dict:
+        return await self._sb_tools()._write_bytes(abs_path, target, ext, data, user)
+
+    async def _record_written(self, metadata, user, abs_path, res) -> None:
+        """書いた物を「この会話で書いた」として記録する (sandbox の write_file の上書きの条件)。"""
+        await self._sb_tools()._record_written(metadata, user, abs_path, res, "recipe")
 
     # ---- 共通 -------------------------------------------------------------------
     def _recipe_read_target(self, ref, user: dict) -> tuple[str, Optional[list]]:
@@ -368,12 +386,13 @@ class RecipeTools:
                 f"{ref.folder} はフォルダでない (レシピはフォルダで、RECIPE.md はその直下)",
                 "`<層>/recipes/<名前>` のフォルダを指定する。",
             )
-        files = {}
+        files = _FolderFiles()
         for f in res.get("files") or []:
             try:
                 files[f["rel"]] = base64.b64decode(f.get("b64") or "")
             except Exception:
                 raise sb.ToolFatal("sandbox の応答を読めない")
+            files.stamps[f["rel"]] = sb._stamp_of(f)
         skipped = {x.get("rel"): x.get("why") for x in res.get("skipped") or []}
         return True, files, skipped
 
@@ -432,6 +451,7 @@ class RecipeTools:
         marks = _current_marks(__messages__, __metadata__)
         if ref.folder in marks.folders:
             return LOADED_RECIPE_RESULT.format(folder=ref.folder)
+        marks.metadata = __metadata__
 
         exists, files, skipped = await self._read_recipe_folder(ref, __user__)
         if not exists:
@@ -460,6 +480,10 @@ class RecipeTools:
         if isinstance(__metadata__, dict):
             __metadata__[RECIPES_LOADED_KEY] |= marks.folders
             __metadata__[RECIPE_PARTS_DONE_KEY].update(marks.keys)
+        for md_path, mtime, size in marks.seen:
+            await sb.file_state_put(
+                __metadata__, __user__, md_path, mtime, size, "recipe"
+            )
         # カードに見せる木 (モデルには渡らない)。中の実行の表示は外しているので、ここで見せる
         from nucllei.utils.tool_output import set_chain
 
@@ -493,6 +517,8 @@ class RecipeTools:
             marks.broken = broken
             return None
         marks.folders.add(ref.folder)
+        stamp = getattr(files, "stamps", {}).get(RECIPE_MD, (None, None))
+        marks.seen.append((f"{ref.folder}/{RECIPE_MD}", *stamp))
         text = decode_text(files[RECIPE_MD])[0]
         fm, _ = read_frontmatter(text)
         items = recipe_items(text, ref.folder)
@@ -529,7 +555,7 @@ class RecipeTools:
                     )
                 )
                 continue
-            body, ok, note = await self._run_part(item, user)
+            body, ok, note = await self._run_part(item, user, marks.metadata)
             node["children"].append(
                 _chain_node(item, "ok", output=body)
                 if ok
@@ -678,7 +704,9 @@ class RecipeTools:
             + [_Section("</recipe-part>")]
         )
 
-    async def _run_part(self, item, user: dict) -> tuple[str, bool, str]:
+    async def _run_part(
+        self, item, user: dict, metadata: Optional[dict] = None
+    ) -> tuple[str, bool, str]:
         """read / shell / python を中で実行する。(結果の文, 実行できたか, 切ったときの続きの取り方)。
         失敗 (ToolError) はその位置のエラー 1 行で、他の要素は続ける。中の tool の表示・失敗の旗は
         load_recipe の結果に混ぜない (sink を外して呼ぶ)。"""
@@ -688,7 +716,9 @@ class RecipeTools:
         token = current_sink.set(None)
         try:
             if item.kind == "read":
-                res = await self._sb_tools().read_file(item.ref_path, __user__=user)
+                res = await self._sb_tools().read_file(
+                    item.ref_path, __user__=user, __metadata__=metadata
+                )
                 text = getattr(res, "text", res)
                 note = f"続きは read_file({item.ref_path!r}, offset=…) で読む"
             else:
@@ -871,7 +901,8 @@ class RecipeTools:
                 trashed = await self._trash(
                     md_target, ext, __user__, md_abs, name=f"{ref.name}.{RECIPE_MD}"
                 )
-            await self._write_bytes(md_abs, md_target, ext, data, __user__)
+            res_md = await self._write_bytes(md_abs, md_target, ext, data, __user__)
+            await self._record_written(__metadata__, __user__, md_abs, res_md)
         else:
             if dest_exists:
                 _, folder_target, _ = self._ws_or_ext(ref, "")
@@ -882,9 +913,11 @@ class RecipeTools:
             try:
                 for rel in sorted(r for r in files if r != RECIPE_MD):
                     a, t, e = self._ws_or_ext(ref, rel)
-                    await self._write_bytes(a, t, e, files[rel], __user__)
+                    res_part = await self._write_bytes(a, t, e, files[rel], __user__)
                     written.append(rel)
-                await self._write_bytes(md_abs, md_target, ext, data, __user__)
+                    await self._record_written(__metadata__, __user__, a, res_part)
+                res_md = await self._write_bytes(md_abs, md_target, ext, data, __user__)
+                await self._record_written(__metadata__, __user__, md_abs, res_md)
             except Exception:
                 if written:
                     log.error(
@@ -1055,8 +1088,9 @@ class RecipeTools:
         entries = {rel: "file" for rel in checked if "/" not in rel}
         entries.update({rel: w for rel, w in skipped.items() if "/" not in rel})
         warns = await reference_warnings_for(__user__, ref.folder, edited, entries)
-        # 読んでから書くまでの間の他の書き込みは検出しない (edit_file と同じ割り切り)
-        await self._write_bytes(md_abs, md_target, ext, out, __user__)
+        # 読んでから書くまでの間の他の書き込みは検出しない (直すのは一致した 1 か所だけ)
+        res_md = await self._write_bytes(md_abs, md_target, ext, out, __user__)
+        await self._record_written(__metadata__, __user__, md_abs, res_md)
 
         first = replaced.count("\n", 0, pos) + 1
         touched = new_text[:-1] if new_text.endswith("\n") else new_text
