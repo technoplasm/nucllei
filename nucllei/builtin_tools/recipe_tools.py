@@ -3,8 +3,9 @@
 有効化はモデル (preset) の能力「レシピ」(`meta.features.recipes`、既定 ON): ON かつ sandbox のある
 配備 (SANDBOX_URL) なら、middleware が `build_recipe_tools` で 3 つを合成して tools に差し込む (load_skill
 と同じ流儀。builtin_sandbox / toolIds の有無に依らない — ツール選択の一覧には出ない)。見えるレシピの一覧は load_recipe の説明に入る (skill の
-manifest と同じ)。preset の system prompt に {{USER_RECIPES}} があれば一覧はそちらに入り、説明には
-1 文 (RECIPE_INDEX_IN_PROMPT) だけ置く。sandbox への HTTP・書き先の解決・read_file / run_shell は、
+manifest と同じ)。preset の会話の前置き (params.context) に {{USER_RECIPES}} があれば一覧は会話の最初の
+発言の先頭に入り、説明には 1 文 (RECIPE_INDEX_IN_PROMPT) だけ置く。サブエージェントの子ターン
+(agent_session) は一覧を説明に入れる。sandbox への HTTP・書き先の解決・read_file / run_shell は、
 中に持つ `sandbox.Tools` のインスタンスから借りる (valve は builtin_sandbox の保存値)。判定は
 `utils/recipes.py`、一覧と「壊れている」の材料集めは `utils/recipe_index.py`。
 
@@ -1169,7 +1170,7 @@ def _recipe_sandbox_error(e: Exception, folder: str):
 # ---------------------------------------------------------------------------
 RECIPE_TOOL_ID = "recipes"
 # 一覧を system prompt の {{USER_RECIPES}} に入れたとき、load_recipe の説明に代わりに置く 1 文
-RECIPE_INDEX_IN_PROMPT = "見えるレシピの一覧は system prompt の「見えるレシピ (`…` の中を path にそのまま渡す。…)」にある。"
+RECIPE_INDEX_IN_PROMPT = "見えるレシピの一覧は会話の最初の発言の先頭 (途中で変わったら更新の枠) の「見えるレシピ (`…` の中を path にそのまま渡す。…)」にある。"
 
 
 def recipe_index_description(base: str, index_text: str) -> str:
@@ -1185,12 +1186,12 @@ async def build_recipe_tools(
     """能力「レシピ」(`meta.features.recipes`、既定 ON) の tool を合成する。
 
     OFF・sandbox の無い配備 (SANDBOX_URL 未設定)・user 不明なら {} (sandbox に聞かない)。
-    ON なら見えるレシピの一覧を 1 回取る (`get_user_recipes` — sandbox 2 往復 + DB 1 回。リクエストの
-    間は持ち回り、system prompt の {{USER_RECIPES}} も同じものを使う)。preset の system prompt に
-    {{USER_RECIPES}} があれば (`listing_in_prompt`) 一覧は system prompt に入るので、load_recipe の
-    説明には 1 文 (RECIPE_INDEX_IN_PROMPT) だけ置く — tool の宣言は chat template で system より前に
-    出るので、利用者ごとに変わる一覧を説明に入れると prefix cache が利用者をまたげない。
-    無ければ説明の末尾に一覧 (書き忘れた preset で消えないように)。
+    preset の会話の前置き (params.context) に {{USER_RECIPES}} があれば (`listing_in_prompt`) 一覧は
+    会話の最初の発言の先頭に入るので、load_recipe の説明には 1 文 (RECIPE_INDEX_IN_PROMPT) だけ置き、
+    sandbox には聞かない — tool の宣言は chat template で system より前に出るので、利用者ごとに変わる
+    一覧を説明に入れると prefix cache が利用者をまたげない。無ければ見えるレシピの一覧を取り
+    (`get_user_recipes` — sandbox 2 往復 + DB 1 回。リクエストの間は持ち回り)、説明の末尾に入れる
+    (書き忘れた preset で消えないように)。サブエージェントの子ターン (agent_session) は一覧を説明に入れる。
     戻り値は get_tools と同じ形のエントリ (tool_id は RECIPE_TOOL_ID、3 つで 1 レーン = 応答順に
     1 本ずつ)。extra_params は tools_extra_params (`__user__` `__metadata__` `__messages__` を関数の
     引数に当てる)。
@@ -1211,7 +1212,7 @@ async def build_recipe_tools(
     uid = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
     if not uid:
         return {}
-    index_text = await get_user_recipes(user)
+    index_text = None if listing_in_prompt else await get_user_recipes(user)
     instance = RecipeTools()
     specs = {spec["name"]: spec for spec in get_tool_specs(instance)}
     entries = {}
