@@ -4,6 +4,11 @@
 	import { onMount, tick, getContext, onDestroy } from 'svelte';
 
 	import { blobToFile } from '$lib/utils';
+	import {
+		loadSpeechVoices,
+		NO_LOCAL_VOICE_MESSAGE,
+		pickLocalVoice
+	} from '$lib/utils/speech-synthesis';
 	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
 
 	import { toast } from 'svelte-sonner';
@@ -383,41 +388,44 @@
 	let finishedMessages: Record<string, boolean> = {};
 	let currentMessageId: string | null = null;
 	let currentUtterance: SpeechSynthesisUtterance | null = null;
+	// 端末内の声が無いことの通知は通話ごとに 1 回(文ごとに出さない)
+	let noLocalVoiceNotified = false;
 
-	const speakSpeechSynthesisHandler = (content: string) => {
-		if ($showCallOverlay) {
-			return new Promise((resolve) => {
-				let voices: SpeechSynthesisVoice[] = [];
-				const getVoicesLoop = setInterval(async () => {
-					voices = await speechSynthesis.getVoices();
-					if (voices.length > 0) {
-						clearInterval(getVoicesLoop);
-
-						const voice =
-							voices
-								?.filter(
-									(v) => v.voiceURI === ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
-								)
-								?.at(0) ?? undefined;
-
-						currentUtterance = new SpeechSynthesisUtterance(content);
-						currentUtterance.rate = $settings.audio?.tts?.playbackRate ?? 1;
-
-						if (voice) {
-							currentUtterance.voice = voice;
-						}
-
-						speechSynthesis.speak(currentUtterance);
-						currentUtterance.onend = async (e) => {
-							await new Promise((r) => setTimeout(r, 200));
-							resolve(e);
-						};
-					}
-				}, 100);
-			});
-		} else {
-			return Promise.resolve();
+	// ブラウザ内蔵 speechSynthesis。表示言語の端末内の声だけで読む(無ければ読まない —
+	// ブラウザ任せにするとクラウド合成の声や別言語の声で読まれる)
+	const speakSpeechSynthesisHandler = async (content: string) => {
+		if (!$showCallOverlay) {
+			return;
 		}
+
+		const lang = $i18n.language || 'en-US';
+		const voice = pickLocalVoice(
+			await loadSpeechVoices(),
+			lang,
+			$settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice
+		);
+		if (!voice) {
+			if (!noLocalVoiceNotified) {
+				noLocalVoiceNotified = true;
+				toast.error($i18n.t(NO_LOCAL_VOICE_MESSAGE));
+			}
+			return;
+		}
+
+		await new Promise((resolve) => {
+			currentUtterance = new SpeechSynthesisUtterance(content);
+			currentUtterance.lang = lang;
+			currentUtterance.voice = voice;
+			currentUtterance.rate = $settings.audio?.tts?.playbackRate ?? 1;
+
+			currentUtterance.onend = async (e) => {
+				await new Promise((r) => setTimeout(r, 200));
+				resolve(e);
+			};
+			currentUtterance.onerror = (e) => resolve(e);
+
+			speechSynthesis.speak(currentUtterance);
+		});
 	};
 
 	const playAudio = (audio: HTMLAudioElement) => {

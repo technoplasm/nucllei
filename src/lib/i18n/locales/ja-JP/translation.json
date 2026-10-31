@@ -777,6 +777,7 @@
 	"This action cannot be undone. Do you wish to continue?": "この操作は元に戻せません。続行しますか？",
 	"This cannot be undone.": "元に戻せません。",
 	"This chat has been deleted": "このチャットは削除されています",
+	"This device has no on-device voice for the display language, so the response cannot be read aloud.": "この端末には、表示言語で読み上げられる端末内の音声がないため、読み上げできません。",
 	"This file has been deleted": "このファイルは削除されています",
 	"This file has not been extracted to text yet.": "このファイルはまだテキスト抽出されていません。",
 	"This file is not plain text (UTF-8). Download it instead.": "このファイルは平文(UTF-8)ではありません。ダウンロードしてください。",

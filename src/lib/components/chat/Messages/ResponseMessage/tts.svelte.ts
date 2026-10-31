@@ -4,7 +4,8 @@
  * MessageActions の Read Aloud ボタンが唯一の利用者。UI から切り離した
  * runes クラス(.svelte.ts)で、`speaking` / `loadingSpeech` だけを公開する。
  * エンジン分岐は元実装のまま:
- * - config.audio.tts.engine === '' → ブラウザ speechSynthesis
+ * - config.audio.tts.engine === '' → ブラウザ speechSynthesis(表示言語の端末内の声だけ。
+ *   無ければ読まずにエラー — utils/speech-synthesis.ts)
  * - それ以外 → backend の OpenAI 互換 TTS(synthesizeOpenAISpeech)
  */
 import { get } from 'svelte/store';
@@ -13,6 +14,12 @@ import { toast } from 'svelte-sonner';
 import { config, settings } from '$lib/stores';
 import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 import { getMessageContentParts } from '$lib/utils';
+import i18n from '$lib/i18n';
+import {
+	loadSpeechVoices,
+	NO_LOCAL_VOICE_MESSAGE,
+	pickLocalVoice
+} from '$lib/utils/speech-synthesis';
 
 export class MessageSpeech {
 	speaking = $state(false);
@@ -83,30 +90,36 @@ export class MessageSpeech {
 		const voice = currentSettings?.audio?.tts?.voice ?? currentConfig?.audio?.tts?.voice ?? '';
 
 		if ((currentConfig?.audio?.tts?.engine ?? '') === '') {
-			// ブラウザ内蔵 speechSynthesis。getVoices() が空で返る間はポーリングする
-			const getVoicesLoop = setInterval(() => {
-				const voices = speechSynthesis.getVoices();
-				if (voices.length > 0) {
-					clearInterval(getVoicesLoop);
+			// ブラウザ内蔵 speechSynthesis。表示言語の端末内の声が無ければ読まない
+			// (ブラウザ任せにするとクラウド合成の声や別言語の声で読まれる)
+			const lang = get(i18n).language || 'en-US';
+			const matched = pickLocalVoice(await loadSpeechVoices(), lang, voice);
+			if (!this.speaking) {
+				// 声の読み込みを待つ間に停止された
+				return;
+			}
+			if (!matched) {
+				toast.error(this.#t(NO_LOCAL_VOICE_MESSAGE));
+				this.speaking = false;
+				return;
+			}
 
-					const speak = new SpeechSynthesisUtterance(content);
-					speak.rate = currentSettings.audio?.tts?.playbackRate ?? 1;
+			const speak = new SpeechSynthesisUtterance(content);
+			speak.lang = lang;
+			speak.voice = matched;
+			speak.rate = currentSettings.audio?.tts?.playbackRate ?? 1;
 
-					speak.onend = () => {
-						this.speaking = false;
-						if (currentSettings.conversationMode) {
-							document.getElementById('voice-input-button')?.click();
-						}
-					};
-
-					const matched = voices.find((v) => v.voiceURI === voice);
-					if (matched) {
-						speak.voice = matched;
-					}
-
-					speechSynthesis.speak(speak);
+			speak.onend = () => {
+				this.speaking = false;
+				if (currentSettings.conversationMode) {
+					document.getElementById('voice-input-button')?.click();
 				}
-			}, 100);
+			};
+			speak.onerror = () => {
+				this.speaking = false;
+			};
+
+			speechSynthesis.speak(speak);
 			return;
 		}
 

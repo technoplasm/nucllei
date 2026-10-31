@@ -10,6 +10,7 @@
 		getVoices as _getVoices
 	} from '$lib/apis/audio';
 	import { config } from '$lib/stores';
+	import { loadSpeechVoices } from '$lib/utils/speech-synthesis';
 
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
@@ -70,15 +71,10 @@
 
 	const getVoices = async () => {
 		if (TTS_ENGINE === '') {
-			const getVoicesLoop = setInterval(() => {
-				voices = speechSynthesis.getVoices();
-
-				// do your loop
-				if (voices.length > 0) {
-					clearInterval(getVoicesLoop);
-					voices.sort((a, b) => a.name.localeCompare(b.name, $i18n.resolvedLanguage));
-				}
-			}, 100);
+			// 読み上げで使うのは端末内で合成する声だけ(utils/speech-synthesis.ts)なので、一覧もそれに絞る
+			voices = (await loadSpeechVoices())
+				.filter((v) => v.localService)
+				.sort((a, b) => a.name.localeCompare(b.name, $i18n.resolvedLanguage));
 		} else {
 			const res = await _getVoices().catch((e) => {
 				toast.error(`${e}`);

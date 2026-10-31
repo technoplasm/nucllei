@@ -777,6 +777,7 @@
 	"This action cannot be undone. Do you wish to continue?": "此操作无法撤销。是否确认继续？",
 	"This cannot be undone.": "此操作无法撤销。",
 	"This chat has been deleted": "此对话已被删除",
+	"This device has no on-device voice for the display language, so the response cannot be read aloud.": "此设备没有与显示语言相符的本地语音，无法朗读回复。",
 	"This file has been deleted": "此文件已被删除",
 	"This file has not been extracted to text yet.": "此文件尚未提取为文本。",
 	"This file is not plain text (UTF-8). Download it instead.": "此文件不是纯文本(UTF-8)。请下载查看。",
