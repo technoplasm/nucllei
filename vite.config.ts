@@ -3,8 +3,6 @@ import { defineConfig } from 'vite';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { viteStaticCopy } from 'vite-plugin-static-copy';
-
 // llens(dev): dev フロントが叩く BE の origin。既定はローカル BE(:3000)。
 // BACKEND_ORIGIN で上書きすれば別ホストの BE を指せる。
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || 'http://localhost:3000';
@@ -54,18 +52,7 @@ const gitDescribe = () => {
 };
 
 export default defineConfig({
-	plugins: [
-		sveltekit(),
-		viteStaticCopy({
-			targets: [
-				{
-					src: 'node_modules/onnxruntime-web/dist/*.jsep.*',
-
-					dest: 'wasm'
-				}
-			]
-		})
-	],
+	plugins: [sveltekit()],
 	define: {
 		// llens(#30/#25): バージョンの真実源は git tag(例 v20260716-01)。
 		// 優先順: APP_VERSION env(docker build が焼き込む)→ git describe(dev / ローカルビルド。
@@ -123,9 +110,6 @@ export default defineConfig({
 				'**/ext/**'
 			]
 		}
-	},
-	worker: {
-		format: 'es'
 	},
 	test: {
 		// _links/ ・ ,始まりディレクトリはマシン固有 symlink(現行 llens 等)を含む。

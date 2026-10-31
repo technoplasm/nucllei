@@ -19,14 +19,13 @@
 
 ## フロントエンド依存(pnpm)
 
-- GPL/AGPL/SSPL/NC 系: **なし**
-- `LGPL-3.0-or-later`: `@img/sharp-libvips-linux-x64`(sharp の prebuilt libvips)のみ。
-  弱コピーレフトで、改変せず動的リンク相当の利用のため頒布可。
-  ビルド時依存(devDependencies 経由)であり配布バンドル(build/)には含まれない。
-- `LIL`(@sveltejs/svelte-virtual-list)= MIT 系の冗談表記(Lil License、許諾的)。
+確認日: 2026-10-31(`pnpm licenses list`、dev 依存込み)。
+
+- GPL/AGPL/SSPL/NC 系: **なし**。LGPL も**なし**。
 - `Unknown`(khroma)= リポジトリにライセンス表記なし(mermaid の依存)。
   実質 MIT として広く利用されているが表記欠落。要ウォッチ。
-- その他は MIT / Apache-2.0 / BSD / ISC / MPL-2.0 / CC0 等の許諾的ライセンス。
+- その他は MIT / Apache-2.0 / BSD / ISC / MPL-2.0 / CC0 / 0BSD / BlueOak-1.0.0 / OFL-1.1
+  (フォント)/ Python-2.0 / Unlicense 等の許諾的ライセンス。
 
 ## NC 期残存コードの確認 — **完了(リスク実質ゼロ)**
 

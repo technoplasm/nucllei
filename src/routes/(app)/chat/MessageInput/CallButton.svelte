@@ -1,12 +1,11 @@
 <script lang="ts">
 	// Call(音声通話オーバーレイ)開始ボタン(#70 C トラック: MessageInput.svelte 分割)。
-	// マイク権限の確認 → 必要なら Kokoro TTS worker 初期化 → オーバーレイ表示。
+	// マイク権限の確認 → オーバーレイ表示。
 	// 表示条件(callEnabled・STT/TTS enable・入力が空)は親の {#if} が持つ
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
-	import { settings, config, showCallOverlay, showControls, TTSWorker } from '$lib/stores';
-	import { KokoroWorker } from '$lib/workers/KokoroWorker';
+	import { config, showCallOverlay, showControls } from '$lib/stores';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
@@ -61,16 +60,6 @@
 					}
 
 					stream = null;
-
-					if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-						// If the user has not initialized the TTS worker, initialize it
-						if (!$TTSWorker) {
-							const worker = new KokoroWorker($settings.audio?.tts?.engineConfig?.dtype ?? 'fp32');
-							TTSWorker.set(worker);
-
-							await worker.init();
-						}
-					}
 
 					showCallOverlay.set(true);
 					showControls.set(true);

@@ -1,22 +1,14 @@
 # Allow native/build postinstall scripts for these deps (pnpm blocks them by
 # default). Required so vite/esbuild native binaries build.
 # 外した理由:
-# - sharp: @img/sharp-linux-x64 の prebuilt を使うため build script 不要
-#   (ソースビルドは node-gyp/libvips 必須で失敗する)
-# - onnxruntime-node: CPU 用 .so/.node は npm パッケージに同梱済み。
-#   postinstall は GPU(CUDA)用ライブラリの外部ダウンロードで air-gapped に不適
 # - core-js: postinstall は寄付案内の表示のみ
 allowBuilds:
   '@parcel/watcher': true
   core-js: false
   esbuild: true
-  onnxruntime-node: false
-  protobufjs: true
-  sharp: false
-  svelte-preprocess: true
 
 # The app imports several transitive packages directly (phantom deps that npm's
-# flat node_modules used to hoist, e.g. @codemirror/*, onnxruntime-web, lowlight,
+# flat node_modules used to hoist, e.g. @codemirror/*, lowlight,
 # @floating-ui/utils). Hoist everything to the root so pnpm resolves them like npm.
 shamefullyHoist: true
 
@@ -25,9 +17,7 @@ shamefullyHoist: true
 # - devalue (@sveltejs/kit / svelte, 親 ^5.8.1): GHSA-j22f-vq7h-c4qm / GHSA-mcm9-63f2-9j32 /
 #   GHSA-x5rw-q4pp-hg5g / GHSA-r9w8-h9r3-54w4 ほか (<=5.9.2)
 # - source-map-js (postcss ^1.2.1 / sass >=0.6.2 <2.0.0): GHSA-68fv-2mgg-jv7q (<1.2.2)
-# - tar (onnxruntime-node, 親 ^7.0.1): GHSA-r292-9mhp-454m (<=7.5.20)
 overrides:
   devalue: ^5.9.3
   dompurify: ^3.4.17
   source-map-js: ^1.2.2
-  tar: ^7.5.21

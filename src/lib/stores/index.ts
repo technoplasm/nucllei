@@ -1,7 +1,6 @@
 import { type Writable, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
-import type { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 // Backend
 // 配備層のブランド名。/api/config の name(WEBUI_NAME env、既定 Nucllei)で上書きされる
@@ -21,8 +20,6 @@ export const MODEL_DOWNLOAD_POOL = writable<Record<string, any>>({});
 export const mobile = writable(false);
 
 export const theme = writable('system');
-
-export const TTSWorker: Writable<KokoroWorker | null> = writable(null);
 
 export const chatId = writable('');
 export const chatTitle = writable('');
@@ -188,14 +185,10 @@ type AudioSettings = {
 		engine?: string;
 	};
 	tts?: {
-		engine?: string;
 		voice?: string;
 		defaultVoice?: string;
 		playbackRate?: number;
 		nonLocalVoices?: boolean;
-		engineConfig?: {
-			dtype?: string;
-		};
 	};
 };
 

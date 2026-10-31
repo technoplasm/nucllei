@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { config, models, settings, showCallOverlay, TTSWorker } from '$lib/stores';
+	import { config, models, settings, showCallOverlay } from '$lib/stores';
 	import { DEFAULT_MODEL_IMAGE_URL } from '$lib/constants';
 	import { onMount, tick, getContext, onDestroy } from 'svelte';
 
@@ -478,21 +478,7 @@
 	const fetchAudio = async (content: string) => {
 		if (!audioCache.has(content)) {
 			try {
-				if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-					const blob = await $TTSWorker
-						?.generate({
-							text: content,
-							voice: $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice ?? ''
-						})
-						.catch((error) => {
-							console.error(error);
-							toast.error(`${error}`);
-						});
-
-					if (blob) {
-						audioCache.set(content, new Audio(blob));
-					}
-				} else if (($config?.audio?.tts?.engine ?? '') !== '') {
+				if (($config?.audio?.tts?.engine ?? '') !== '') {
 					const res = await synthesizeOpenAISpeech(
 						$settings?.audio?.tts?.defaultVoice === $config?.audio?.tts?.voice
 							? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)

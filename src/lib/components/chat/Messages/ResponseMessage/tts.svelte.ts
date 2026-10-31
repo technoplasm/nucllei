@@ -5,16 +5,14 @@
  * runes クラス(.svelte.ts)で、`speaking` / `loadingSpeech` だけを公開する。
  * エンジン分岐は元実装のまま:
  * - config.audio.tts.engine === '' → ブラウザ speechSynthesis
- * - settings.audio.tts.engine === 'browser-kokoro' → KokoroWorker(WASM)
  * - それ以外 → backend の OpenAI 互換 TTS(synthesizeOpenAISpeech)
  */
 import { get } from 'svelte/store';
 import { toast } from 'svelte-sonner';
 
-import { config, settings, TTSWorker } from '$lib/stores';
+import { config, settings } from '$lib/stores';
 import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 import { getMessageContentParts } from '$lib/utils';
-import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 export class MessageSpeech {
 	speaking = $state(false);
@@ -146,43 +144,23 @@ export class MessageSpeech {
 		// 直前パートの再生完了に次パートをチェーンする(合成と再生のパイプライン化)
 		let lastPlayedAudioPromise = Promise.resolve();
 
-		if (currentSettings.audio?.tts?.engine === 'browser-kokoro') {
-			if (!get(TTSWorker)) {
-				TTSWorker.set(new KokoroWorker(currentSettings.audio?.tts?.engineConfig?.dtype ?? 'fp32'));
-				await get(TTSWorker)?.init();
-			}
+		for (const [idx, sentence] of messageContentParts.entries()) {
+			const res = await synthesizeOpenAISpeech(
+				currentSettings?.audio?.tts?.defaultVoice === currentConfig?.audio?.tts?.voice
+					? voice
+					: (currentConfig?.audio?.tts?.voice ?? ''),
+				sentence
+			).catch(onError);
 
-			for (const [idx, sentence] of messageContentParts.entries()) {
-				const blobUrl = await get(TTSWorker)?.generate({ text: sentence, voice }).catch(onError);
+			if (res) {
+				const blob = await res.blob();
+				const blobUrl = URL.createObjectURL(blob);
+				const audio = new Audio(blobUrl);
+				audio.playbackRate = currentSettings.audio?.tts?.playbackRate ?? 1;
 
-				if (blobUrl) {
-					const audio = new Audio(blobUrl);
-					audio.playbackRate = currentSettings.audio?.tts?.playbackRate ?? 1;
-
-					this.#audioParts[idx] = audio;
-					this.loadingSpeech = false;
-					lastPlayedAudioPromise = lastPlayedAudioPromise.then(() => this.#playAudio(idx));
-				}
-			}
-		} else {
-			for (const [idx, sentence] of messageContentParts.entries()) {
-				const res = await synthesizeOpenAISpeech(
-					currentSettings?.audio?.tts?.defaultVoice === currentConfig?.audio?.tts?.voice
-						? voice
-						: (currentConfig?.audio?.tts?.voice ?? ''),
-					sentence
-				).catch(onError);
-
-				if (res) {
-					const blob = await res.blob();
-					const blobUrl = URL.createObjectURL(blob);
-					const audio = new Audio(blobUrl);
-					audio.playbackRate = currentSettings.audio?.tts?.playbackRate ?? 1;
-
-					this.#audioParts[idx] = audio;
-					this.loadingSpeech = false;
-					lastPlayedAudioPromise = lastPlayedAudioPromise.then(() => this.#playAudio(idx));
-				}
+				this.#audioParts[idx] = audio;
+				this.loadingSpeech = false;
+				lastPlayedAudioPromise = lastPlayedAudioPromise.then(() => this.#playAudio(idx));
 			}
 		}
 	}

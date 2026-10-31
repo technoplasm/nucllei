@@ -32,6 +32,7 @@
 		"@tailwindcss/postcss": "^4.0.0",
 		"@tailwindcss/typography": "^0.5.13",
 		"@types/markdown-it": "^14.1.2",
+		"@types/node": "^22.20.5",
 		"@types/sortablejs": "^1.15.9",
 		"@typescript-eslint/eslint-plugin": "^6.17.0",
 		"@typescript-eslint/parser": "^6.17.0",
@@ -62,7 +63,6 @@
 		"@fontsource-variable/jetbrains-mono": "^5.2.8",
 		"@fontsource-variable/m-plus-1-code": "^5.2.10",
 		"@fontsource-variable/noto-sans-jp": "^5.2.10",
-		"@huggingface/transformers": "^3.0.0",
 		"bits-ui": "^2.18.1",
 		"codemirror": "^6.0.1",
 		"codemirror-lang-elixir": "^4.0.0",
@@ -79,7 +79,6 @@
 		"i18next-resources-to-backend": "^1.2.0",
 		"jspdf": "^4.2.1",
 		"katex": "^0.16.21",
-		"kokoro-js": "^1.1.1",
 		"markdown-it": "^14.3.3",
 		"markdown-it-attrs": "^5.0.0",
 		"mermaid": "^11.16.1",
@@ -90,7 +89,6 @@
 		"svelte-sonner": "^0.3.19",
 		"tippy.js": "^6.3.7",
 		"uuid": "^11.1.1",
-		"vite-plugin-static-copy": "^2.2.0",
 		"yaml": "^2.7.1"
 	},
 	"engines": {
