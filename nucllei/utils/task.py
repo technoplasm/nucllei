@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import math
 import re
@@ -150,6 +151,9 @@ def user_prompt_params(user) -> dict:
 # では空。
 SKILLS_TOKEN = "{{SKILLS}}"
 USER_RECIPES_TOKEN = "{{USER_RECIPES}}"
+# 利用者の記憶の目次 (2026-10-31 ken「レシピが一覧で入るなら記憶も何かしら入るべき」— utils/memory_index)。
+# 能力「レシピ」に依らない (変数が system prompt にあるときだけ取る)。サブエージェントの子ターンでは空
+USER_MEMORY_INDEX_TOKEN = "{{USER_MEMORY_INDEX}}"
 
 # 変数ごとの「何で変わるか」(2026-10-30 ken「実際どのように展開されるかプレビューを」): system prompt の
 # プレビュー (utils/prompt_preview) が、prefix cache の観点でどこが利用者ごと・日時ごとかの印を付ける。
@@ -168,6 +172,7 @@ PROMPT_VARIABLE_SCOPES = {
     "{{USER_GROUPS}}": "user",
     SKILLS_TOKEN: "user",
     USER_RECIPES_TOKEN: "user",
+    USER_MEMORY_INDEX_TOKEN: "user",
     "{{BASE_MODEL_ID}}": "preset",
 }
 # レシピの一覧は sandbox に聞く (非同期) ので、同期の prompt_template は自分では取らない —
@@ -248,14 +253,75 @@ async def get_user_recipes(user) -> str:
     return text
 
 
-async def ensure_user_recipes(user, model, *templates) -> None:
-    """`templates` のどれかに {{USER_RECIPES}} があり、能力「レシピ」が ON なら一覧を取っておく
-    (このリクエストで取ってあれば何もしない)。無ければ sandbox に聞かない。"""
-    if not any(isinstance(t, str) and USER_RECIPES_TOKEN in t for t in templates):
+async def ensure_user_recipes(user, model, *templates, metadata=None) -> None:
+    """system prompt の展開の前に sandbox に聞く変数を取っておく (このリクエストで取ってあれば何もしない):
+    `templates` のどれかに {{USER_RECIPES}} があり能力「レシピ」が ON ならレシピの一覧、
+    {{USER_MEMORY_INDEX}} があれば記憶の目次 (サブエージェントの子ターン = metadata の agent_session では
+    取らない — 展開も空)。両方なら並べて聞く。無ければ sandbox に聞かない。"""
+    texts = [t for t in templates if isinstance(t, str)]
+    if not _user_id_of(user):
         return
-    if not _user_id_of(user) or not recipes_available(model):
-        return
-    await get_user_recipes(user)
+    fetches = []
+    if any(USER_RECIPES_TOKEN in t for t in texts) and recipes_available(model):
+        fetches.append(get_user_recipes(user))
+    if any(USER_MEMORY_INDEX_TOKEN in t for t in texts) and not (metadata or {}).get(
+        "agent_session"
+    ):
+        fetches.append(get_user_memory_index(user))
+    if fetches:
+        # 持ち回りの dict はここ (呼び手の context) で作っておく — gather は別の task で走らせるので、
+        # その中で ContextVar に set した dict は呼び手に戻らない
+        for var in (_user_recipes, _user_memory):
+            if var.get() is None:
+                var.set({})
+        await asyncio.gather(*fetches)
+
+
+# 記憶の目次 (ensure_user_recipes が先に取る — レシピの一覧と同じく 1 リクエスト 1 回)
+MEMORY_INDEX_NOT_FETCHED = "(記憶の目次はここでは取れない)"
+_user_memory: ContextVar[Optional[dict]] = ContextVar(
+    "nucllei_user_memory_index", default=None
+)
+
+
+def reset_prompt_fetches() -> None:
+    """このリクエストで取ったレシピの一覧・記憶の目次を捨てる (次の ensure_user_recipes で取り直す)。"""
+    _user_recipes.set(None)
+    _user_memory.set(None)
+
+
+async def get_user_memory_index(user) -> str:
+    """{{USER_MEMORY_INDEX}} の中身 (utils/memory_index)。このリクエストで取ってあればそれを。"""
+    uid = _user_id_of(user)
+    cache = _user_memory.get()
+    if cache is None:
+        cache = {}
+        _user_memory.set(cache)
+    hit = cache.get(uid)
+    if hit is not None and time.monotonic() - hit[0] < _USER_RECIPES_TTL_S:
+        return hit[1]
+    from nucllei.utils.memory_index import user_memory_index_text
+
+    text = await user_memory_index_text(user)
+    cache[uid] = (time.monotonic(), text)
+    return text
+
+
+def _user_memory_block(user_id: Optional[str], agent_session: bool) -> str:
+    if agent_session or not user_id:
+        return ""
+    hit = (_user_memory.get() or {}).get(user_id)
+    if hit is None or time.monotonic() - hit[0] >= _USER_RECIPES_TTL_S:
+        from nucllei.utils.memory_index import memory_index_path
+        from nucllei.env import SANDBOX_URL
+
+        if not SANDBOX_URL or not memory_index_path():
+            return ""
+        log.warning(
+            "{{USER_MEMORY_INDEX}} を先に取っていない経路で展開した (ensure_user_recipes の呼び漏れ)"
+        )
+        return MEMORY_INDEX_NOT_FETCHED
+    return hit[1]
 
 
 def _user_recipes_block(model, user_id: Optional[str]) -> str:
@@ -284,6 +350,7 @@ def prompt_template(
     user_role: Optional[str] = None,
     user_id: Optional[str] = None,
     model=None,
+    agent_session: bool = False,
 ) -> str:
     """サーバー既知のプロンプト変数を展開する(変数の一覧はここが単一情報源)。
 
@@ -294,7 +361,27 @@ def prompt_template(
     load_skill の説明に入れていたものと同じ。能力「スキル」OFF・0 件・model 無しなら空)。
     {{USER_RECIPES}} は見えるレシピの一覧 (見出し + 行頭の印付きの行。0 件はその 1 文。能力「レシピ」
     OFF・sandbox 無し・model 無しなら空) で、非同期の入口が先に取ったものを入れる。
+    {{USER_MEMORY_INDEX}} は利用者の記憶の目次 (utils/memory_index — 無ければ空。`agent_session` (サブエージェントの
+    子ターン) では空)。中身は利用者が書いたものなので最後に展開する (中の `{{…}}` を展開しない)。
     """
+    if USER_MEMORY_INDEX_TOKEN in template:
+        # 記憶の目次は利用者が書いたもの — 先に分けて残りを展開し、最後につなぐ (目次の中の {{…}} を展開
+        # しない・ほかの変数の値 (レシピの説明等) に書かれた {{USER_MEMORY_INDEX}} も展開しない)
+        block = _user_memory_block(user_id, agent_session)
+        return block.join(
+            prompt_template(
+                part,
+                user_name=user_name,
+                user_location=user_location,
+                base_model_id=base_model_id,
+                user_role=user_role,
+                user_id=user_id,
+                model=model,
+                agent_session=agent_session,
+            )
+            for part in template.split(USER_MEMORY_INDEX_TOKEN)
+        )
+
     # 今の日時。TZ はこのリクエストの利用者の TZ (ブラウザの {{CURRENT_TIMEZONE}})、無ければサーバの TZ
     current_date = datetime.now(_request_timezone.get())
 
@@ -350,7 +437,6 @@ def prompt_template(
         template = template.replace(
             USER_RECIPES_TOKEN, _user_recipes_block(model, user_id)
         )
-
     return template
 
 

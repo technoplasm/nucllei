@@ -63,9 +63,13 @@ def activate_skill(skill, user, model=None) -> str:
 
 
 def expand_skill_content(content: str, user, model=None) -> str:
-    """skill の本文の変数を展開する (activate_skill と skill のプレビュー — utils/prompt_preview が通る)。"""
+    """skill の本文の変数を展開する (activate_skill と skill のプレビュー — utils/prompt_preview が通る)。
+    {{USER_MEMORY_INDEX}} は system prompt 専用 — skill の本文では空 (先に取る経路が無く、子ターンでは親の
+    目次が入りうる)。"""
+    from nucllei.utils.task import USER_MEMORY_INDEX_TOKEN
+
     return prompt_template(
-        content,
+        content.replace(USER_MEMORY_INDEX_TOKEN, ""),
         **user_prompt_params(user),
         base_model_id=resolve_base_model_id(model),
         model=model,

@@ -617,7 +617,9 @@ async def process_chat_payload(
     set_request_timezone(metadata.get("variables"))
     messages = form_data.get("messages") or []
     if messages and messages[0].get("role") == "system":
-        await ensure_user_recipes(user, model, messages[0].get("content"))
+        await ensure_user_recipes(
+            user, model, messages[0].get("content"), metadata=metadata
+        )
         form_data["messages"] = expand_chat_system_message(
             messages, user, model, metadata.get("variables")
         )
@@ -899,6 +901,9 @@ async def process_chat_payload(
 
     # 能力の合成 tool (load_skill・レシピ)。プレビューと同じ関数 (build_capability_tools)
     preset_system = await asyncio.to_thread(preset_system_prompt, model)
+    # system prompt の変数で sandbox に聞くもの ({{USER_RECIPES}} と {{USER_MEMORY_INDEX}}) をここで並べて取る —
+    # build_recipe_tools はレシピの一覧を、routers の展開は両方を、この持ち回りから引く (直列に増やさない)
+    await ensure_user_recipes(user, model, preset_system, metadata=metadata)
     for name, entry in (
         await build_capability_tools(
             model,

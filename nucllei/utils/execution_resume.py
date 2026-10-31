@@ -56,6 +56,7 @@ from nucllei.utils.executions import (
 from nucllei.utils.image_refs import split_page, stored_ref_kind
 from nucllei.utils.task import (
     ensure_user_recipes,
+    reset_prompt_fetches,
     prompt_template,
     resolve_base_model_id,
     user_prompt_params,
@@ -830,7 +831,10 @@ async def _try_start_turn(chat, assistant_id: str, user, chain_count: int) -> No
     if model is None:
         raise _PermanentTurnFailure(f"model '{model_id}' is not resolvable")
 
-    # {{USER_RECIPES}} は sandbox に聞く (非同期) ので先に取る (能力「レシピ」が ON のときだけ)
+    # {{USER_RECIPES}} / {{USER_MEMORY_INDEX}} は sandbox に聞く (非同期) ので先に取る。続きターンは長く生きる
+    # task (配達のループ) から起きることがあるので、前のターンの持ち回りを使わない (直前に直した記憶が古いまま
+    # 入らないように)
+    reset_prompt_fetches()
     await ensure_user_recipes(
         user, model, ((chat_json.get("params") or {}).get("system"))
     )

@@ -42,7 +42,13 @@ def apply_model_system_prompt_to_body(
         template_params["base_model_id"] = model_info.base_model_id or model_info.id
 
     # {{SKILLS}} / {{USER_RECIPES}} の展開に preset (どの skill が載るか・能力「レシピ」) が要る
-    system = prompt_template(system, **template_params, model=model_info)
+    system = prompt_template(
+        system,
+        **template_params,
+        model=model_info,
+        # サブエージェントの子ターンでは {{USER_MEMORY_INDEX}} を空にする (子は記憶を読まない)
+        agent_session=bool((metadata or {}).get("agent_session")),
+    )
 
     form_data["messages"] = add_or_update_system_message(
         system, form_data.get("messages", [])

@@ -378,6 +378,13 @@ SANDBOX_URL = os.environ.get("SANDBOX_URL", "").strip()
 # 同名・同値を持ち合うこと。
 SANDBOX_TOKEN = os.environ.get("SANDBOX_TOKEN", "").strip()
 
+# system prompt の変数 {{USER_MEMORY_INDEX}} が入れる、利用者の記憶の目次のファイル (sandbox の `/workspace/…`。
+# 空・`/workspace/` の外は無効 = 変数は空)。既定は `/workspace/memory/MEMORY.md` (ken 2026-10-31 決定 — nucllei
+# 自身に記憶の決まりは無いので、置き場は設定で変えられる。utils/memory_index)
+USER_MEMORY_INDEX_PATH = os.environ.get(
+    "USER_MEMORY_INDEX_PATH", "/workspace/memory/MEMORY.md"
+).strip()
+
 # テキストの上限 (MB の整数、既定 1): write_file の本文の上限 (モデルが壊れて同じ出力を繰り返した
 # ときの歯止め — workspace quota を食い潰さない蓋)、edit_file で直すファイル (直す前と後) と、
 # ファイルブラウザのテキスト編集 (開く・保存) の上限。read_file は範囲読みなので使わない。旧名 `SANDBOX_WRITE_FILE_LIMIT_BYTES` は読まない

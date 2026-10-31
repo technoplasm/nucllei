@@ -719,7 +719,9 @@ async def generate_chat_completion(
         params = model_info.params.model_dump()
         payload = apply_model_params_to_body_openai(params, payload)
         # {{USER_RECIPES}} は sandbox に聞く (非同期) ので先に取る (このリクエストで取ってあれば聞かない)
-        await ensure_user_recipes(user, model_info, params.get("system"))
+        await ensure_user_recipes(
+            user, model_info, params.get("system"), metadata=metadata
+        )
         payload = apply_model_system_prompt_to_body(
             params, payload, metadata, user, model_info
         )
