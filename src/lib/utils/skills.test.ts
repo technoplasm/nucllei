@@ -61,6 +61,16 @@ describe('findSkillByCommand', () => {
 	it('行頭でない /command は null', () => {
 		expect(findSkillByCommand(skills, 'x /summarize')).toBeNull();
 	});
+
+	it('名前は空白までの全体 — 前方一致では当てない', () => {
+		const emr = [{ id: 'emr', name: 'EMR' }];
+		expect(findSkillByCommand(emr, '/emr')).toEqual(emr[0]);
+		expect(findSkillByCommand(emr, '/emr 抽出して')).toEqual(emr[0]);
+		expect(findSkillByCommand(emr, '/emr\n2 行目')).toEqual(emr[0]);
+		expect(findSkillByCommand(emr, '/emr抽出')).toBeNull();
+		expect(findSkillByCommand(emr, '/emr.x')).toBeNull();
+		expect(matchSkillCommand('/emr抽出 今月')).toBe('emr抽出');
+	});
 });
 
 describe('isToolReachableFromPreset: toolIds 直か、紐づけた skill の tool_ids 経由', () => {

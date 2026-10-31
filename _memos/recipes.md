@@ -129,8 +129,9 @@
   tool_calls ブロック、自動ロードの skill の後)。結果は本物の load_recipe をこのターンの tools_dict から
   execute_tool_calls で — 読める範囲・壊れている・警告・読み込み済み・カードの木は load_recipe のまま
   (権限の判定を 2 か所に書かない)。
-  - 名前の規則: skill が先 (`/name` で発火する skill = `skills.command_skill`。skill の `/command` は行頭の
-    `[A-Za-z0-9_-]+` なので `/foo.bar` は skill foo) → レシピは狭い置き場 (個人 → グループ名の順 → 全体)。
+  - 名前の規則: 名前は `/` から空白・行末までの全体 (`skills.command_name`)。skill が先 — 名前全体が発火する
+    skill の id と一致するときだけ (`skills.command_skill`。前方一致では当てない: `/emr抽出` はレシピ「emr抽出」、
+    `/emr`・`/emr 抽出して` は skill emr) → レシピは狭い置き場 (個人 → グループ名の順 → 全体)。
     勝った物が壊れていれば何も呼ばない (広い置き場に回すと、自分の上書きのつもりが黙って共有の物になる)。
     名前は空白までの 1 語 — 空白のある名前は `/` では呼べない (補完に理由付きで灰色)。
   - 候補は一覧 (`recipe_index.user_recipe_listing`) と同じ。load_recipe は管理者なら所属していない

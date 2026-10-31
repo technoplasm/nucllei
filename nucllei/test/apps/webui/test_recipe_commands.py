@@ -167,6 +167,9 @@ def test_command_token():
     assert command_token("/") is None
     assert command_token("/ 集計") is None
     assert command_token(None) is None
+    # 名前は空白・行末までの全体 (ASCII で切らない)
+    assert command_token("/emr抽出 今月") == "emr抽出"
+    assert command_token("/emr 抽出して") == "emr"
 
 
 def _r(name, place, group="", broken=()):
@@ -412,16 +415,43 @@ class TestRecipeCommand(AbstractPostgresTest):
         assert _calls(form_data2["messages"], "load_recipe") == []
         assert not metadata2.get("skill_activations")
 
-    def test_skill_prefix_match_shadows_recipe(self, sbx):
-        """`/foo.bar` は skill foo を発火させる (skill の `/command` は行頭の英数字・_・- の並び) —
-        レシピ foo.bar は呼ばない。"""
-        _put(sbx["ws"], "foo.bar", _md())
+    def test_skill_wins_only_on_the_whole_name(self, sbx):
+        """skill が勝つのは名前全体が id と一致するときだけ: `/emr抽出` はレシピ「emr抽出」、`/emr` と
+        `/emr 抽出して` は skill emr (同じ名前のレシピ emr があっても)。"""
+        _put(sbx["ws"], "emr抽出", _md(body="emr抽出の本文\n"))
+        _put(sbx["ws"], "emr", _md())
+        self._skill("emr")
+        form_data, metadata = self._payload(
+            [{"role": "user", "content": "/emr抽出 今月分"}], _model("emr")
+        )
+        ((call_id, args),) = _calls(form_data["messages"], "load_recipe")
+        assert args == {"path": "/workspace/recipes/emr抽出"}
+        assert "emr抽出の本文" in _tool_content(form_data["messages"], call_id)
+        assert not metadata.get("skill_activations")
+        for text in ("/emr", "/emr 抽出して"):
+            form_data, metadata = self._payload(
+                [{"role": "user", "content": text}], _model("emr")
+            )
+            assert _calls(form_data["messages"], "load_recipe") == [], text
+            assert [a["id"] for a in metadata["skill_activations"]] == ["emr"], text
+            # 利用者の文は生のまま (残りがその発言)
+            assert text in json.dumps(form_data["messages"], ensure_ascii=False)
+
+    def test_name_with_punctuation_is_not_a_skill_prefix(self, sbx):
+        """`/foo.bar` の名前は `foo.bar` — skill foo は発火せず、レシピ foo.bar が呼ばれる
+        (どちらも無ければ普通の文)。"""
         self._skill("foo")
         form_data, metadata = self._payload(
             [{"role": "user", "content": "/foo.bar"}], _model("foo")
         )
         assert _calls(form_data["messages"], "load_recipe") == []
-        assert [a["id"] for a in metadata["skill_activations"]] == ["foo"]
+        assert not metadata.get("skill_activations")
+        _put(sbx["ws"], "foo.bar", _md())
+        form_data, metadata = self._payload(
+            [{"role": "user", "content": "/foo.bar"}], _model("foo")
+        )
+        assert len(_calls(form_data["messages"], "load_recipe")) == 1
+        assert not metadata.get("skill_activations")
 
     def test_recipe_fires_when_skill_not_invocable(self, sbx):
         """skill がこのモデルに紐づいていない・見えない・機能「スキル」OFF なら、レシピが呼ばれる。"""

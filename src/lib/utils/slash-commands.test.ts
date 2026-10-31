@@ -69,8 +69,9 @@ describe('commandSkillOf: /name で発火する skill', () => {
 		expect(commandSkillOf('summary', [skill('other')])).toBeNull();
 	});
 
-	it('skill の /command は英数字・_・- の並び — foo.bar は skill foo に当たる', () => {
-		expect(commandSkillOf('foo.bar', [skill('foo')])).toBe('foo');
+	it('名前全体が id と一致するときだけ(前方一致では当てない)', () => {
+		expect(commandSkillOf('foo.bar', [skill('foo')])).toBeNull();
+		expect(commandSkillOf('emr抽出', [skill('emr')])).toBeNull();
 		expect(commandSkillOf('集計', [skill('foo')])).toBeNull();
 	});
 });
@@ -162,10 +163,27 @@ describe('skill とレシピ: skill が先', () => {
 		).toEqual([['personal', '', 'summary', { kind: 'skill', skill: 'summary' }]]);
 	});
 
-	it('/foo.bar のレシピは skill foo に取られる', () => {
-		expect(blockedOf([recipe('foo.bar', 'personal')], [skill('foo')])).toEqual([
-			['personal', '', 'foo.bar', { kind: 'skill', skill: 'foo' }]
+	it('名前の先頭が skill の id でも、全体が一致しなければ灰色にしない(emr抽出 と skill emr)', () => {
+		expect(
+			blockedOf(
+				[recipe('emr抽出', 'personal'), recipe('foo.bar', 'public')],
+				[skill('emr'), skill('foo')]
+			)
+		).toEqual([
+			['personal', '', 'emr抽出', null],
+			['public', '', 'foo.bar', null]
 		]);
+	});
+
+	it('/emr抽出 はレシピ、/emr と /emr 抽出して は skill(送ったときに呼ばれるもの)', () => {
+		const recipes = [recipe('emr抽出', 'personal'), recipe('emr', 'personal')];
+		const skills = [skill('emr')];
+		expect(resolveRecipeCommand('/emr抽出', recipes, skills)?.name).toBe('emr抽出');
+		expect(resolveRecipeCommand('/emr抽出 今月分', recipes, skills)?.name).toBe('emr抽出');
+		expect(resolveRecipeCommand('/emr', recipes, skills)).toBeNull();
+		expect(resolveRecipeCommand('/emr 抽出して', recipes, skills)).toBeNull();
+		expect(commandSkillOf(commandToken('/emr 抽出して') ?? '', skills)).toBe('emr');
+		expect(commandSkillOf(commandToken('/emr') ?? '', skills)).toBe('emr');
 	});
 
 	it('このモデルで発火しない skill(一覧に無い)とは衝突しない', () => {

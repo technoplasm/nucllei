@@ -9,8 +9,9 @@ tools_dict の物を、モデルの call と同じ execute_tool_calls で) が�
 
 名前の決め方 (入力欄の補完 `src/lib/utils/slash-commands.ts` と同じ規則):
 
-- skill が先: `/name` で発火する skill (モデルに紐づく ∧ 見える ∧ 機能「スキル」ON) があれば skill
-  (utils/skills.command_skill)。同じ名前のレシピはどの置き場でも使われない
+- skill が先: name 全体が skill の id と一致し、その skill が発火する (モデルに紐づく ∧ 見える ∧ 機能
+  「スキル」ON) なら skill (utils/skills.command_skill)。同じ名前のレシピはどの置き場でも使われない。
+  前方一致では当てない (`/emr抽出` はレシピ「emr抽出」、`/emr` と `/emr 抽出して` は skill emr)
 - レシピ同士は狭い置き場が勝つ: 個人 → グループ (グループ名の順) → 全体
 - 勝った物が壊れていれば何も呼ばない (広い置き場の同じ名前のレシピに回さない)
 - 候補は見えるレシピの一覧 (recipe_index — 個人・所属グループ・全体。管理者でも所属分だけ)。
@@ -25,16 +26,17 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-import unicodedata
 from typing import Optional
 
-from nucllei.utils.skills import command_skill, command_skill_ids, message_text
+from nucllei.utils.skills import (
+    command_name,
+    command_skill,
+    command_skill_ids,
+    message_text,
+)
 
 log = logging.getLogger(__name__)
 
-# 先頭行の行頭の `/name`。名前は空白までの 1 語 (レシピのフォルダ名は `/` を含まない)
-RECIPE_COMMAND_PATTERN = re.compile(r"^/(\S+)")
 # 置き場の狭い順
 PLACE_ORDER = {"personal": 0, "group": 1, "public": 2}
 # 合成の呼び出しの id (モデル由来の call と衝突しない自前の形)
@@ -42,13 +44,8 @@ RECIPE_CALL_ID = "recipe:{idx}"
 
 
 def command_token(text) -> Optional[str]:
-    """`text` の先頭行の行頭の `/name` の name (NFC)。無ければ None。"""
-    if not isinstance(text, str):
-        return None
-    match = RECIPE_COMMAND_PATTERN.match(text.split("\n", 1)[0])
-    if not match:
-        return None
-    return unicodedata.normalize("NFC", match.group(1))
+    """`text` の先頭行の行頭の `/name` の name (`/` から空白・行末まで。NFC — skills.command_name)。"""
+    return command_name(text)
 
 
 def _field(recipe, key: str):

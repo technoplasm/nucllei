@@ -3273,7 +3273,10 @@ A skill fires only if all three hold: the model preset has skills enabled
 `meta.skillIds` ∧ the caller can read the skill. A `/command` that fails any
 condition passes through as plain text (no error).
 
-- **User path**: a message starting with `/<id>` (first line). The server injects,
+- **User path**: a message starting with `/<id>` (first line). The name runs from
+  `/` to the first whitespace or the end of the line and must equal the skill id
+  exactly — `/emr` and `/emr 抽出して` fire `emr`, `/emr抽出` and `/emr.x` do
+  not (they are other names: a recipe's, or plain text). The server injects,
   right after that message, an assistant `load_skill` call (call id
   `skill:<id>:<n>`) plus its tool result. **It fires once**: the same exchange is
   stored at the head of that turn's response as an ordinary tool block, so the
@@ -3737,9 +3740,10 @@ the real `load_recipe` of the turn, run like a model's call — the same read
 access, broken / warning / already-loaded handling and card. The rest of the
 message is the user's request.
 
-- **Which name wins.** A skill first: if `/<name>` fires a skill (§6.3 — the
-  skill's `/command` is the leading run of `[A-Za-z0-9_-]`, so `/foo.bar` fires
-  skill `foo`), no recipe is called. Between recipes the narrower place wins:
+- **Which name wins.** A skill first: if the whole `<name>` is the id of a skill
+  `/` fires (§6.3), no recipe is called — `/emr` and `/emr 抽出して` call skill
+  `emr`, `/emr抽出` calls recipe 「emr抽出」 (a skill id that is only a prefix does
+  not count). Between recipes the narrower place wins:
   personal, then groups (by group name), then everyone. If the winner is broken,
   nothing is called (the same-named recipe of a wider place is not used instead).
   A recipe whose name has whitespace cannot be called with `/`.

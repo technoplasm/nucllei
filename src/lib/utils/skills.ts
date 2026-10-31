@@ -2,12 +2,14 @@
 // サーバ(middleware)は全 user メッセージの「先頭行の行頭」だけを発火対象にするため、
 // フロントの picker 表示条件・ハイライト述語もこの正規表現に完全一致させる。
 // SKILL_COMMAND_PATTERN はサーバ側の同名定数と同一に保つこと(片方だけ変えない)。
-export const SKILL_COMMAND_PATTERN = /^\/([a-zA-Z0-9_-]+)/;
+// 名前は `/` から空白(か行末)までの全体で、skill の id・レシピの名前と完全一致で比べる
+// (`/emr抽出` の名前は `emr抽出` — skill `emr` には当たらない)。
+export const SKILL_COMMAND_PATTERN = /^\/(\S+)/;
 
 // llens(#43): skill の可読キーは id 一本(旧 command)。/command 一致 = id 一致。
 type SkillLike = { id: string };
 
-// text の先頭行の行頭がパターンに一致すれば command 文字列(= skill id、先頭 `/` なし)を返す。
+// text の先頭行の行頭の `/name` の name(先頭 `/` なし。NFC)を返す。サーバの command_name と同じ。
 // 先頭行以外・行頭以外の `/foo` は対象外(= サーバの素通しと一致)。
 export const matchSkillCommand = (text: string): string | null => {
 	if (!text) {
@@ -15,7 +17,7 @@ export const matchSkillCommand = (text: string): string | null => {
 	}
 	const firstLine = text.split('\n')[0];
 	const match = firstLine.match(SKILL_COMMAND_PATTERN);
-	return match ? match[1] : null;
+	return match ? match[1].normalize('NFC') : null;
 };
 
 // matchSkillCommand の結果が skillList(store の中身、null 許容)の id に

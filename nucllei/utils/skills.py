@@ -9,6 +9,7 @@ middleware(オーケストレーション)から issue #23 で分離した。設
 import json
 import logging
 import re
+import unicodedata
 
 from nucllei.env import SRC_LOG_LEVELS
 from nucllei.models.files import Files
@@ -36,8 +37,9 @@ LOADED_RESULT = (
 # 履歴の tool 往復にはならない(表示・ログで何の実行かを引くための名前)
 HOOK_CALL_ID = "skill:{skill_id}:{phase}:{n}"
 
-# 先頭行の行頭にある `/command` トークンを検出する正規表現(issue #35)。
-SKILL_COMMAND_PATTERN = re.compile(r"^/([a-zA-Z0-9_-]+)")
+# 先頭行の行頭の `/name`。名前は `/` から空白 (か行末) までの全体で、skill の id・レシピの名前と完全一致で
+# 比べる (`/emr抽出` の名前は `emr抽出` — skill `emr` には当たらない)。FE の src/lib/utils/skills.ts と同じ
+SKILL_COMMAND_PATTERN = re.compile(r"^/(\S+)")
 
 
 def is_skill_visible(skill, user) -> bool:
@@ -106,8 +108,8 @@ def apply_skill_command(form_data, user, model):
     ペイロード内の**全 user メッセージ**を毎リクエスト走査する。状態は会話そのもの
     — 発火した `/command` の往復は応答に残り、履歴として届く。
 
-    - 各 user メッセージの先頭行の行頭が `/([a-zA-Z0-9_-]+)` なら、その command で
-      read 可視な skill を lookup する。
+    - 各 user メッセージの先頭行の行頭の `/name` (`/` から空白・行末まで — command_name) の name 全体が
+      skill の id と一致すれば、その skill を lookup する (`/emr抽出` は skill emr に当たらない)。
     - ミス: 何もしない(通常テキストとして素通し。エラーにしない)。
     - 発火条件は AND(issue #42): 機能「スキル」がモデルで有効 ∧ その skill がモデルに
       紐づく(meta.skillIds)∧ ユーザーに read 可視。モデル設定を唯一の制御面にする
@@ -172,19 +174,30 @@ def message_text(message) -> str | None:
     return content if isinstance(content, str) else None
 
 
+def command_name(text) -> str | None:
+    """`text` の先頭行の行頭の `/name` の name (`/` から空白・行末まで。NFC)。無ければ None。"""
+    if not isinstance(text, str):
+        return None
+    match = SKILL_COMMAND_PATTERN.match(text.split("\n", 1)[0])
+    if not match:
+        return None
+    return unicodedata.normalize("NFC", match.group(1))
+
+
 def command_skill(text, user, model_skill_ids):
-    """`text` の先頭行の行頭の `/command` で発火する skill (無ければ None)。
+    """`text` の先頭行の行頭の `/name` で発火する skill (無ければ None)。name 全体が skill の id と
+    一致するときだけ (前方一致では当てない)。
 
     条件は AND: その skill がモデルに紐づく (`model_skill_ids` — 機能「スキル」が OFF なら空で渡す) ∧
     read 可視。`/` でレシピも呼べるが、同じ `/name` なら skill が先 — レシピの発火
     (utils/recipe_commands) もこれで「skill が使われる」を判定する。"""
-    if not isinstance(text, str) or not model_skill_ids:
+    if not model_skill_ids:
         return None
-    match = SKILL_COMMAND_PATTERN.match(text)
-    if not match:
+    name = command_name(text)
+    if name is None or name not in model_skill_ids:
         return None
     # llens(#43): skill の可読キーは id 一本(旧 command)。/command 一致 = id 一致。
-    skill = Skills.get_skill_by_id(match.group(1))
+    skill = Skills.get_skill_by_id(name)
     if (
         skill is None
         or skill.id not in model_skill_ids

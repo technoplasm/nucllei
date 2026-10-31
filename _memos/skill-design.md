@@ -99,8 +99,9 @@
 1. フロント: picker は補完のみ(`/command` トークンを挿入するだけ)。メッセージは生のまま送信。
    **有効な command だけハイライト**する(サーバと同一述語: 先頭行行頭 token ∈ read 可視 skill の
    command。無効は普通のテキスト表示 = サーバの素通しと見た目が一致)— frontend batch の要件
-2. middleware inlet: ペイロード内の**全 user メッセージ**について先頭行の行頭
-   `/([a-zA-Z0-9_-]+)` を検出 → read 可視な skill を command で lookup
+2. middleware inlet: ペイロード内の**全 user メッセージ**について先頭行の行頭の `/name`
+   (`/` から空白・行末までの全体 — `command_name`) を取り、name 全体が id と一致する read 可視な skill を
+   lookup (前方一致では当てない: `/emr抽出` は skill emr に当たらない)
    (毎リクエスト全走査 = 発火の会話持続。下記「発火の有効範囲」)
 3. ヒット: **load_skill を呼んだことにする**(2026-07-06 改訂 — トークン置換案を撤回)。
    user メッセージは生のまま残し、直後に合成の assistant tool_call(load_skill)+
@@ -415,8 +416,9 @@ before / after も毎回動く。
 
 - 入力欄の `/` はレシピも呼ぶ。補完は「個人のレシピ」「グループのレシピ」「全体のレシピ」「スキル」の順で、
   前方一致 → 部分一致に絞る。キーボードの上下は灰色の行を飛ばす。
-- **skill が先**: `/name` で発火する skill (`skills.command_skill` — 機能「スキル」ON ∧ skillIds ∧ 見える) が
-  あれば、同じ名前のレシピはどの置き場でも呼ばない (読み込み済みで skill が発火しないときも)。
+- **skill が先**: name 全体が発火する skill (`skills.command_skill` — 機能「スキル」ON ∧ skillIds ∧ 見える) の
+  id と一致すれば、同じ名前のレシピはどの置き場でも呼ばない (読み込み済みで skill が発火しないときも)。
+  名前の先頭が skill の id なだけ (`/emr抽出` と skill emr) では当てない。
   `apply_skill_command` と `utils/recipe_commands.apply_recipe_command` が同じ判定を通る。
 - 発火したレシピの load_recipe 往復は skill の発火と同じブロックで応答の先頭に残る
   (`middleware.activation_seed_blocks`)。詳細・名前の規則は `_memos/recipes.md`「`/name` で呼ぶ」。

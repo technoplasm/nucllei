@@ -1,6 +1,7 @@
 // 入力欄の `/` の補完(スキルとレシピ)。どれが使われるかの規則はサーバ(nucllei/utils/recipe_commands.py と
 // utils/skills.py の command_skill)と同じに保つこと(片方だけ変えない):
-// - skill が先: `/name` で発火する skill があれば、同じ名前のレシピはどの置き場でも使われない
+// - skill が先: name 全体が発火する skill の id と一致すれば、同じ名前のレシピはどの置き場でも使われない
+//   (前方一致では当てない — `/emr抽出` はレシピ「emr抽出」、`/emr` と `/emr 抽出して` は skill emr)
 // - レシピ同士は狭い置き場が勝つ: 個人 → グループ(グループ名の順)→ 全体。グループの順はサーバが返す一覧の順
 //   (GET /api/v1/recipes/ — サーバの precedence と同じ鍵で並べてある)をそのまま使う
 // - 勝ったレシピが壊れていれば何も呼ばない(広い置き場の同じ名前に回さない)
@@ -8,10 +9,7 @@
 // 使われない行も一覧には出し、灰色にして選べなくする(理由を添える)。
 
 import type { RecipeItem, RecipePlace } from '$lib/apis/recipes';
-import { SKILL_COMMAND_PATTERN } from './skills';
-
-// サーバの RECIPE_COMMAND_PATTERN と同じ(先頭行の行頭の `/` から空白まで)
-export const RECIPE_COMMAND_PATTERN = /^\/(\S+)/;
+import { matchSkillCommand } from './skills';
 
 const PLACE_ORDER: Record<RecipePlace, number> = { personal: 0, group: 1, public: 2 };
 
@@ -40,24 +38,14 @@ export type SlashSectionId = RecipePlace | 'skill';
 
 export type SlashSection = { id: SlashSectionId; entries: SlashEntry[] };
 
-// 先頭行の行頭の `/name` の name(NFC)。サーバの command_token と同じ。
-export const commandToken = (text: string | null | undefined): string | null => {
-	if (!text) {
-		return null;
-	}
-	const match = text.split('\n')[0].match(RECIPE_COMMAND_PATTERN);
-	return match ? match[1].normalize('NFC') : null;
-};
+// 先頭行の行頭の `/name` の name(`/` から空白・行末まで。NFC)。サーバの command_name と同じ。
+export const commandToken = (text: string | null | undefined): string | null =>
+	text ? matchSkillCommand(text) : null;
 
-// `/name` で発火する skill の id(無ければ null)。skill の `/command` は行頭の英数字・_・- の並びなので、
-// `/foo.bar` は skill foo に当たる。skills は選んでいるモデルで発火しうる skill。
-export const commandSkillOf = (name: string, skills: SlashSkill[]): string | null => {
-	const match = `/${name}`.match(SKILL_COMMAND_PATTERN);
-	if (!match) {
-		return null;
-	}
-	return skills.some((s) => s.id === match[1]) ? match[1] : null;
-};
+// `/name` で発火する skill の id(無ければ null)。name 全体が skill の id と一致するときだけ。
+// skills は選んでいるモデルで発火しうる skill。
+export const commandSkillOf = (name: string, skills: SlashSkill[]): string | null =>
+	skills.some((s) => s.id === name) ? name : null;
 
 // 置き場の狭い順。同じ置き場の中(グループ同士)は一覧の順のまま(サーバがグループ名の順に並べて返す —
 // 文字の比べ方を FE で書き直さない)
