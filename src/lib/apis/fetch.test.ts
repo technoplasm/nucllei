@@ -14,13 +14,13 @@
  * jsdom は依存に無いので(オフライン配備の repo に増やさない)、
  * モジュール読み込み前に必要なグローバルだけを差し込む。
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 
 type Listener = (...args: unknown[]) => void;
 
 let windowListeners: Record<string, Listener[]>;
 let documentListeners: Record<string, Listener[]>;
-let fetchMock: ReturnType<typeof vi.fn<Parameters<typeof fetch>, Promise<Response>>>;
+let fetchMock: Mock<typeof fetch>;
 // タブ間で共有される localStorage(同じブラウザの別タブ = 同じ Map)
 let localStore: Map<string, string>;
 
@@ -70,9 +70,7 @@ const loadModule = async ({ secondTab = false } = {}) => {
 
 	if (!secondTab) {
 		localStore = new Map();
-		fetchMock = vi.fn<Parameters<typeof fetch>, Promise<Response>>(
-			async () => new Response('{}', { status: 200 })
-		);
+		fetchMock = vi.fn<typeof fetch>(async () => new Response('{}', { status: 200 }));
 	}
 	vi.stubGlobal('localStorage', {
 		setItem: (k: string, v: string) => localStore.set(k, v),
