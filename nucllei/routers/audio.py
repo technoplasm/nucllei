@@ -29,8 +29,19 @@ from pydantic import BaseModel
 
 from nucllei.utils.auth import get_admin_user, get_verified_user
 from nucllei.config import (
+    AUDIO_STT_HALLUCINATION_FILTER,
+    AUDIO_STT_HALLUCINATION_PHRASES,
+    AUDIO_STT_REPEAT_MAX_UNIT_CHARS,
+    AUDIO_STT_REPEAT_MIN_COUNT,
+    WHISPER_COMPRESSION_RATIO_THRESHOLD,
+    WHISPER_CONDITION_ON_PREVIOUS_TEXT,
+    WHISPER_HALLUCINATION_SILENCE_THRESHOLD,
+    WHISPER_LOG_PROB_THRESHOLD,
     WHISPER_MODEL_AUTO_UPDATE,
     WHISPER_MODEL_DIR,
+    WHISPER_NO_SPEECH_THRESHOLD,
+    WHISPER_VAD_SPEECH_PAD_MS,
+    WHISPER_VAD_THRESHOLD,
 )
 
 from nucllei.constants import ERROR_MESSAGES
@@ -46,8 +57,52 @@ from nucllei.utils.audio import (
     SPEECH_CACHE_DIR,
     synthesize_speech,
 )
+from nucllei.utils.stt_filter import (
+    SttFilterOptions,
+    filter_segments,
+    filter_text,
+    parse_phrases,
+)
 
 router = APIRouter()
+
+# 幻聴対策の後処理の設定(config.py の WHISPER_* / AUDIO_STT_*。_memos/audio.md「幻聴対策」)
+STT_FILTER_OPTIONS = SttFilterOptions(
+    enabled=AUDIO_STT_HALLUCINATION_FILTER,
+    no_speech_threshold=WHISPER_NO_SPEECH_THRESHOLD,
+    log_prob_threshold=WHISPER_LOG_PROB_THRESHOLD,
+    compression_ratio_threshold=WHISPER_COMPRESSION_RATIO_THRESHOLD,
+    # 末尾の定型句の前の無音は、内蔵の hallucination_silence_threshold と同じ長さで見る
+    # (0 = 内蔵側を切っていても、後処理の判定には既定の 2 秒を使う)
+    silence_seconds=WHISPER_HALLUCINATION_SILENCE_THRESHOLD or 2.0,
+    phrases=parse_phrases(AUDIO_STT_HALLUCINATION_PHRASES),
+    repeat_min_count=AUDIO_STT_REPEAT_MIN_COUNT,
+    repeat_max_unit_chars=AUDIO_STT_REPEAT_MAX_UNIT_CHARS,
+)
+
+
+def whisper_transcribe_kwargs(beam_size: int) -> dict:
+    """内蔵 faster-whisper の transcribe に渡す幻聴対策込みのパラメータ。"""
+    kwargs = {
+        "beam_size": beam_size,
+        "condition_on_previous_text": WHISPER_CONDITION_ON_PREVIOUS_TEXT,
+        "no_speech_threshold": WHISPER_NO_SPEECH_THRESHOLD,
+        "log_prob_threshold": WHISPER_LOG_PROB_THRESHOLD,
+        "compression_ratio_threshold": WHISPER_COMPRESSION_RATIO_THRESHOLD,
+        # vad_filter が on のときだけ使われる
+        "vad_parameters": {
+            "threshold": WHISPER_VAD_THRESHOLD,
+            "speech_pad_ms": WHISPER_VAD_SPEECH_PAD_MS,
+        },
+    }
+    if WHISPER_HALLUCINATION_SILENCE_THRESHOLD > 0:
+        # hallucination_silence_threshold は単語の時刻で無音を測るので word_timestamps が要る
+        kwargs["word_timestamps"] = True
+        kwargs["hallucination_silence_threshold"] = (
+            WHISPER_HALLUCINATION_SILENCE_THRESHOLD
+        )
+    return kwargs
+
 
 # Constants
 MAX_FILE_SIZE_MB = 25
@@ -476,20 +531,24 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
             )
         segments, info = model.transcribe(
             file_path,
-            beam_size=request.app.state.WHISPER_BEAM_SIZE,
             vad_filter=request.app.state.config.WHISPER_VAD_FILTER,
             # llens: 言語固定(空なら従来通り自動判定)。北大運用は ja 固定
             language=request.app.state.config.WHISPER_LANGUAGE or None,
             # None = 渡さないのと同じ(faster-whisper の既定値)
             initial_prompt=prompt,
+            **whisper_transcribe_kwargs(request.app.state.WHISPER_BEAM_SIZE),
         )
         log.info(
             "Detected language '%s' with probability %f"
             % (info.language, info.language_probability)
         )
 
-        transcript = "".join([segment.text for segment in list(segments)])
-        data = {"text": transcript.strip()}
+        # 幻聴の区間(無音・物音から出た定型句、繰り返しループ)を落として組み立てる
+        data = {
+            "text": filter_segments(
+                list(segments), getattr(info, "duration", None), STT_FILTER_OPTIONS
+            )
+        }
 
         # save the transcript to a json file
         transcript_file = f"{file_dir}/{id}.json"
@@ -527,6 +586,9 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
 
             r.raise_for_status()
             data = r.json()
+            # テキストだけが返るので、定型句は転写全体がそれだけのときに限って落とす
+            if isinstance(data.get("text"), str):
+                data["text"] = filter_text(data["text"], STT_FILTER_OPTIONS)
 
             # save the transcript to a json file
             transcript_file = f"{file_dir}/{id}.json"
@@ -594,7 +656,7 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
                 raise Exception(
                     "Failed to parse Deepgram response - unexpected response format"
                 )
-            data = {"text": transcript.strip()}
+            data = {"text": filter_text(transcript.strip(), STT_FILTER_OPTIONS)}
 
             # Save transcript
             transcript_file = f"{file_dir}/{id}.json"
@@ -699,7 +761,7 @@ def transcribe(request: Request, file_path, prompt: str | None = None):
             if not transcript:
                 raise ValueError("Empty transcript in response")
 
-            data = {"text": transcript}
+            data = {"text": filter_text(transcript, STT_FILTER_OPTIONS)}
 
             # Save transcript to json file (consistent with other providers)
             transcript_file = f"{file_dir}/{id}.json"

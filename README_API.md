@@ -974,7 +974,9 @@ STT: `AUDIO_STT_ENGINE` (RC, `""` = bundled faster-whisper, always on `cpu` sinc
 `azure`). Whisper knobs: `WHISPER_MODEL` (`base`; a name or a local model path),
 `WHISPER_MODEL_DIR`, `WHISPER_LANGUAGE` (`""` = auto; set `ja` for Japanese-only
 sites), `WHISPER_COMPUTE_TYPE` (`int8`), `WHISPER_CPU_THREADS` (`0`),
-`WHISPER_NUM_WORKERS` (`1`), `WHISPER_VAD_FILTER` (`false`), `WHISPER_MODEL_AUTO_UPDATE`
+`WHISPER_NUM_WORKERS` (`1`), `WHISPER_VAD_FILTER` (`true`; Silero VAD drops
+non-speech before decoding — the main guard against hallucinations on silence,
+see below), `WHISPER_MODEL_AUTO_UPDATE`
 (env, `false`; `true` re-checks the hub for a newer model at load — forced off by
 `OFFLINE_MODE`). Engine-specific:
 `AUDIO_STT_OPENAI_API_BASE_URL/_KEY`, `AUDIO_STT_MODEL`, `DEEPGRAM_API_KEY`,
@@ -992,6 +994,32 @@ warning. Tune per site (microphone, room noise, CPU speed); background in
 | `AUDIO_STT_SILENCE_THRESHOLD_DB`   | env  | `-45`   | -90 – -10  | level below which input counts as silence (`AnalyserNode.minDecibels`). Depends on the microphone level: lower it for quiet input, raise it when room noise is never treated as silence |
 | `AUDIO_STT_RECORDING_BITRATE_KBPS` | env  | `32`    | 8 – 128    | bitrate of the full recording kept as an attachment (§4.4)                                                                                                                              |
 | `WHISPER_BEAM_SIZE`                | env  | `5`     | 1 – 10     | beam size of the bundled faster-whisper (ignored by external STT engines). Smaller = faster, less accurate                                                                              |
+
+Hallucination mitigation — env only, all on by default. Whisper writes text for
+silence and noise: video sign-offs ("ご視聴ありがとうございました", "Thank you for
+watching") and loops of a repeated word or number. The `WHISPER_*` rows are
+passed to the bundled faster-whisper (ignored by external engines). The
+`AUDIO_STT_*` rows post-process the text of every engine
+(`nucllei/utils/stt_filter.py`). A known phrase is removed only when it is the
+whole transcript, or, for the bundled engine, a segment of its own that runs
+past the end of the audio or ends the transcript after a pause; a phrase said as
+part of a sentence or in the middle of speech is kept. External engines return
+text only, so for them a phrase is removed only when it is the whole transcript.
+Measurements are in `_memos/audio.md` ("幻聴対策").
+
+| Var                                       | Kind | Default | Range       | Effect                                                                                                                                                                                            |
+| ----------------------------------------- | ---- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WHISPER_VAD_THRESHOLD`                   | env  | `0.5`   | 0.05 – 0.95 | speech probability above which the VAD (`WHISPER_VAD_FILTER`) keeps audio. Lower keeps quieter or shorter speech but lets more noise through to the decoder (more hallucinations)                 |
+| `WHISPER_VAD_SPEECH_PAD_MS`               | env  | `400`   | 0 – 2000    | audio kept before and after each speech region found by the VAD. Longer keeps short words at the edges (「はい、」) but also more of the surrounding noise                                        |
+| `WHISPER_CONDITION_ON_PREVIOUS_TEXT`      | env  | `false` | bool        | feed the previous 30 s window's text as context to the next. `true` carries a loop from one window into the next                                                                                  |
+| `WHISPER_HALLUCINATION_SILENCE_THRESHOLD` | env  | `2`     | 0 – 30      | seconds of silence around a suspicious segment after which faster-whisper skips it. Turns on `word_timestamps`. `0` = off                                                                         |
+| `WHISPER_NO_SPEECH_THRESHOLD`             | env  | `0.6`   | 0 – 1       | a segment with `no_speech_prob` above this and `avg_logprob` below `WHISPER_LOG_PROB_THRESHOLD` counts as silence (skipped by faster-whisper and dropped by the post-filter). `1` = never         |
+| `WHISPER_LOG_PROB_THRESHOLD`              | env  | `-1`    | -20 – 0     | average log probability below which a decode is retried at a higher temperature; also the second half of the silence test above                                                                   |
+| `WHISPER_COMPRESSION_RATIO_THRESHOLD`     | env  | `2.4`   | 1 – 10      | gzip compression ratio above which a decode is retried at a higher temperature; the post-filter drops a segment whose own text is still above it after collapsing repeats. `10` = effectively off |
+| `AUDIO_STT_HALLUCINATION_FILTER`          | env  | `true`  | bool        | the post-filter as a whole (phrases, repeats, per-segment drops). `false` = the engine's text as is                                                                                               |
+| `AUDIO_STT_HALLUCINATION_PHRASES`         | env  | (list)  | text        | phrases to remove, separated by `\|`. Unset = the built-in ja/en list; set but empty = remove no phrases. Matching ignores spaces, punctuation, case and full/half width                          |
+| `AUDIO_STT_REPEAT_MIN_COUNT`              | env  | `5`     | 0 – 100     | the same unit repeated this many times in a row is collapsed to one. Units of digits only (`1000000`) are never collapsed. `0` = off                                                              |
+| `AUDIO_STT_REPEAT_MAX_UNIT_CHARS`         | env  | `50`    | 1 – 200     | longest unit (in characters) the repeat collapse looks for                                                                                                                                        |
 
 TTS: `AUDIO_TTS_ENGINE` (RC, `""` = browser speech API; or `openai`, `azure`,
 `elevenlabs`). `AUDIO_TTS_OPENAI_API_BASE_URL` accepts any

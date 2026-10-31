@@ -1212,7 +1212,7 @@ WHISPER_MODEL_AUTO_UPDATE = (
 WHISPER_VAD_FILTER = RuntimeConfig(
     "WHISPER_VAD_FILTER",
     "audio.stt.whisper_vad_filter",
-    os.getenv("WHISPER_VAD_FILTER", "False").lower() == "true",
+    os.getenv("WHISPER_VAD_FILTER", "True").lower() == "true",
 )
 
 # llens 追加(issue #12 キャッチアップ、_memos/prod-config-snapshot.md):
@@ -1288,6 +1288,43 @@ AUDIO_STT_RECORDING_BITRATE_KBPS = env_number(
 )
 # 内蔵 faster-whisper の beam size(外部 STT エンジンには効かない)
 WHISPER_BEAM_SIZE = env_number("WHISPER_BEAM_SIZE", 5, 1, 10)
+
+# 無音・雑音からの幻聴(定型句・繰り返しループ)対策。env 専用で、既定は全部 on。
+# 実測と動かし方は _memos/audio.md「幻聴対策」。
+# 内蔵 faster-whisper の転写パラメータ(外部 STT エンジンには効かない):
+# - VAD_THRESHOLD / VAD_SPEECH_PAD_MS: VAD(WHISPER_VAD_FILTER)の発話判定のしきい値と、発話区間の
+#   前後に残す余白。既定は faster-whisper の既定値
+# - CONDITION_ON_PREVIOUS_TEXT: 前の窓の転写を次の窓の文脈にするか(ループが次の窓へ伝播する)
+# - HALLUCINATION_SILENCE_THRESHOLD: この秒数以上の無音に挟まれた怪しい区間を飛ばす
+#   (word_timestamps を伴う。0 = 使わない)
+# - NO_SPEECH / LOG_PROB / COMPRESSION_RATIO_THRESHOLD: Whisper の無音判定・温度フォールバックの
+#   しきい値。後処理(下)の区間の落としにも同じ値を使う
+WHISPER_VAD_THRESHOLD = env_number("WHISPER_VAD_THRESHOLD", 0.5, 0.05, 0.95)
+WHISPER_VAD_SPEECH_PAD_MS = env_number("WHISPER_VAD_SPEECH_PAD_MS", 400, 0, 2000)
+WHISPER_CONDITION_ON_PREVIOUS_TEXT = (
+    os.getenv("WHISPER_CONDITION_ON_PREVIOUS_TEXT", "false").lower() == "true"
+)
+WHISPER_HALLUCINATION_SILENCE_THRESHOLD = env_number(
+    "WHISPER_HALLUCINATION_SILENCE_THRESHOLD", 2.0, 0, 30
+)
+WHISPER_NO_SPEECH_THRESHOLD = env_number("WHISPER_NO_SPEECH_THRESHOLD", 0.6, 0, 1)
+WHISPER_LOG_PROB_THRESHOLD = env_number("WHISPER_LOG_PROB_THRESHOLD", -1.0, -20, 0)
+WHISPER_COMPRESSION_RATIO_THRESHOLD = env_number(
+    "WHISPER_COMPRESSION_RATIO_THRESHOLD", 2.4, 1, 10
+)
+# 転写結果の後処理(全エンジン。nucllei/utils/stt_filter.py):
+# - HALLUCINATION_FILTER: 後処理全体の on/off
+# - HALLUCINATION_PHRASES: 落とす定型句(`|` 区切り)。未設定 = 既定の ja/en 一覧、空 = 定型句は落とさない
+# - REPEAT_MIN_COUNT / REPEAT_MAX_UNIT_CHARS: 同じ単位(最大この文字数)がこの回数以上続いたら
+#   1 回に畳む(0 = 畳まない)
+AUDIO_STT_HALLUCINATION_FILTER = (
+    os.getenv("AUDIO_STT_HALLUCINATION_FILTER", "true").lower() == "true"
+)
+AUDIO_STT_HALLUCINATION_PHRASES = os.environ.get("AUDIO_STT_HALLUCINATION_PHRASES")
+AUDIO_STT_REPEAT_MIN_COUNT = env_number("AUDIO_STT_REPEAT_MIN_COUNT", 5, 0, 100)
+AUDIO_STT_REPEAT_MAX_UNIT_CHARS = env_number(
+    "AUDIO_STT_REPEAT_MAX_UNIT_CHARS", 50, 1, 200
+)
 
 
 # Add Deepgram configuration

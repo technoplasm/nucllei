@@ -92,6 +92,19 @@ def test_defaults_match_documented_values():
     assert config.AUDIO_STT_RECORDING_BITRATE_KBPS == 32
     assert config.WHISPER_BEAM_SIZE == 5
     assert app.state.WHISPER_BEAM_SIZE == 5
+    # 幻聴対策(_memos/audio.md「幻聴対策」)は既定で on
+    assert config.WHISPER_VAD_FILTER.env_value is True
+    assert config.WHISPER_VAD_THRESHOLD == 0.5
+    assert config.WHISPER_VAD_SPEECH_PAD_MS == 400
+    assert config.WHISPER_CONDITION_ON_PREVIOUS_TEXT is False
+    assert config.WHISPER_HALLUCINATION_SILENCE_THRESHOLD == 2.0
+    assert config.WHISPER_NO_SPEECH_THRESHOLD == 0.6
+    assert config.WHISPER_LOG_PROB_THRESHOLD == -1.0
+    assert config.WHISPER_COMPRESSION_RATIO_THRESHOLD == 2.4
+    assert config.AUDIO_STT_HALLUCINATION_FILTER is True
+    assert config.AUDIO_STT_HALLUCINATION_PHRASES is None
+    assert config.AUDIO_STT_REPEAT_MIN_COUNT == 5
+    assert config.AUDIO_STT_REPEAT_MAX_UNIT_CHARS == 50
     assert app.state.AUDIO_STT_INPUT == {
         "segment_seconds": 12,
         "segment_pause_ms": 400,
