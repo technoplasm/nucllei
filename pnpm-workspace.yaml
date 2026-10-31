@@ -19,3 +19,7 @@ allowBuilds:
 # flat node_modules used to hoist, e.g. @codemirror/*, onnxruntime-web, lowlight,
 # @floating-ui/utils). Hoist everything to the root so pnpm resolves them like npm.
 shamefullyHoist: true
+
+# 推移依存 (jspdf / mermaid) の dompurify を修正版に揃える (GHSA-cg2g-xh64-v4q7: >=3.4.4 <=3.4.16)
+overrides:
+  dompurify: ^3.4.17
