@@ -250,21 +250,6 @@ async def update_audio_config(
     return _audio_config_response(request)
 
 
-def load_speech_pipeline(request):
-    from transformers import pipeline
-    from datasets import load_dataset
-
-    if request.app.state.speech_synthesiser is None:
-        request.app.state.speech_synthesiser = pipeline(
-            "text-to-speech", "microsoft/speecht5_tts"
-        )
-
-    if request.app.state.speech_speaker_embeddings_dataset is None:
-        request.app.state.speech_speaker_embeddings_dataset = load_dataset(
-            "Matthijs/cmu-arctic-xvectors", split="validation"
-        )
-
-
 @router.post("/speech")
 async def speech(request: Request, user=Depends(get_verified_user)):
     # llens(#53 フォロー): 配備レベルの機能フラグ(FE のアイコン制御と対のサーバー側 enforcement)
@@ -445,45 +430,6 @@ async def speech(request: Request, user=Depends(get_verified_user)):
                 status_code=getattr(r, "status", 500) if r else 500,
                 detail=detail if detail else "Nucllei: Server Connection Error",
             )
-
-    elif request.app.state.config.TTS_ENGINE == "transformers":
-        payload = None
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except Exception as e:
-            log.exception(e)
-            raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
-        import torch
-        import soundfile as sf
-
-        load_speech_pipeline(request)
-
-        embeddings_dataset = request.app.state.speech_speaker_embeddings_dataset
-
-        speaker_index = 6799
-        try:
-            speaker_index = embeddings_dataset["filename"].index(
-                request.app.state.config.TTS_MODEL
-            )
-        except Exception:
-            pass
-
-        speaker_embedding = torch.tensor(
-            embeddings_dataset[speaker_index]["xvector"]
-        ).unsqueeze(0)
-
-        speech = request.app.state.speech_synthesiser(
-            payload["input"],
-            forward_params={"speaker_embeddings": speaker_embedding},
-        )
-
-        sf.write(file_path, speech["audio"], samplerate=speech["sampling_rate"])
-
-        async with aiofiles.open(file_body_path, "w") as f:
-            await f.write(json.dumps(payload))
-
-        return FileResponse(file_path)
 
 
 # 転写に渡す文脈(prompt)の上限文字数。Whisper の prompt はデコーダ文脈の半分 = 224 トークン

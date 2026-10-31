@@ -392,7 +392,6 @@
 							}}
 						>
 							<option value="">{$i18n.t('Web API')}</option>
-							<option value="transformers">{$i18n.t('Transformers')} ({$i18n.t('Local')})</option>
 							<option value="openai">{$i18n.t('OpenAI')}</option>
 							<option value="elevenlabs">{$i18n.t('ElevenLabs')}</option>
 							<option value="azure">{$i18n.t('Azure AI Speech')}</option>
@@ -467,47 +466,6 @@
 									{/each}
 								</select>
 							</div>
-						</div>
-					</div>
-				{:else if TTS_ENGINE === 'transformers'}
-					<div>
-						<div class=" mb-1.5 text-sm font-medium">{$i18n.t('TTS Model')}</div>
-						<div class="flex w-full">
-							<div class="flex-1">
-								<input
-									list="model-list"
-									class="w-full text-sm px-2 py-1 bg-surface-form rounded-xs outline-hidden"
-									bind:value={TTS_MODEL}
-									placeholder="CMU ARCTIC speaker embedding name"
-								/>
-
-								<datalist id="model-list">
-									<option value="tts-1"></option>
-								</datalist>
-							</div>
-						</div>
-						<div class="mt-2 mb-1 text-xs text-content-subtle">
-							{$i18n.t(`Nucllei uses SpeechT5 and CMU Arctic speaker embeddings.`)}
-
-							To learn more about SpeechT5,
-
-							<a
-								class=" hover:underline text-content"
-								href="https://github.com/microsoft/SpeechT5"
-								target="_blank"
-							>
-								{$i18n.t(`click here`, {
-									name: 'SpeechT5'
-								})}.
-							</a>
-							To see the available CMU Arctic speaker embeddings,
-							<a
-								class=" hover:underline text-content"
-								href="https://huggingface.co/datasets/Matthijs/cmu-arctic-xvectors"
-								target="_blank"
-							>
-								{$i18n.t(`click here`)}.
-							</a>
 						</div>
 					</div>
 				{:else if TTS_ENGINE === 'openai' || TTS_ENGINE === 'elevenlabs'}

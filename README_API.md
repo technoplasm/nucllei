@@ -994,7 +994,7 @@ warning. Tune per site (microphone, room noise, CPU speed); background in
 | `WHISPER_BEAM_SIZE`                | env  | `5`     | 1 – 10     | beam size of the bundled faster-whisper (ignored by external STT engines). Smaller = faster, less accurate                                                                              |
 
 TTS: `AUDIO_TTS_ENGINE` (RC, `""` = browser speech API; or `openai`, `azure`,
-`elevenlabs`, `transformers`). `AUDIO_TTS_OPENAI_API_BASE_URL` accepts any
+`elevenlabs`). `AUDIO_TTS_OPENAI_API_BASE_URL` accepts any
 OpenAI-compatible `/v1` speech endpoint (the reference deployment points it at a
 VOICEVOX/AivisSpeech bridge), plus `AUDIO_TTS_MODEL`, `AUDIO_TTS_VOICE`,
 `AUDIO_TTS_SPLIT_ON`, `AUDIO_TTS_API_KEY`, `AUDIO_TTS_AZURE_*`.

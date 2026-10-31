@@ -19,8 +19,9 @@ admin Settings > Audio にトグルあり)。off にすると **FE のアイコ�
   `"openai"` = 外部 OpenAI 互換 API。llens 現行 = 内蔵 large-v3-turbo・int8・CPU。
   faster-whisper は extras `stt`(torch 無しで軽い — Docker イメージに同梱)。
   dev では `uv sync --extra stt` か `--extra local-ml` で入る(2026-07-16 の extras 分割)。
-- **TTS**: `AUDIO_TTS_ENGINE="openai"` = OpenAI 互換(llens = tts-bridge → AivisSpeech)。
-  fork プロセスは合成しない(プロキシ + mp3 キャッシュのみ)— fork 側の CPU/GPU 設定と無関係。
+- **TTS**: `AUDIO_TTS_ENGINE` = `""`(ブラウザの音声合成)/ `"openai"`(OpenAI 互換。llens = tts-bridge →
+  AivisSpeech)/ `"elevenlabs"` / `"azure"`。どれも fork プロセスは合成しない(外部への中継 + mp3 キャッシュ
+  のみ)— fork 側の CPU/GPU 設定と無関係。
 - **内部関数(#53)**: `utils/audio.py::transcribe_audio / synthesize_speech`。
   sync 提供(主 caller = sync tool。async からは `asyncio.to_thread`)。
   TTS の voice/model は config 既定 + 引数上書き、en/ja→voice の対応表は caller(prism 層 tool)責務。
