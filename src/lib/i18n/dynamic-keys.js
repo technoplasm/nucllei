@@ -35,6 +35,10 @@
 //   logit_bias の例)
 // - workspace/functions/FunctionEditor.svelte: 編集時バッジ TYPE_LABELS(Attachment / Filter /
 //   Action / Pipe — 一覧の group.label と同じキー)
+// - utils/speech-synthesis.ts の NO_LOCAL_VOICE_MESSAGE: tts.svelte.ts / CallOverlay.svelte が
+//   定数経由で t() に渡す
+// - chat/MessageInput.svelte・MessageInput/CallButton.svelte の micUnavailableMessage、
+//   MessageInput/CallOverlay.svelte の MEDIA_UNAVAILABLE_MESSAGE: 定数経由で t() に渡す
 
 // t('Account')
 // t('Action')
@@ -89,6 +93,7 @@
 // t('Last Active')
 // t('License')
 // t('Local')
+// t('Microphone requires a secure (HTTPS) connection.')
 // t('Minimum Voice Segment Length (seconds)')
 // t('Mirostat')
 // t('Model {{modelId}} not found')
@@ -130,6 +135,7 @@
 // t('Skills')
 // t('Talk to model')
 // t('Theme')
+// t('This device has no on-device voice for the display language, so the response cannot be read aloud.')
 // t('Title Auto-Generation')
 // t('Today')
 // t('Toggle settings')
