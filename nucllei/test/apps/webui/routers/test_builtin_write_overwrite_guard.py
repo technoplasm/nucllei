@@ -219,6 +219,59 @@ def test_edit_file_then_write_file(sbx):
     assert "上書きした" in run(tool.write_file("/workspace/a.md", "x", USER, meta))
 
 
+def test_edit_file_does_not_launder_an_outside_change(sbx):
+    """読んだ → 外で追記 → edit_file で 1 か所直す → write_file で丸ごと: 外の追記を知らないまま
+    消させない (edit_file は古い記録を進めない)。edit_file そのものは通る。"""
+    p = sbx["ws"] / "a.md"
+    p.write_text("one\ntwo\n")
+    _mark(p, 1_000_000_000_000_000_000)
+    meta = _chat()
+    tool = _sb()
+    run(tool.read_file("/workspace/a.md", __user__=USER, __metadata__=meta))
+    with p.open("a") as f:
+        f.write("ほかの人の追記\n")
+    out = run(
+        tool.edit_file("/workspace/a.md", "two", "2", __user__=USER, __metadata__=meta)
+    )
+    assert "を置き換えた" in out
+    out = run(tool.write_file("/workspace/a.md", "丸ごと", USER, meta))
+    assert out == E5_2.format(p="/workspace/a.md")
+    assert "ほかの人の追記" in p.read_text()
+    # 読み直せば書ける
+    run(tool.read_file("/workspace/a.md", __user__=USER, __metadata__=meta))
+    assert "上書きした" in run(tool.write_file("/workspace/a.md", "丸ごと", USER, meta))
+
+
+def test_edit_file_after_its_own_known_version_moves_the_record(sbx):
+    """記録が edit_file の読んだ版と同じなら記録を進める (続けて write_file で上書きできる)。"""
+    p = sbx["ws"] / "a.md"
+    p.write_text("one\ntwo\n")
+    meta = _chat()
+    tool = _sb()
+    run(tool.read_file("/workspace/a.md", __user__=USER, __metadata__=meta))
+    run(tool.edit_file("/workspace/a.md", "two", "2", __user__=USER, __metadata__=meta))
+    run(tool.edit_file("/workspace/a.md", "one", "1", __user__=USER, __metadata__=meta))
+    assert "上書きした" in run(tool.write_file("/workspace/a.md", "x", USER, meta))
+
+
+def test_text_extension_that_read_file_cannot_decode_gets_the_binary_next_step(sbx):
+    """拡張子はテキストでも中身が UTF-8 / cp932 でない物 (EUC-JP 等) は read_file で読めない —
+    読んでから書く道ではなく、ユーザーに確かめてゴミ箱へ移して作り直す道を言う。"""
+    p = sbx["ws"] / "euc.txt"
+    p.write_bytes("日本語のテキスト".encode("euc_jp"))
+    meta = _chat()
+    tool = _sb()
+    out = run(tool.read_file("/workspace/euc.txt", __user__=USER, __metadata__=meta))
+    assert out.startswith("ERROR: /workspace/euc.txt はテキストとして読めない")
+    out = run(tool.write_file("/workspace/euc.txt", "x", USER, meta))
+    assert out == E5_1_BINARY.format(p="/workspace/euc.txt")
+    assert p.read_bytes() == "日本語のテキスト".encode("euc_jp")
+    # 読めるテキストは今までどおり「読んでから」
+    (sbx["ws"] / "ok.txt").write_text("読める")
+    out = run(tool.write_file("/workspace/ok.txt", "x", USER, meta))
+    assert out == E5_1.format(p="/workspace/ok.txt")
+
+
 def test_dotdot_reaches_the_same_record(sbx):
     (sbx["ws"] / "b.md").write_text("b")
     meta = _chat()

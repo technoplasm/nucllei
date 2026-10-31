@@ -853,10 +853,20 @@ async def file_state_put(
         log.error(f"[sandbox] file state write failed for {abs_path}: {e!r}")
 
 
-def _not_read_yet(abs_path: str) -> ToolError:
-    """既にあるファイルを、この会話で読んでいないのに write_file で上書きしようとした。"""
+def _same_version(known, mtime: Optional[float], size: Optional[int]) -> bool:
+    """記録 `known` が版 (mtime, size) と同じか (sandbox の比べ方と同じ: mtime は 1e-6 秒以内、大きさは
+    両方あるときだけ)。どちらかに mtime が無ければ同じとは言えない。"""
+    if known.mtime is None or mtime is None or abs(known.mtime - mtime) >= 1e-6:
+        return False
+    return known.size is None or size is None or known.size == size
+
+
+def _not_read_yet(abs_path: str, binary: bool = False) -> ToolError:
+    """既にあるファイルを、この会話で読んでいないのに write_file で上書きしようとした。read_file で読めない
+    もの (拡張子で断る物と、`binary` = 中身が UTF-8 / cp932 のテキストでない物) は、読んでから書く道が
+    無いので、ユーザーに確かめてゴミ箱へ移してから作り直す道を言う。"""
     fact = f"{abs_path} は既にあり、この会話ではまだ読んでいないので上書きしない"
-    if _read_ext(abs_path) in _READ_IMAGE_EXTS | _READ_BINARY_EXTS:
+    if binary or _read_ext(abs_path) in _READ_IMAGE_EXTS | _READ_BINARY_EXTS:
         return ToolCallError(
             fact,
             "置き換えてよいかユーザーに確かめてから、remove_file でゴミ箱へ移して write_file で作り直す。",
@@ -2067,7 +2077,9 @@ class Tools:
                     raise _changed_since_read(abs_path)
                 if unversioned:
                     raise _sandbox_without_versions()
-                raise _not_read_yet(abs_path)
+                raise _not_read_yet(
+                    abs_path, await self._unreadable_text(target, ext, __user__)
+                )
         mtime, written = _stamp_of(res)
         await file_state_put(__metadata__, __user__, abs_path, mtime, written, "write")
         if deleted:
@@ -2197,6 +2209,29 @@ class Tools:
                 return
             mtime, size = _stamp_of(st)
         await file_state_put(metadata, user, abs_path, mtime, size, via)
+
+    async def _unreadable_text(self, target: str, ext: bool, user: dict) -> bool:
+        """既にあるファイルの先頭が、read_file の読めるテキスト (UTF-8 / cp932) でないか。拡張子で断る物は
+        聞かない (その文は拡張子で決まる)。読めなければ False (読んでから書く道を言う側)。"""
+        if _read_ext(target) in _READ_IMAGE_EXTS | _READ_BINARY_EXTS:
+            return False
+        payload = {
+            "user_id": user["id"],
+            "path": target,
+            "nofollow": True,
+            "offset": 0,
+            "length": READ_FILE_PROBE_BYTES,
+        }
+        if ext:
+            payload["mounts"] = _ext_mounts(user)
+        try:
+            res = await self._post("/files/read", payload, timeout_s=30)
+            head = base64.b64decode(res["b64"])[:READ_FILE_PROBE_BYTES]
+        except Exception as e:
+            log.warning(f"[sandbox] probe for write_file failed on {target}: {e!r}")
+            return False
+        whole = not isinstance(res.get("size"), int) or len(head) >= res["size"]
+        return _detect_encoding(head, whole=whole) is None
 
     async def edit_file(
         self,
@@ -2350,8 +2385,15 @@ class Tools:
                 f"{abs_path} は edit_file が読んでから書くまでの間に変わった。何も書いていない",
                 "同じ edit_file を 1 回だけ呼び直す。",
             )
-        mtime, written = _stamp_of(res)
-        await file_state_put(__metadata__, __user__, abs_path, mtime, written, "edit")
+        # 記録を進めるのは、記録が無いか、記録が edit_file の読んだ版と同じときだけ。この会話が知らない
+        # 外の変更の上に直したときは古い記録を残す — 後の write_file が「変わっている」で読み直しになる
+        # (edit_file を挟んで外の変更を知らないまま丸ごと書き直させない)
+        known = await file_state_get(__metadata__, __user__, abs_path)
+        if known is None or _same_version(known, seen_mtime, seen_size):
+            mtime, written = _stamp_of(res)
+            await file_state_put(
+                __metadata__, __user__, abs_path, mtime, written, "edit"
+            )
 
         first = text.count("\n", 0, pos) + 1
         # 末尾の改行は次の行を始めない (`"b\n"` に置き換えたら 1 行)

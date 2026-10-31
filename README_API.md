@@ -2400,7 +2400,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       `expected_mtime` + `expected_size`) and a 409 becomes
       「<path> は edit_file が読んでから書くまでの間に変わった。何も書いていない。次の手: 同じ edit_file を 1 回だけ呼び直す。」
       (a sandbox that returns no `mtime` gets an unconditional write). A
-      successful edit counts as "written in this chat" for `write_file` (below).
+      successful edit records the new version for `write_file` (below) only when
+      the chat had no record of the file or its record is the version
+      `edit_file` read; otherwise the older record stays, so a change made
+      elsewhere since the chat read the file still sends a later `write_file` to
+      re-read (an edit never launders it).
       `write_file`'s and `read_file`'s docstrings point at `edit_file` for
       partial edits, and `read_file`'s cp932 label says `edit_file` keeps cp932.
       `edit_file`'s own description says
@@ -2438,8 +2442,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       **Flow**: no record → `/files/write` with `exclusive` (`O_EXCL`; a file
       created meanwhile is not overwritten) → 「<path> を新しく作った (UTF-8、size)。」;
       a 409 → 「<path> は既にあり、この会話ではまだ読んでいないので上書きしない。次の手: 一部を直す・足すなら edit_file を使う (末尾に足すなら最後の行を old_text に含める)。丸ごと書き直すなら、先に read_file で今の中身を読んでから write_file を呼び直す。run_shell や run_python で書き直さない。」
-      — or, for an extension `read_file` refuses (image / PDF / Office /
-      binary), 「<path> は既にあり、この会話ではまだ読んでいないので上書きしない。次の手: 置き換えてよいかユーザーに確かめてから、remove_file でゴミ箱へ移して write_file で作り直す。」.
+      — or, for a file `read_file` cannot read (an extension it refuses: image /
+      PDF / Office / binary; or a text extension whose first 64 KiB are not
+      UTF-8 / cp932, e.g. EUC-JP — probed with one `/files/read` on this error
+      path only), 「<path> は既にあり、この会話ではまだ読んでいないので上書きしない。次の手: 置き換えてよいかユーザーに確かめてから、remove_file でゴミ箱へ移して write_file で作り直す。」.
       A record → `/files/write` with `expected_mtime` + `expected_size` (the
       recorded version) → 「<path> を上書きした (UTF-8、size)。」; 409 `modified`
       → 「<path> はこの会話で読んだ・書いた後に変わっている (別の会話・画面のファイルブラウザ・run_shell / run_python・同じ置き場のほかの人など)。上書きしていない。次の手: read_file で今の中身を読み直し、変わった分を踏まえて書く (一部だけなら edit_file)。」
