@@ -54,6 +54,9 @@
 	let name = $state('');
 	let description = $state('');
 	let userIds = $state<string[]>([]);
+	// グループの置き場への書き込み(data.ext。2026-10-31 ken、案 A)— GroupUsers で編集
+	let writeMode = $state<'members' | 'listed'>('members');
+	let writers = $state<string[]>([]);
 
 	const submitHandler = async () => {
 		loading = true;
@@ -62,7 +65,11 @@
 			name,
 			description,
 			permissions,
-			user_ids: userIds
+			user_ids: userIds,
+			ext: {
+				write: writeMode,
+				writers: writers.filter((id) => userIds.includes(id))
+			}
 		});
 
 		loading = false;
@@ -79,6 +86,10 @@
 			description = group.description ?? '';
 			permissions = group?.permissions ?? {};
 			userIds = group?.user_ids ?? [];
+			const ext = group?.data?.ext ?? {};
+			// 知らない値は BE と同じく「指定した人だけ」扱い(書ける人を広げない側)
+			writeMode = ext.write == null || ext.write === 'members' ? 'members' : 'listed';
+			writers = Array.isArray(ext.writers) ? [...ext.writers] : [];
 		}
 	};
 
@@ -180,7 +191,7 @@
 							{#if selectedTab === 'permissions'}
 								<GroupPermissions bind:permissions />
 							{:else if selectedTab === 'users'}
-								<GroupUsers bind:userIds {users} />
+								<GroupUsers bind:userIds bind:writeMode bind:writers {users} />
 							{/if}
 						</div>
 					</div>
