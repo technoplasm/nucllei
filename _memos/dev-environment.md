@@ -317,7 +317,7 @@ DB(`data/webui.db`)は clone に含まれないので、新環境では作り直
      は [[file-handling]] の 2026-10-05 節。
    - **グループ・全体の共有の置き場**(#152): `groups` と `public` は予約名で、per-user の ACL が掛かる
      (メンバー rw・非メンバーは見えない・admin は全部 rw / public は admin だけ rw。グループの書き込みを
-     「指定した人だけ」にすると他のメンバーは ro — 2026-10-31。[[builtin-tools]] の #152 の節)。
+     「指定した人だけ」にすると他のメンバーは ro。[[builtin-tools]] の #152 の節)。
      dev で試すなら host にディレクトリを作り `EXT_MOUNTS` に
      `groups=/abs/path/groups,public=/abs/path/public` を足す(env の新設は無い)。sandbox コンテナ側は
      llens の compose に `./groups:/ext/groups`・`./public:/ext/public`(rw)が要る — 無ければ jail には

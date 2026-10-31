@@ -23,12 +23,12 @@
    つき 1 回。subagent の子ターンでも親と同じユーザー。一覧と定義は `utils/task.py`
    (prompt_template / resolve_base_model_id / user_group_names / user_prompt_params)が
    単一情報源で、preset のシステムプロンプトと共通。
-   {{SKILLS}}(2026-10-30 追加、ken「tool → system prompt → スキル → レシピの並び」)= load_skill の
+   {{SKILLS}} = load_skill の
    manifest と同じ一覧 (見出し `使える skill (load_skill の skill_id にそのまま渡す):` + `- id: 説明`。
    `skill_manifest` を共有)。preset の system prompt にこれがあれば load_skill の説明には一覧も enum も
    入れない (tool の宣言は chat template で system より前に出る — 利用者ごとの一覧が先頭にあると
-   prefix cache が利用者をまたげない)。レシピの一覧と違い「— の後は書いた人の文」は付けない: skill の
-   説明を書くのは管理者・スキル編集者で、preset に割り当てるのは管理者だから。
+   prefix cache が利用者をまたげない)。レシピの一覧と違い「— の後は書いた人の文」は付けない(skill の
+   説明を書くのは管理者・スキル編集者)。
 5. 引数機構は初期実装なし(将来 optional で {{PARAM}} = frontmatter 定義の呼び出し時パラメータ)
 6. グローバル有効化トグルなし。制御面は**モデル(preset)設定に一元化**(#42 改訂):
    - モデル capability「スキル」(`meta.features.skills`、既定 ON)。OFF で manifest も
@@ -116,9 +116,8 @@
      ※ messages の受け渡し(`build_load_skill_tool(..., messages=form_data["messages"])`)は
      middleware 側の結線が要る — 未結線の間は「同じターン内の 2 回目」だけが効く
    - UI は既存の tool_calls 描画(View Result from load_skill)がそのまま使える。
-     当該ターンの発火は tool_calls ブロックとして応答先頭に残す(2026-10-30 まではモデル向け
-     履歴へ再送しない synthetic で、毎リクエスト再導出していた — 下の「before / after」で発火 1 回に
-     変えた。そのターン内は in_payload の印で追撃に二重に載せない)
+     当該ターンの発火は tool_calls ブロックとして応答先頭に残す(発火は 1 回 — 下の「before / after」。
+     そのターン内は in_payload の印で追撃に二重に載せない)
    - (step2b で)tool_ids ロード → tools 配列へ
 4. ミス: 何もしない(通常テキストとして素通し。エラーにしない)
 
@@ -183,9 +182,7 @@
   メッセージが変わるので、そのターンの再計算は元々避けられない)
 - 同じ位置に `/command` の exchange があればその後ろ
 
-**UI のカード**: 発火したターンの応答に load_skill のカード(= 保存される往復)が出る
-(2026-10-30 から。それまでは「添付が付いたターン」にだけ synthetic のカードを seed し、その判定に
-chat DB を見ていた — 発火が 1 回になったので要らなくなった)。
+**UI のカード**: 発火したターンの応答に load_skill のカード(= 保存される往復)が出る。
 
 **既知の割り切り**:
 - 後のターンで添付したとき、合成 exchange は「最初の発言の直後」に現れる(モデルから見ると
@@ -362,22 +359,12 @@ tool result = 展開済み content の全シーケンス。
 - `{{CURRENT_WEEKDAY}}` は日本語(月曜日…日曜日)で固定した(`utils/task.py`。strftime の %A はプロセスの
   ロケール次第で英語だった)。手順書 `docs/manual/13_skills.md` も「曜日 (例: `月曜日`)」に。
 
-## before / after(2026-10-29 on_load → 2026-10-30 作り直し、llens 依頼・ken 指示 — llens prism-hu/llens#22「hooks 的な」)
+## before / after(llens prism-hu/llens#22)
 
-**なぜ**: llens の `emr` は「DB のノートの索引を必ず読んでから作業する」が要るが、手順書に「読め」と
-書いても GLM が読まない。prompt で頼むのではなく、読み込みと同時にサーバが確実に context へ入れる。
-トリガ型(「tool X が呼ばれたら」)と per-turn hooks(README_API §5.9)は別物で、作らない。
-
-**経緯**: 2026-10-29 に `on_load`(load_skill の要素で skill → skill の連鎖 + tool の要素、短い記法
-`skill:` / `recipe:` / `read:` も)で出したが、出荷前の 2026-10-30 に ken の指示で作り直した:
-- skill が別の skill やレシピを読み込む場面は無い(読み込むかはモデルが決める)→ 連鎖・短い記法・
-  load_skill / load_recipe の要素は無くす
-- 結果の位置を「本文の前 / 後」の 2 つに分ける → `before` / `after`
-- `/command`・添付の 2 ターン目以降で並びが崩れていた(load_skill の合成 exchange は毎リクエスト
-  再導出、tool の結果は 1 回目の応答に保存 → 「本文が先・保存された結果が後」)のを解く
-migration は出荷していないので `b6e1d9a3c7f2` を before / after の 2 列に書き換えた(ファイル名も
-`…_skill_hooks.py`)。dev DB は手で on_load を落として 2 列を足した(バックアップは
-scratchpad の `webui.db.before-skill-hooks`)。
+**目的**: skill の読み込みと同時に、決まった tool の結果をサーバが確実に context へ入れる(手順書で
+「読め」と頼むのではモデルが読まないことがある)。トリガ型(「tool X が呼ばれたら」)と per-turn hooks
+(README_API §5.9)は別物で、作らない。skill から別の skill・レシピは読み込まない(読み込むかはモデルが
+決める)— load_skill / load_recipe の要素・短い記法は無い。列は migration `b6e1d9a3c7f2`(`…_skill_hooks.py`)。
 
 **データ**: `skill.before` / `skill.after`(JSON、どちらも `[{"tool": <関数名>, "args": {…}}]`)。
 API は top-level フィールドで、**update の省略(None)は既存値を保つ**。検証は router の 400
@@ -395,9 +382,8 @@ tool_ids を載せた後に呼ぶ(before / after から使えるように)。記
 `<skill-hook skill= phase= n= tool=>` + 見出し「読み込み時に実行した <tool> の結果 (before n)」/
 「手順書の後に実行した …」で囲んで、**1 つの load_skill の結果**にする(別の tool 往復にしない)。
 
-**2 ターン目以降の並び — 発火を 1 回にした**: `/command`・自動ロードの合成 exchange を毎リクエスト
-再導出するのをやめ、発火したターンの応答の先頭に通常の tool_calls ブロックとして残す
-(`skill_activation_seed_block` — synthetic をやめて in_payload の印。同じターンの追撃では
+**2 ターン目以降の並び — 発火は 1 回**: `/command`・自動ロードは、発火したターンの応答の先頭に通常の
+tool_calls ブロックとして残す(`skill_activation_seed_block` — in_payload の印。同じターンの追撃では
 convert_content_blocks_to_messages が飛ばし、印は永続化で落ちる)。次のリクエストからは FE の
 expandAssistantToolHistory / サーバ側の再構成(subagent・続きターン)が履歴の load_skill 往復として
 運び、`apply_skill_command` / `apply_skill_auto_load` は「履歴全体のどこかにその skill の load_skill が
@@ -407,12 +393,9 @@ execute_tool_calls を閉じ込めたフック)を呼び、同じ 1 つの結果
 - 「chat につき 1 回」は call id の判定ではなく「本文が context に入るときにだけ実行する」で決まる
   (発火は 1 回、load_skill の 2 回目以降は LOADED_RESULT)。
 - tool は `replay_skill_tool_ids` が履歴の load_skill 往復から毎リクエスト載せ直す(3 入口とも同じ)。
-- synthetic の印は全体から消した(content_blocks.py・FE chat-messages.ts / chat-events.ts)。
-  自動ロードの「カードを出すターン」の判定(`_current_turn_file_ids` の chat DB 参照)も不要になった。
-- 本文の変数(`{{CURRENT_DATE}}` 等)は発火したターンの値で固定される(以前の `/command` は
-  毎リクエスト展開していた)。モデルの load_skill は前からそう。
+- 本文の変数(`{{CURRENT_DATE}}` 等)は発火したターンの値で固定される(3 入口とも)。
 
-**カード(results[i].chain、同日)**: モデル向けの本文とは別に、before / after の節(phase・tool・
+**カード(results[i].chain)**: モデル向けの本文とは別に、before / after の節(phase・tool・
 args・status・output)と本文を `skill_chain` で組んで結果に載せる(`/command`・自動ロードは発火の
 ブロックの結果に、モデルの load_skill は `tool_output.set_chain` → middleware が display と同じく
 harvest)。FE は ToolChainTree で before の行 → 本文 → after の行を描き、ERROR の件数を見出しに出す。
@@ -429,15 +412,15 @@ before / after も毎回動く。
 (5) 履歴はクライアント入力なので、偽の load_skill の結果を履歴に入れれば発火・実行を止められる —
 止まるのはその利用者自身の context に入る結果だけで、権限は増えない。
 
-## プレビュー(2026-10-30、llens 経由 ken「実際どのように展開されるかプレビューをタブで付けて」)
+## プレビュー
 
 - preset の編集画面「プロンプト」タブの System Prompt 欄と、skill の編集画面の本文欄に「編集 / プレビュー」。
   endpoint は `POST /api/v1/models/preview`(admin)・`POST /api/v1/skills/preview`(skill editor)。
 - **プレビュー専用の展開を書かない**: tools は process_chat_payload と同じ関数を同じ並びで呼ぶ
-  (`get_tools` → `middleware.build_capability_tools` → `mount_recall_tools_if_needed` → `model_tool_specs`。
-  この 3 つはプレビューのために middleware から切り出した)。system prompt は routers が使う
-  `payload.apply_model_system_prompt_to_body`、skill の本文は activate_skill と同じ `expand_skill_content`。
-  回帰テスト `test_prompt_preview.py` がプレビューの spec と実リクエストの spec の一致を見る。
+  (`get_tools` → `middleware.build_capability_tools` → `mount_recall_tools_if_needed` → `model_tool_specs`)。
+  system prompt は routers が使う `payload.apply_model_system_prompt_to_body`、skill の本文は
+  activate_skill と同じ `expand_skill_content`。回帰テスト `test_prompt_preview.py` がプレビューの spec と
+  実リクエストの spec の一致を見る。
 - 本人としてだけ展開する(他の利用者として見る口は作らない — 個人のレシピ名が見える)。前提は
   「新しいチャットの最初のターン」(履歴・添付・`/command` の skill の tool・Filter inlet の変更は入らない)。
   preset の tool・skill・能力は保存済みの値(編集画面はタブ切替で「一般」の未保存の変更を戻すので、
@@ -446,17 +429,15 @@ before / after も毎回動く。
   エントリの `varies`(load_skill・load_recipe の一覧 = `description_from`、load_skill の enum = `params`、
   get_tools の spec_overrides で差し替わった tool = `overridden`)。断片をつないで全体の展開と一致しない
   ときは印を付けない(`exact: false`)。
-- 実物どおりなので見えたこと: チャットはブラウザの `getPromptVariables` の値(metadata.variables)を先に
-  当てていたので、UI のチャットでは `{{CURRENT_WEEKDAY}}` が英語(`Friday`)になっていた — サーバ側の
-  日本語固定(2026-10-19)はブラウザから来ない経路(API・skill の本文)にしか効いていなかった。
-  → 同日直した: 日時・曜日・利用者はサーバが正、ブラウザから当てるのは `{{CURRENT_TIMEZONE}}`
-  `{{USER_LANGUAGE}}` だけ(task.BROWSER_PROMPT_VARIABLES)。日時は**ブラウザの TZ でサーバが作る**
-  (request_timezone の ContextVar — process_chat_payload・apply_model_system_prompt_to_body が置く)。
-  TZ をサーバのプロセスの TZ だけにすると、TZ を設定していない配備(image の既定は UTC)で 0〜9 時(JST)に
-  日付・曜日が前日になる — ブラウザの TZ ならその心配が無く、ブラウザの値を使っていた今までの UI の
-  チャットと同じ日付になる。ブラウザの TZ が無い経路(API・続きターン execution_resume)はプロセスの TZ
-  (llens は compose で Asia/Tokyo)。時刻はブラウザに合わせて 24 時間制に。チャットの system prompt
-  (先頭の system メッセージ)の自前展開も FE から外し、サーバが展開する(expand_chat_system_message)。
-  ken「サーバーの locale は ja で」: サーバ由来の値は ja 表記に固定(曜日は日本語、時刻は 24 時間制)。
-  日付は ISO の `YYYY-MM-DD` のまま(ja の慣用の `2026年10月30日` にはしない — レシピの updated・tool の
-  引数が ISO)。locale を切り替える env / 設定は作らない。
+
+## 変数の値はサーバが作る
+
+- 日時・曜日・利用者はサーバが正。ブラウザから当てるのは `{{CURRENT_TIMEZONE}}` `{{USER_LANGUAGE}}` だけ
+  (task.BROWSER_PROMPT_VARIABLES)。チャットの system prompt(先頭の system メッセージ)もサーバが展開する
+  (expand_chat_system_message)。
+- 日時は**ブラウザの TZ でサーバが作る**(request_timezone の ContextVar — process_chat_payload・
+  apply_model_system_prompt_to_body が置く)。プロセスの TZ だけで作ると、TZ を設定していない配備(image の
+  既定は UTC)で 0〜9 時(JST)に日付・曜日が前日になる。ブラウザの TZ が無い経路(API・続きターン
+  execution_resume)はプロセスの TZ(llens は compose で Asia/Tokyo)。
+- サーバ由来の値は ja 表記に固定(曜日は日本語、時刻は 24 時間制)。日付は ISO の `YYYY-MM-DD`(レシピの
+  updated・tool の引数が ISO)。locale を切り替える env / 設定は作らない。

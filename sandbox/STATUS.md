@@ -89,13 +89,13 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       max(mtime, ctime) から `SANDBOX_CACHE_TTL_DAYS` 日で丸ごと消す (中身の時刻は見ない。rename が
       ctime を今にするのを ext4 / tmpfs で確認 — `test_rename_updates_ctime`)。旧「ファイル単位の
       mtime」は廃止。回帰は `test_retention.py`。**実機 (コンテナ) の掃除は未確認** — image の更新待ち
-- [x] **`/files/trash` と共有の置き場の `trash/`** (2026-10-27、ken 決定・llens 依頼)。nucllei の
+- [x] **`/files/trash` と共有の置き場の `trash/`** (2026-10-27)。nucllei の
       `remove_file` 用に、どの置き場のものもその置き場の `trash/` の直下へ移す endpoint を新設
-      (`/files/delete` は不変 — 古い sandbox で `/ext` が黙って完全削除されないよう別 endpoint)。
+      (`/files/delete` とは別 — 古い sandbox で `/ext` が黙って完全削除されないように)。
       `/ext/groups/*/trash` `/ext/public/trash` は 1 時間ごとの周期タスクで同じ期限の掃除。
       回帰は `test_files_browser.py` (`test_trash_*`) と `test_retention.py` (`test_ext_trash_*`)。
       **実機 (コンテナ) は未確認** — image の更新待ち
-- [x] **レシピ用の endpoint** (2026-10-30、llens 依頼・ken 指示「ぜんぶ nuc にやらせて」)。
+- [x] **レシピ用の endpoint** (2026-10-30)。
       nucllei の builtin `load_recipe` / `save_recipe` / `edit_recipe` と `{{USER_RECIPES}}` 用に
       `POST /recipes/index` (各層の `recipes/<名前>/RECIPE.md` の先頭を 1 回で) と
       `POST /recipes/folder` (フォルダの中身を本文ごと。symlink は `skipped`)、`POST /files/stat_many`
@@ -107,7 +107,7 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       bind の指紋が変わると作り直す。`/files/*` は `/ext/...` の絶対パスも受け、bind の中だけを
       経路の symlink を O_NOFOLLOW で拒否しながら扱う。回帰は `test_ext_mounts.py`。
       **実機 (コンテナ) での確認は未** — compose の volume 追加 (llens) 待ち
-- [x] **所属とロールを jail の env で渡す** (2026-10-27、llens 依頼・ken 指示)。`/exec` `/exec_cell` の
+- [x] **所属とロールを jail の env で渡す** (2026-10-27)。`/exec` `/exec_cell` の
       `user_groups` `user_role` を `NUCLLEI_USER_GROUPS` (カンマ区切り、所属なしは空文字で定義) /
       `NUCLLEI_USER_ROLE` にする。送られなければ未定義、不正は 400。常駐 kernel の指紋に含める。
       回帰は `test_ext_mounts.py`。**隔離テスト `test_user_env_reaches_jail` は未実行** — image 待ち

@@ -149,7 +149,7 @@ jail からの見え方は **rw / ro / 見えない の 3 値**:
   (どちらも **rw** — `:ro` を付けると rw の bind も EROFS になる)。nucllei 側にも同じ組を
   `EXT_MOUNTS=…,groups=/ext/groups,public=/ext/public` で見せる。
 
-### ユーザーの所属とロールを jail の env で渡す (2026-10-27、llens 依頼・ken 指示)
+### ユーザーの所属とロールを jail の env で渡す
 
 jail の中のプログラム (配備側の CLI 等) が、呼び出したユーザーの所属とロールを引数なしで知る口。
 nucllei は `/exec` `/exec_cell` に `user_groups` `user_role` を付け、sandbox はそれを nsjail の
@@ -161,10 +161,9 @@ nucllei は `/exec` `/exec_cell` に `user_groups` `user_role` を付け、sandb
 | `NUCLLEI_USER_ROLE` | `admin` / `user` / `pending` |
 
 - **未定義 = 古い nucllei / 古い sandbox** (項目を送らない・知らない)。空文字の `NUCLLEI_USER_GROUPS` は
-  「所属なし」で、未定義とは別。読む側は未定義のときだけ従来の手 (引数等) に戻ればよい。
-- nucllei は現行のグループ名の規則を通らない名前 (#151 より前に作られた `:`・カンマ・空白・シェル記号
-  入り等) を `NUCLLEI_USER_GROUPS` から落とす (warning 1 行。改名すれば入る)。カンマ区切りを機械が
-  読む契約なので。新しい名前はカンマを最初から使えない。
+  「所属なし」で、未定義とは別。読む側は未定義のときだけ別の手 (引数等) に戻ればよい。
+- nucllei はグループ名の規則 (#151) を通らない名前 (`:`・カンマ・空白・シェル記号入り等) を
+  `NUCLLEI_USER_GROUPS` から落とす (warning 1 行。改名すれば入る) — カンマ区切りを機械が読む契約なので。
 - sandbox は値を解釈せず形だけ見る: グループ名に `,`・制御 / 書式文字・空・255 バイト超、ロールが
   上の 3 つ以外 → 400 (実行しない)。
 - 常駐 kernel は env を起動時に固定するので、**bind の指紋に所属とロールを含める** — どちらかが
@@ -341,7 +340,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     コンテナの他の場所を消させない)。ログは
     `[sandbox] ext trash: removed entries older than N days — <件数>, <サイズ>` の 1 行。
     `/ext` の置き場の `trash/` はファイルブラウザからは保護していない (workspace の `trash/` と違い
-    消せる・改名できる。FE の挙動を変えないため)
+    消せる・改名できる)
   - `/workspace/memory/` — 配備層の `memory` skill (llens の `nucllei/skills/memory.md`)
     が会話を跨ぐ記憶を置く (`MEMORY.md` 索引 + トピック別 md / csv)。sandbox 側に特別扱いは
     無く、単なる規約 — ユーザーごとに永続する workspace をそのまま使っているだけ
@@ -421,23 +420,22 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     `permanent: true`・`trash/` の中・`/ext/...` は完全に消す → `{ok, trashed: false}`。
     ディレクトリは中身ごと (`shutil.rmtree(dir_fd=)` = fd ベースで symlink を辿らない)。
     llens が API の delete で消して trash に入らなかった件から (2026-10-08、ken 決定)
-  - `POST /files/trash` — `{user_id, path, mounts?}`。nucllei の builtin `remove_file` 用
-    (2026-10-27、ken 決定・llens 依頼)。**どの置き場でも消さずに、その置き場の `trash/` の直下へ
-    移す**: workspace → `trash/<名前>`、`/ext/groups/<g>/…` → `/ext/groups/<g>/trash/<名前>`、
+  - `POST /files/trash` — `{user_id, path, mounts?}`。nucllei の builtin `remove_file` 用。
+    **どの置き場でも消さずに、その置き場の `trash/` の直下へ移す**: workspace → `trash/<名前>`、
+    `/ext/groups/<g>/…` → `/ext/groups/<g>/trash/<名前>`、
     `/ext/public/…` → `/ext/public/trash/<名前>` → `{ok, trashed: true, path, cache_ttl_days}`
     (`path` は workspace なら相対、`/ext` は jail の絶対パス)。名前の番号・409・`trash/` の作成と
     symlink の 400 は `/files/delete` と同じ。ファイルもディレクトリ (中身ごと) も受ける。400 で
     断るもの: 置き場の root・`.` 始まり・workspace 直下の `imports/` (`_check_mutable`)、置き場の
     `trash/` そのものとその中、末端の symlink (`is a symlink: …`)。ro の bind は 403、bind に無い
-    ものは 404。**`/files/delete` の意味は変えていない** (`/ext` は完全削除のまま = ファイル
-    ブラウザの挙動は不変) — 新しい nucllei と古い sandbox の組み合わせで `/ext` のファイルが黙って
-    完全に消えないよう、別の endpoint にした (古い sandbox は 404 で止まり、nucllei は「sandbox の
-    更新が要る」と言う)
-    `name` (省略可、2026-10-30) を渡すとゴミ箱ではその名前にする (同名の番号は同じ規則。`/`・`.`
+    ものは 404。`/files/delete` (`/ext` は完全削除 = ファイルブラウザ用) とは別の endpoint — `/files/trash`
+    を知らない sandbox は 404 で止まり (nucllei は「sandbox の更新が要る」と言う)、`/ext` のファイルが黙って
+    完全に消えることはない
+    `name` (省略可) を渡すとゴミ箱ではその名前にする (同名の番号は同じ規則。`/`・`.`
     始まり・NUL・255 バイト超は 400)。nucllei の `save_recipe` が前の版の RECIPE.md を
     `<レシピ名>.RECIPE.md` として移すのに使う
-  - `POST /recipes/index` — `{user_id, places, mounts?, head_bytes?}` (2026-10-30、llens 依頼)。
-    nucllei のレシピの一覧 (モデルの能力「レシピ」が有効なとき、見えるレシピの一覧を `load_recipe` の説明に差し込む) 用。`places` は層の
+  - `POST /recipes/index` — `{user_id, places, mounts?, head_bytes?}`。
+    nucllei のレシピの一覧 (モデルの能力「レシピ」が有効なとき、見えるレシピの一覧を `{{USER_RECIPES}}` か `load_recipe` の説明に差し込む) 用。`places` は層の
     jail のパス (`/workspace` / `/ext/groups/<g>` / `/ext/public`) で、各層の `recipes/` の直下を
     `{places: [{place, exists, recipes: [{name, type, md: {type, size, head_b64, truncated} | null,
     entries: {<直下の名前>: <種類>}}]}]}` で返す (`.` 始まりは出さない・1 層 500 件まで、`head_bytes` は既定 16KB・上限 64KB)。symlink の
@@ -445,7 +443,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
     して他の層は返す。毎リクエスト走るので 1 回で全部返す (100 件の層で 1 秒未満を
     `test_recipes.py` で見る)。判定 (名前の規則・frontmatter) は nucllei の `utils/recipes.py`
   - `POST /files/stat_many` — `{user_id, paths, mounts?}` → `{results: {<path>: "file" | "dir" |
-    "symlink" | "other" | null}}` (2026-10-30)。jail の絶対パス (`/workspace/…` `/ext/…`) を 500 件まで
+    "symlink" | "other" | null}}`。jail の絶対パス (`/workspace/…` `/ext/…`) を 500 件まで
     まとめて stat する (経路も末端も symlink を辿らない、`null` は無い・見えない)。nucllei の
     レシピの一覧が全レシピの requires の参照先 (`read:` `recipe:`) の有無を 1 回で調べるのに使う
   - `POST /recipes/folder` — `{user_id, path, mounts?, limit_bytes?}`。レシピのフォルダの中身を
@@ -598,8 +596,8 @@ jail に出る (上記「参照用データを jail に見せる」)。グルー
 | `write_file(path, content)` | モデルが書いたテキストを workspace に直接書く (`/files/write`)。`path` は `/workspace/` 配下か、書ける `/ext/groups/<g>/…` (admin は `/ext/public/…` も) の絶対パス。テキスト専用・上書き・既定 1MB 上限 (nucllei の `SANDBOX_TEXT_MAX_SIZE_MB`) |
 | `edit_file(path, old_text, new_text)` | テキストファイルの一部を直す (`/files/stat` → `/files/read` → `/files/write`)。`old_text` がちょうど 1 か所一致するときだけ `new_text` に置き換え、0 か所・2 か所以上・`old_text` 空は断る (追記の専用引数は無い)。読んだ文字コード (BOM 付き UTF-8 / UTF-8 / cp932) のまま書き戻す。`path` の範囲と上限は `write_file` と同じ |
 | `remove_file(path)` | ファイル・フォルダ (中身ごと) をその置き場のゴミ箱の直下へ移す (`/files/trash`)。`/workspace/…` → `/workspace/trash/`、`/ext/groups/<g>/…` → `/ext/groups/<g>/trash/`、`/ext/public/…` → `/ext/public/trash/`。完全には消さない。同名は `-2` `-3`…。ゴミ箱の中・ゴミ箱そのもの・置き場の root・`.` 始まり・`/workspace/imports` と末端の symlink は断る。`path` の範囲は `write_file` と同じ |
-| `load_recipe(path)` / `save_recipe(…)` / `edit_recipe(path, old_text, new_text)` | (sandbox のツールではなく、モデルの能力「レシピ」で入る別の tool。sandbox の API を使うのでここに載せる) レシピ (`<層>/recipes/<名前>/RECIPE.md`) を読み込む・作る・直す。読み出しと検査は `/recipes/folder`、前の版は `/files/trash` (`name`) で `<層>/trash/<名前>.RECIPE.md` へ、書き込みは `/files/write`。一覧は `/recipes/index` (`load_recipe` の説明に差し込む)。判定と引数は nucllei の README_API |
-| `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧。管理者が所属していないグループには「所属していない (管理者なので見えている)」を添える — その中の一覧も同じ)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
+| `load_recipe(path)` / `save_recipe(…)` / `edit_recipe(path, old_text, new_text)` | (sandbox のツールではなく、モデルの能力「レシピ」で入る別の tool。sandbox の API を使うのでここに載せる) レシピ (`<層>/recipes/<名前>/RECIPE.md`) を読み込む・作る・直す。読み出しと検査は `/recipes/folder`、前の版は `/files/trash` (`name`) で `<層>/trash/<名前>.RECIPE.md` へ、書き込みは `/files/write`。一覧は `/recipes/index` (`{{USER_RECIPES}}` か `load_recipe` の説明に差し込む)。判定と引数は nucllei の README_API |
+| `list_workspace(path?)` | workspace のファイル一覧。`path` は `/workspace` 配下・`/ext/groups` (見えるグループの一覧。各行に書けるか・読み取り専用か (書き込みを指定した人だけにしたグループの、指定されていないメンバー) を添え、管理者が所属していないグループには「所属していない (管理者なので見えている)」も添える — その中の一覧も同じ)・`/ext/groups/<g>/…`・`/ext/public/…` の絶対パス (省略時 `/workspace`)、各行も絶対パスで返す |
 | `fetch_from_workspace(path)` | sandbox のファイル (`/workspace/…` か `/ext/…` の絶対パス) を利用者に見せられる形にする: Files に登録してチャットに添付し file_id を返す。nucllei 側にも在る (= 既に URL `/ext/…` で配信されている) `/ext/…` のファイルは添付せず、その URL (同じ文字列) を返す (下記) |
 
 - **`send_to_workspace(url=)` の URL は nucllei の共有 resolver (`nucllei/utils/image_refs.py`) で解決する**

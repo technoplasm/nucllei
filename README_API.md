@@ -281,28 +281,28 @@ separate reasoning block.
 
 ### 3.6 Tool calling & tasks
 
-| Var                                                            | Kind | Default                                     | Effect                                                                                                                                                                                                                                                                |
-| -------------------------------------------------------------- | ---- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TOOL_CALL_MAX_ITERATIONS`                                     | env  | `30` (`-1` unlimited)                       | native tool-loop cap; hitting it surfaces an in-chat error                                                                                                                                                                                                            |
-| `TOOL_EXEC_TIMEOUT_S`                                          | env  | `300` s (`-1` off)                          | authoritative per-tool-call timeout; expiry is returned to the model as a tool result                                                                                                                                                                                 |
-| `TOOL_RESULT_MAX_CHARS`                                        | env  | `65536`                                     | tool results longer than this are truncated once at the producer (sync and background alike), flagged `truncated` / `original_chars` (§5.5)                                                                                                                           |
-| `SUBAGENT_TURN_TIMEOUT_S`                                      | env  | `1800` s (`-1` off)                         | timeout of one `run_subagent` child turn (§5.8)                                                                                                                                                                                                                       |
-| `SUBAGENT_MAX_DEPTH`                                           | env  | `2`                                         | nesting limit of agent sessions (user chat = depth 0); `run_subagent` is not offered beyond it (§5.8)                                                                                                                                                                 |
-| `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                                         | per-process cap on simultaneously running subagents; excess calls wait for a slot in arrival order (since 2026-10-30; before, they failed immediately) (§5.8)                                                                                                         |
-| `SUBAGENT_QUEUE_TIMEOUT_S`                                     | env  | `SUBAGENT_TURN_TIMEOUT_S` + 30 s (`-1` off) | how long an excess `run_subagent` call waits for a slot before failing — unset, it follows the child-turn limit (+30 s to stop a child), so the first N waiters outlast the children holding the slots; added to its per-tool timeout; nested calls never wait (§5.8) |
-| `ASYNC_EXEC_TIMEOUT_S`                                         | env  | `1800` s (`-1` off)                         | timeout of one background execution unless the tool declares its own (§5.9)                                                                                                                                                                                           |
-| `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`                                  | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                                                                                                                        |
-| `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                                         | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                                                                                                                         |
-| `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)                                  | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                                                                                                                          |
-| `SANDBOX_TEXT_MAX_SIZE_MB`                                     | env  | `1` (MB, integer)                           | text cap: body of `write_file` (guard against a looping model), the file `edit_file` edits (before and after the edit) and the file browser's text editor (open / save, §4.4.1). `read_file` reads by range and has no cap (§5.7)                                     |
-| `RECIPE_RESTRICTED_TOOLS`                                      | env  | empty                                       | recipes (§6.5): functions only some users can use, as a JSON object `{"<function>": "<group>"                                                                                                                                                                         | null}` (`null`= personal layer only). A recipe in a shared layer whose files name such a function is refused unless the layer is that group; a reader outside the group gets a warning when the`RECIPE.md`names it. Read by`save_recipe`/`edit_recipe`/`load_recipe`(and the recipe list in its description) and`nucllei recipe-check` |
-| `RECIPE_MEMO_KEYS`                                             | env  | empty                                       | recipes (§6.5): keys of provenance-memo lines (`-- <key>:`) that a tool leaves at the top of saved files (comma-separated, e.g. `executed_at,csv,params`). Such a line is refused as patient data                                                                     |
-| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                                        | model used for background tasks (title generation)                                                                                                                                                                                                                    |
-| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in                           | auto chat titles                                                                                                                                                                                                                                                      |
-| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`                                 | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                                                                                                                      |
-| `SELF_ADDRESSES`                                               | env  | `""`                                        | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8). Was `EXT_SELF_ADDRESSES` until 2026-10-03                                                                                                      |
-| `FETCH_MAX_BYTES`                                              | env  | `26214400` (25 MB)                          | default size cap when a reference (URL or sandbox path) is read by the resolver (§3.8); tools override it per call. Was `EXT_INLINE_MAX_BYTES` until 2026-10-03                                                                                                       |
-| `EXT_MOUNTS` / `EXT_PROXY_TIMEOUT_S`                           | env  | `""` / `30`                                 | `/ext/<name>` table — `name=http(s)://base` (proxy) or `name=/abs/dir` (static); empty = `/ext/**` all 404 / proxy read timeout (§3.8)                                                                                                                                |
+| Var                                                            | Kind | Default                                     | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------------------- | ---- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TOOL_CALL_MAX_ITERATIONS`                                     | env  | `30` (`-1` unlimited)                       | native tool-loop cap; hitting it surfaces an in-chat error                                                                                                                                                                                                                                                                                                                                                                                        |
+| `TOOL_EXEC_TIMEOUT_S`                                          | env  | `300` s (`-1` off)                          | authoritative per-tool-call timeout; expiry is returned to the model as a tool result                                                                                                                                                                                                                                                                                                                                                             |
+| `TOOL_RESULT_MAX_CHARS`                                        | env  | `65536`                                     | tool results longer than this are truncated once at the producer (sync and background alike), flagged `truncated` / `original_chars` (§5.5)                                                                                                                                                                                                                                                                                                       |
+| `SUBAGENT_TURN_TIMEOUT_S`                                      | env  | `1800` s (`-1` off)                         | timeout of one `run_subagent` child turn (§5.8)                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `SUBAGENT_MAX_DEPTH`                                           | env  | `2`                                         | nesting limit of agent sessions (user chat = depth 0); `run_subagent` is not offered beyond it (§5.8)                                                                                                                                                                                                                                                                                                                                             |
+| `SUBAGENT_MAX_CONCURRENCY`                                     | env  | `4`                                         | per-process cap on simultaneously running subagents; excess calls wait for a slot in arrival order (§5.8)                                                                                                                                                                                                                                                                                                                                         |
+| `SUBAGENT_QUEUE_TIMEOUT_S`                                     | env  | `SUBAGENT_TURN_TIMEOUT_S` + 30 s (`-1` off) | how long an excess `run_subagent` call waits for a slot before failing — unset, it follows the child-turn limit (+30 s to stop a child), so the first N waiters outlast the children holding the slots; added to its per-tool timeout; nested calls never wait (§5.8)                                                                                                                                                                             |
+| `ASYNC_EXEC_TIMEOUT_S`                                         | env  | `1800` s (`-1` off)                         | timeout of one background execution unless the tool declares its own (§5.9)                                                                                                                                                                                                                                                                                                                                                                       |
+| `ASYNC_EXEC_MAX_CONCURRENCY` / `ASYNC_EXEC_MAX_TOTAL`          | env  | `4` / `16`                                  | background executions running at once per user / per process; excess fails immediately as a tool result (§5.9)                                                                                                                                                                                                                                                                                                                                    |
+| `ASYNC_EXEC_RESUME_CHAIN_LIMIT`                                | env  | `5`                                         | how many server-driven delivery turns may chain without a user message; further deliveries wait for the next user turn (§5.9)                                                                                                                                                                                                                                                                                                                     |
+| `ASYNC_EXEC_RETENTION_DAYS`                                    | env  | `0` (keep)                                  | `> 0`: at boot, drop result/args/meta of finished execution rows older than this many days (rows themselves are kept) (§5.9)                                                                                                                                                                                                                                                                                                                      |
+| `SANDBOX_TEXT_MAX_SIZE_MB`                                     | env  | `1` (MB, integer)                           | text cap: body of `write_file` (guard against a looping model), the file `edit_file` edits (before and after the edit) and the file browser's text editor (open / save, §4.4.1). `read_file` reads by range and has no cap (§5.7)                                                                                                                                                                                                                 |
+| `RECIPE_RESTRICTED_TOOLS`                                      | env  | empty                                       | recipes (§6.5): functions only some users can use, as a JSON object `{"<function>": "<group>" \| null}` (`null` = personal layer only). A recipe in a shared layer whose files name such a function is refused unless the layer is that group; a reader outside the group gets a warning when the `RECIPE.md` names it. Read by `save_recipe` / `edit_recipe` / `load_recipe` (and the recipe list in its description) and `nucllei recipe-check` |
+| `RECIPE_MEMO_KEYS`                                             | env  | empty                                       | recipes (§6.5): keys of provenance-memo lines (`-- <key>:`) that a tool leaves at the top of saved files (comma-separated, e.g. `executed_at,csv,params`). Such a line is refused as patient data                                                                                                                                                                                                                                                 |
+| `TASK_MODEL` / `TASK_MODEL_EXTERNAL`                           | RC   | `""`                                        | model used for background tasks (title generation)                                                                                                                                                                                                                                                                                                                                                                                                |
+| `ENABLE_TITLE_GENERATION` / `TITLE_GENERATION_PROMPT_TEMPLATE` | RC   | `true` / built-in                           | auto chat titles                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `SANDBOX_URL` / `SANDBOX_TOKEN`                                | env  | `""` / `""`                                 | sandbox base URL (gates `builtin_sandbox`) + optional shared bearer token (§5.7)                                                                                                                                                                                                                                                                                                                                                                  |
+| `SELF_ADDRESSES`                                               | env  | `""`                                        | comma-separated IPs added to the "this server itself" set refused by `url=` fetches (host's outward-facing IPs; §3.8). Was `EXT_SELF_ADDRESSES` until 2026-10-03                                                                                                                                                                                                                                                                                  |
+| `FETCH_MAX_BYTES`                                              | env  | `26214400` (25 MB)                          | default size cap when a reference (URL or sandbox path) is read by the resolver (§3.8); tools override it per call. Was `EXT_INLINE_MAX_BYTES` until 2026-10-03                                                                                                                                                                                                                                                                                   |
+| `EXT_MOUNTS` / `EXT_PROXY_TIMEOUT_S`                           | env  | `""` / `30`                                 | `/ext/<name>` table — `name=http(s)://base` (proxy) or `name=/abs/dir` (static); empty = `/ext/**` all 404 / proxy read timeout (§3.8)                                                                                                                                                                                                                                                                                                            |
 
 ### 3.7 Attachments / files / storage
 
@@ -479,7 +479,7 @@ sandbox tool and the file browser all call it:
 | `/ext/public/…`             | ro                                                                                                                   | rw                        |
 | `/ext/<other>/…` (doc, …)   | ro                                                                                                                   | ro                        |
 
-- **Who may write a group's folder** (2026-10-31) is a group attribute, not a
+- **Who may write a group's folder** is a group attribute, not a
   user permission: `data.ext = {"write": "members" | "listed", "writers":
 [user_id, …]}`. Absent or `members` = every member is rw (a group without
   the setting needs no migration). `listed` = only
@@ -1117,8 +1117,7 @@ calls carry the turn's reasoning back to the model — see "Reasoning in the
 history" under 4.3. Turn it off only for an OpenAI-compatible API that rejects or
 misreads `reasoning_content` on assistant messages.
 
-`POST /api/v1/models/preview` (admin-only, like preset edits; 2026-10-30, ken:
-"show how it actually expands, as a tab") — body `{model: <ModelForm, unsaved>,
+`POST /api/v1/models/preview` (admin-only, like preset edits) — body `{model: <ModelForm, unsaved>,
 variables?: {"{{CURRENT_TIMEZONE}}": …, "{{USER_LANGUAGE}}": …}}` (`variables` = what
 the chat sends as `metadata.variables` — the browser's `getPromptVariables`; only
 those two are used, §6.1). Returns what the model
@@ -1731,8 +1730,7 @@ class Tools:
   docstring. That spec is the function named by the class attribute
   `toolkit_note_anchor` (a string; the builtin sandbox uses `"run_python"`),
   else the first spec (by name order — which changes whenever a function is
-  added, so declare the anchor; until 2026-10-30 the sandbox note sat on
-  `edit_file` that way). Use it for caveats that apply to the whole toolkit
+  added, so declare the anchor). Use it for caveats that apply to the whole toolkit
   (execution-environment properties, serialization behavior, …). Docstrings in
   a tool file are model-facing text across the board (function docstrings
   already are); keep developer notes in `#` comments.
@@ -1958,15 +1956,13 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     the calling user's own chats. `grep_history` hits carry `matches` (up to 3
     per chat: `{role, excerpt}` with ±60 chars of context around the match,
     NFKC + casefold matching; empty when only the title matched — 2026-10-03).
-    Since 2026-10-30 a hit whose excerpts hit the cap or are empty carries
+    A hit whose excerpts hit the cap or are empty carries
     `matches_note` (「抜粋は最初の 3 件まで (他にも一致があるかもしれない)」 /
-    「本文の抜粋は無い (タイトルだけの一致)」) instead of the description saying
-    so, and "not found" with a current chat adds 「(いま進行中のチャットは検索しない)」.
+    「本文の抜粋は無い (タイトルだけの一致)」), and "not found" with a current chat adds 「(いま進行中のチャットは検索しない)」.
   - `builtin_chat_files` — `list_chat_files` / `grep_chat_files`: attachments
     issued in the current chat, metadata only. An entry with `deleted: true` is
     a deleted file whose `file_id` no longer opens — said by the result's
-    `note` when such an entry is present (2026-10-30; the docstrings said it
-    from 2026-10-19). Without a user both tools (and `builtin_history`) raise a
+    `note` when such an entry is present. Without a user both tools (and `builtin_history`) raise a
     `failure` ToolError (until 2026-10-19 a bare `ValueError`, i.e. `fatal`).
   - `builtin_attachment_text` — `read_attachment(file_id, offset?, max_chars?)`:
     the extracted text of an owned attachment (`Files.data.content` written by
@@ -2099,8 +2095,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     context on later turns, so it is not "light" — look only when the text
     is not enough, as for attached PDFs. A cut result names the next window
     **with the same `query`** (`続きは fetch_url(url="<the url>", query="…", offset=N) で取る (同じ query を渡す)`
-    — the real url, not `url=...`, since 2026-10-30
-    — the offset counts the filtered text). Oversize (`too_large`): the
+    with the real url — the offset counts the filtered text). Oversize (`too_large`): the
     suggested `max_mb` is always a concrete number (never a placeholder) —
     over the real size when known, else twice the cap, within the ceiling —
     and the step is 「run_subagent に URL と指示を渡し、子が fetch_url(url=…, max_mb=N) で読む」
@@ -2133,14 +2128,14 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
   - `builtin_sandbox` — `run_python` / `run_python_once` / `run_shell` /
     `send_to_workspace` / `write_file` / `edit_file` / `remove_file` / `read_file` /
     `list_workspace` / `fetch_from_workspace`. (The recipe tools `load_recipe` /
-    `save_recipe` / `edit_recipe` are not part of it since 2026-10-30: they come
+    `save_recipe` / `edit_recipe` are not part of it: they come
     with the preset's capability "Recipes" — §6.5.) **Registered only when `SANDBOX_URL` is set**; with
     no value the tool is absent from `/api/v1/tools/` entirely (and an existing
     row is pruned on the next boot, ACL included). It is gated because, unlike
     the always-registered builtins above, it needs an external service to be
     reachable — a builtin that is listed but always errors would be worse than
     one that is absent.
-    **Jail environment (2026-10-27).** Every `run_python` / `run_python_once` /
+    **Jail environment.** Every `run_python` / `run_python_once` /
     `run_shell` request carries the caller's groups and role
     (`user_groups: [...]`, `user_role`), and the sandbox exposes them inside the
     jail as two environment variables, so programs in the jail (a deployment's
@@ -2149,11 +2144,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       comma-separated, in the same order as `{{USER_GROUPS}}`. Admins get only
       their own memberships, not every group. **No membership is the empty
       string; the variable is still defined.** Undefined means a sandbox or
-      nucllei too old to pass it. A name that fails the current group-name rule
-      (one created before #151, e.g. with a comma, a space or a shell
-      metacharacter) is left out with a warning in the log, because the value
-      is a comma-separated contract read by programs; `{{USER_GROUPS}}` keeps
-      the stored names unchanged. Commas are already forbidden in new names.
+      nucllei too old to pass it. A stored name that fails the group-name rule
+      (e.g. with a comma, a space or a shell metacharacter) is left out with a
+      warning in the log, because the value is a comma-separated contract read
+      by programs; `{{USER_GROUPS}}` keeps the stored names unchanged.
     - `NUCLLEI_USER_ROLE` — `admin`, `user` or `pending` (the role string as
       stored). Any other role is not sent, so the variable is undefined.
       The stateful kernel is recreated (`session_reset`) when either value
@@ -2219,7 +2213,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       default and `feed_image` is not on the turn, the image / PDF refusal says
       「PDF なら run_shell の pdftotext (スキャンなら tesseract) で /workspace/ にテキストを書き出し、そのファイルを read_file で読む。」
       instead (a deployment's own valve text is kept as is).
-      `edit_file(path, old_text, new_text)` (2026-10-27, requested by llens) edits
+      `edit_file(path, old_text, new_text)` edits
       part of an existing text file: it replaces the **one** occurrence of
       `old_text` with `new_text` and writes the file back. Path resolution, ACL
       (`/workspace/`, a writable `/ext/groups/<g>/`, `/ext/public/` for admins),
@@ -2255,30 +2249,25 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       write is not detected (the sandbox has no conditional write).
       `write_file`'s and `read_file`'s docstrings point at `edit_file` for
       partial edits, and `read_file`'s cp932 label says `edit_file` keeps cp932.
-      `edit_file`'s own description (2026-10-30, trimmed at llens' request) says
+      `edit_file`'s own description says
       only what it does, how to append and the arguments; the rest (no match,
       creating, binary, size, encoding, writable places) is said by the error or
       result of that case.
-      **No-overwrite places for `write_file` (2026-10-31, ken):** the model sometimes
-      rewrote the memory index wholesale with `write_file`, dropping existing lines.
-      The sandbox valve `write_no_overwrite_paths` (same format and matching as
+      **No-overwrite places for `write_file`:** the sandbox valve `write_no_overwrite_paths` (same format and matching as
       `rm_allowed_paths` below — newline / comma separated absolute paths, globs per
       segment, paths normalised so `..` neither escapes nor sneaks in, files **below**
       an entry, nested ones included) makes `write_file` there **create only** — it
       writes with the sandbox's exclusive create (`/files/write` `exclusive`, `O_EXCL`;
       no stat-then-write race) and turns the 409 into
       「<path> は既にある (この置き場では write_file で上書きしない)。次の手: 一部を直す・足すなら edit_file (末尾に足すなら最後の行を old_text に含める。構成を変えるなら edit_file で該当範囲ごと置き換える — run_shell や run_python で書き直さない)。」
-      (a final symlink is refused by the sandbox as before). Creating a new file there
-      still works; outside the entries nothing changes; the default is empty (no
-      change). There is no escape hatch for a full rewrite (`edit_file` can replace a
+      (a final symlink is refused by the sandbox). Creating a new file there
+      works; outside the entries nothing changes; the default is empty. There is no escape hatch for a full rewrite (`edit_file` can replace a
       large span). Not covered: `run_shell` redirections (`>`, `cat > … <<EOF`),
       `python` `open(…, "w")`, `mv` / `cp` over the file, `rm` then `write_file` where
       `rm` is allowed (`rm_allowed_paths`), or a symlink placed outside the entry that
       points into it — a guard, not a security boundary.
-      **`rm` guard on `run_shell` (2026-10-30, requested by llens):** asked to
-      「完全に消して」, the model sometimes ran `rm -rf /workspace/<作業フォルダ>` (and once,
-      as an admin, `rm -rf` on shared `/ext/public` recipes) instead of `remove_file`.
-      Before sending a command to the sandbox, `run_shell` looks for a plain `rm`
+      **`rm` guard on `run_shell`:** before sending a command to the sandbox,
+      `run_shell` looks for a plain `rm`
       **command word** (at the start, after `;` `&&` `||` `|` `&` a newline `(` `$(` or a
       backtick, after `if` / `then` / `do` / … and past `sudo` / `env` / `command` / `exec` /
       `nohup` / `time` / `nice` / `timeout` (with their value-taking options) and
@@ -2305,7 +2294,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       command word (`echo rm …`, `grep rm file`, `git rm` pass), `#` comments (outside
       quotes, at a word start) and `\`-newline continuations are handled, and a command
       it cannot read (unclosed quote, a heredoc `<<`) runs unchanged (`utils/rm_guard.py`).
-      `remove_file(path)` (2026-10-27, decided by ken, requested by llens)
+      `remove_file(path)`
       **moves** a file or a folder (with its contents) to the trash of the place
       it is in — it never deletes: `/workspace/…` → `/workspace/trash/<name>`,
       `/ext/groups/<g>/…` → `/ext/groups/<g>/trash/<name>`, `/ext/public/…` →
@@ -2316,11 +2305,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       `/ext/groups/<g>`, `/ext/public`) is refused. Refused before asking the
       sandbox: the trash itself and anything in it (next step: nothing to do, it
       empties itself; to empty it sooner the user can delete it on screen under
-      the workspace's 「サンドボックス」 — said in the error since 2026-10-30, not
-      left to the deployment prompt), a name starting with `.`,
-      and `/workspace/imports`. The sandbox endpoint is the new
-      `POST /files/trash` — `/files/delete` is unchanged (its `/ext` delete stays
-      permanent, so the workspace file browser behaves as before); a sandbox
+      the workspace's 「サンドボックス」 — said in the error), a name starting with `.`,
+      and `/workspace/imports`. The sandbox endpoint is
+      `POST /files/trash` (`/files/delete`, which the workspace file browser uses,
+      deletes `/ext` entries permanently); a sandbox
       without `/files/trash` (FastAPI's `{"detail":"Not Found"}` 404) is
       reported as 「sandbox が古く、remove_file に対応していない (sandbox の更新が要る)」
       instead of silently deleting. A final symlink is refused (「… は symlink で、remove_file では移さない (リンク先も移さない)」).
@@ -2329,8 +2317,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
       or missing) and the restore line
       「戻すなら run_shell で `mv '<trash path>' '<path>'` を実行する。」 (shell-quoted).
       `remove_file`'s description says 「ファイルを消すときは run_shell の rm ではなくこちらを使う (例外は system prompt の決まりに従う)」
-      (the toolkit note said it until 2026-10-30; the note now only says that
-      `imports/` and `trash/` expire).
+      (the toolkit note only says that `imports/` and `trash/` expire).
       The sandbox empties `/ext/groups/*/trash/` and `/ext/public/trash/` with
       the same rule as `/workspace/trash/` (`SANDBOX_CACHE_TTL_DAYS`, per
       top-level entry, max(mtime, ctime)) every hour.
@@ -2487,10 +2474,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 
 The docstrings of `feed_image` and `fetch_url` carry only what the model needs
 to decide whether and how to call them — purpose, the accepted form of each
-argument, the return shape and the one-line ERROR shape (`feed_image` dropped
-the return / ERROR shape on 2026-10-30 — the deployment's system prompt states
-the `ERROR:` / `次の手:` convention once for every tool — and leaves how to
-show what it saw, the continuation of a cut PDF and `pages` on an image to the
+argument, the return shape and the one-line ERROR shape (`feed_image` omits
+the return and ERROR shapes — the deployment's system prompt states the
+`ERROR:` / `次の手:` convention once for every tool — and leaves how to show
+what it saw, the continuation of a cut PDF and `pages` on an image to the
 result or error of that case). They are sent on every
 turn, so the finer guidance was moved here on 2026-10-04 (it cost ~900 tokens
 per turn). A deployment that wants the model to know it carries it in its
@@ -2618,8 +2605,8 @@ shared note, so deployment prompts need not repeat it.
   `ToolError` instead. Pass `session_id` instead
   of `preset_id` to send a follow-up instruction to an existing session.
   A new spawn without `preset_id` uses the only usable preset when there is
-  exactly one (2026-10-30, staging P05 — not stated to the model, since the
-  param says it is required for a new spawn); with two or more it fails with
+  exactly one (not stated to the model, since the param says it is required
+  for a new spawn); with two or more it fails with
   「preset_id が無い (新しく起動するときは必須)。次の手: preset_id に a / b のどれかを入れて呼び直す。」
   (the same ids as the enum); with none, 「サブエージェントに使える preset が無い。次の手: 自分で処理する。」.
   `preset_id` stays optional in the schema (a continuation does not need it).
@@ -2644,11 +2631,9 @@ response run concurrently (§5.5) and the turn continues when all are done;
 Limits: nesting depth `SUBAGENT_MAX_DEPTH` (default 2), process-wide
 concurrency `SUBAGENT_MAX_CONCURRENCY` (default 4; every user, nested children
 and background runs count; per worker process when `UVICORN_WORKERS > 1`).
-**Since 2026-10-30 a call over the limit waits for a slot instead of failing**
-(staging P11: with an immediate error — whatever its wording, including naming
-the running tasks and telling the model not to retry — the model kept calling
-run_subagent 4–13 times per run; it put the user's "have a child read each
-chapter" before the error's next step). Waiters form one FIFO queue across
+**A call over the limit waits for a slot; it does not fail** (an immediate
+error, however worded, makes the model call `run_subagent` again and again).
+Waiters form one FIFO queue across
 users (`_slot_waiters`); a released slot is handed to the head waiter without
 being decremented, so a new call cannot jump the queue. A sync call waits in
 the parent turn (the tool card shows 「サブエージェントの枠が空くのを待っている (N 番目、T 秒)」, re-sent every 30 s);
@@ -2684,8 +2669,8 @@ background call queues instead of failing, and a merely waiting task never
 makes the child's own background `run_python` etc. fail. Waiting tasks still
 count toward the process-wide `ASYNC_EXEC_MAX_TOTAL` (so they cannot pile up
 without bound). Running background subagents do count per user, so with 4 of
-them running the children's own background `run_python` can still be refused
-(unchanged). If the parent chat was
+them running the children's own background `run_python` can still be refused.
+If the parent chat was
 deleted while waiting, no child is created. If the call ends after the child
 task was created but before its done callback was attached (a cancel inside
 `start_internal_turn`), the slot is released when the child ends and the child
@@ -2737,10 +2722,10 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   (default 90 s, clamped to 10–300) covers all ids (max 20 per call);
   already-terminal tasks return immediately (idempotent — results stay
   re-collectable while the row is retained: indefinitely by default, see
-  `ASYNC_EXEC_RETENTION_DAYS`; since 2026-10-30 the description no longer
-  states the period — a purged row comes back as `{ok: false, …, error:
-「このタスクの結果は保持期間を過ぎて消えている。次の手: 結果が要るなら同じ処理をもう一度実行する。」}`
-  instead of an empty success). Per entry: done →
+  `ASYNC_EXEC_RETENTION_DAYS`; the description does not state the period — a
+  purged row comes back as `{ok: false, …, error:
+「このタスクの結果は保持期間を過ぎて消えている。次の手: 結果が要るなら同じ処理をもう一度実行する。」}`).
+  Per entry: done →
   `{ok, task_id, tool_name, status, result, duration?, usage?, truncated?}`
   (with the original tool's settled result display — text included — when
   exactly one done task was requested, and a one-time replay of `context_images`/`display`
@@ -2749,11 +2734,10 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   (`error_kind` from the row's `meta.error_kind` — absent for stopped /
   orphaned);
   still running at the deadline → the running form (partial collection — the
-  server delivers the rest later), and the result then carries `note`
-  (2026-10-30, moved from the description): 「status が "running" のタスクはまだ実行中 (終わったタスクの結果はこの返りにある)。次の手: running の分を待つために呼び直さず、終わった分の結果と、まだ実行中のものがあることをユーザーに伝えて応答を終える (running の分の結果は完了時に自動で届く)。」.
+  server delivers the rest later), and the result then carries `note`: 「status が "running" のタスクはまだ実行中 (終わったタスクの結果はこの返りにある)。次の手: running の分を待つために呼び直さず、終わった分の結果と、まだ実行中のものがあることをユーザーに伝えて応答を終える (running の分の結果は完了時に自動で届く)。」.
   `check_task` returning a running task carries `note`
-  「実行中のタスクの結果は完了時に自動で届く。次の手: 待つために check_task を呼び直さない (今すぐ結果が要るなら await_task で受け取る)。」
-  (the "no need to call to collect" sentence moved out of its description).
+  「実行中のタスクの結果は完了時に自動で届く。次の手: 待つために check_task を呼び直さない (今すぐ結果が要るなら await_task で受け取る)。」.
+
 - `stop_task(task_ids)` — force-stop; returns each task's actual state
   afterwards. Idempotent on already-terminal tasks. Side effects may already
   have completed. An entry that had already finished carries `note`
@@ -2762,10 +2746,8 @@ true` lists terminal ones too (newest first, max 50); with `task_ids` returns
   delivered by this report, so no notice will bring the result later);
   `orphaned` → the row's fixed `error` (below). The description no longer
   says 「撃って」: 「終了済みのタスクを指定しても今の状態を返すだけで、何も変えない (その結果は await_task で受け取る)」.
-  What to do with `running` was in `await_task`'s description until
-  2026-10-30 and is now the result's `note` (above); `orphaned` is explained
-  by the row's own `error` (`ORPHANED_ERROR`), no longer by `check_task`'s
-  `include_done`.
+  What to do with `running` is the result's `note` (above); `orphaned` is
+  explained by the row's own `error` (`ORPHANED_ERROR`).
 
 All three collectors are builtin pseudo-tools, mounted automatically whenever
 an eligible tool is on the turn or the chat has execution rows (independent of
@@ -2936,8 +2918,7 @@ POST /api/v1/skills/create
   (the recipes the user can see — the same block as in `load_recipe`'s
   description, §6.5; empty when the "Recipes" capability is off or there is no
   sandbox; fetched once per request). Both need the preset, so they are empty
-  where none is known (e.g. title generation). `{{USER_MEMORY_INDEX}}`
-  (2026-10-31, ken: "if recipes come in as a list, memory should too") is the
+  where none is known (e.g. title generation). `{{USER_MEMORY_INDEX}}` is the
   user's memory index file — env `USER_MEMORY_INDEX_PATH` (default
   `/workspace/memory/MEMORY.md`; empty or outside `/workspace/` = off) read from
   the sandbox (`/files/read`, `nofollow`, up to 256 KB, UTF-8 or cp932; binary →
@@ -2962,7 +2943,7 @@ POST /api/v1/skills/create
   string; no sandbox → empty; a sandbox that fails or does not answer (5 s) →
   `(記憶の目次を取れない: sandbox が応答しない)`. Empty, and not fetched, in a
   subagent's child turn (`agent_session` — the child works from its instruction
-  and does not read the user's memory, llens's subagent prompt) and in skill
+  and does not read the user's memory) and in skill
   bodies (system prompt only: a skill has no fetch-ahead path, and inside a
   child turn it would carry the parent's index). The value changes whenever the
   memory is written — mid-chat too — so put it near the end of the system
@@ -2971,8 +2952,7 @@ POST /api/v1/skills/create
   system prompt (`params.system`). Inside a subagent's turn `{{BASE_MODEL_ID}}`
   refers to the child preset's base, while the `{{USER_*}}` variables stay those
   of the user who started the parent chat. There is no call-time parameter mechanism.
-  **Which side is the source** (2026-10-30, llens: "in the UI chat `{{CURRENT_WEEKDAY}}`
-  came out as `Friday`" — the browser's values used to be applied first and won):
+  **Which side is the source**:
 
   | Variable                                                                           | Source  | Note                                                                                                                                                                                                                                                                                                                                                                 |
   | ---------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2982,17 +2962,16 @@ POST /api/v1/skills/create
   | `{{USER_MEMORY_INDEX}}`                                                            | server  | the user's memory index file (sandbox); system prompt only — empty in skill bodies and subagent child turns                                                                                                                                                                                                                                                          |
   | `{{CURRENT_TIMEZONE}}` `{{USER_LANGUAGE}}`                                         | browser | only the browser knows them: the chat sends them as `variables` (`getPromptVariables`); they are expanded in the preset's system prompt and the chat's system prompt, and stay literal where no browser is involved (API, skills)                                                                                                                                    |
 
-  **Server-made values are fixed to `ja`** (2026-10-30, ken: "the server's locale is
-  ja"), whatever the browser's language (`{{USER_LANGUAGE}}`) or the server process's
-  locale: weekday `月曜日` … `日曜日`, time 24-hour `HH:MM:SS`, date `YYYY-MM-DD` (kept
-  ISO rather than `2026年10月30日` — recipes' `updated` and tool arguments use the ISO
-  form). There is no setting to switch it.
+  **Server-made values are fixed to `ja`**, whatever the browser's language
+  (`{{USER_LANGUAGE}}`) or the server process's locale: weekday `月曜日` … `日曜日`,
+  time 24-hour `HH:MM:SS`, date `YYYY-MM-DD` (ISO, not `2026年10月30日` — recipes'
+  `updated` and tool arguments use the ISO form). There is no setting to switch it.
 
   The chat sends only the two browser variables; any other key in `variables` is
   ignored (`task.BROWSER_PROMPT_VARIABLES`). The chat's own system prompt (the leading
   `system` message — per-chat settings) is expanded **by the server** too
-  (`payload.expand_chat_system_message` in `process_chat_payload`); the browser no
-  longer expands it.
+  (`payload.expand_chat_system_message` in `process_chat_payload`); the browser
+  does not expand it.
 
 - `tool_ids` — workspace tool ids to load on activation (**admin-only** to set,
   since it grants tool access through skill visibility).
@@ -3017,11 +2996,9 @@ POST /api/v1/skills/create
   send `[]` to clear. (Unlike `tool_ids` / `auto_load_content_types`, which an
   update replaces.) They are top-level fields of `POST /skills/create`,
   `POST /skills/id/{id}/update` and the skill responses (always lists).
-  `on_load` is gone (replaced before release, 2026-10-30); an `on_load` key in
-  the body is ignored as an unknown field.
 - `access_control` — `null` public / `{}` private / `{"read":{group_ids,user_ids}}`.
 
-`POST /api/v1/skills/preview` (skill editors; 2026-10-30) — body `{content,
+`POST /api/v1/skills/preview` (skill editors) — body `{content,
 before?, after?, model_id?, variables?}` (unsaved values; `variables` as in the model
 preview — gives the time zone for the dates). Returns `{before: [{n, tool, args}],
 content: {text, segments, exact, chars}, after: […]}`: the content expanded **as the
@@ -3060,17 +3037,16 @@ condition passes through as plain text (no error).
   model gets one `load_skill(skill_id)` pseudo-tool whose description embeds the
   manifest (`- <id>: <description>` lines, enum-constrained). Tools loaded this
   way are available from the next tool-loop iteration.
-  **If the preset's system prompt contains `{{SKILLS}}`** (2026-10-30, ken: "tools
-  → system prompt → skills → recipes; the lists go into the system prompt"), the
+  **If the preset's system prompt contains `{{SKILLS}}`**, the
   manifest goes there instead and `load_skill`'s description ends with the fixed
   sentence `使える skill の一覧は system prompt の「使える skill (load_skill の skill_id
 にそのまま渡す)」にある。`, with no `enum`. Chat templates (Kimi / MiMo / GLM) put
-  the tool declarations before the system prompt, so per-user lists in tool
-  descriptions kept the whole prompt out of the cross-user prefix cache; with
+  the tool declarations before the system prompt, so a per-user list in a tool
+  description keeps the whole prompt out of the cross-user prefix cache; with
   the variable, a preset's tool declarations are the same string for every user.
   An id the user cannot see is still refused (`system prompt の「使える skill
-(…)」の一覧にある id をそのまま渡す。`). Without the variable nothing changes, so a
-  preset that forgets it keeps the list. Which system prompt counts: the preset's
+(…)」の一覧にある id をそのまま渡す。`). Without the variable the manifest stays
+  in `load_skill`'s description. Which system prompt counts: the preset's
   `params.system`, read from the database like the routers do (a subagent's child
   preset the same way).
 
@@ -3146,7 +3122,7 @@ exit_code=0 (0.1s)
 ```
 
 There is no separate tool card or tool exchange for them. A skill with both
-empty returns its content alone, as before.
+empty returns its content alone.
 
 **The card** — besides the model-facing `content`, the result carries
 `results[i].chain` (display only — never sent to the model; the history
@@ -3186,14 +3162,12 @@ the tool sink (`tool_output.set_chain`, harvested into `results[i].chain` like
 
 ### 6.5 Recipes (user-written procedures)
 
-(2026-10-30, requested by llens — ken: 「ぜんぶ nuc にやらせて」.) A **recipe** is a
+A **recipe** is a
 procedure a user leaves for later: a folder `<layer>/recipes/<name>/` with a
-`RECIPE.md` and, next to it, attached files (`.sql` / `.py` templates …). Until
-this date llens handled them with a jail command (`/ext/bin/recipe list / check /
-promote`); the checks, the listing and the writes now live in nucllei. The
+`RECIPE.md` and, next to it, attached files (`.sql` / `.py` templates …). The
 checks are implemented once, in `nucllei/utils/recipes.py`.
 
-**Capability "Recipes" (2026-10-30, ken: 「スキルみたいに」「能力として」).** The
+**Capability "Recipes".** The
 three tools `load_recipe` / `save_recipe` / `edit_recipe` are switched on per
 model preset by `meta.features.recipes` (**default on** — a missing key is on;
 the model editor's Capabilities, "Recipes", next to "Skills"). When it is on and
@@ -3207,15 +3181,15 @@ own (an internal `sandbox.Tools` instance using `builtin_sandbox`'s saved
 valves), so `requires`' `read` / `shell` / `python` run even for a preset without
 `builtin_sandbox`; running an attached file by hand still needs `run_shell`, and
 `load_recipe`'s result says so when the recipe has attached files and `run_shell`
-is not on the turn (in the description until 2026-10-30). A model whose preset turns the capability
+is not on the turn. A model whose preset turns the capability
 off and calls one of them anyway (history replay) gets the usual "not in this
 turn's tool list" error.
 
-| layer                   | place                             | who can write                                           |
-| ----------------------- | --------------------------------- | ------------------------------------------------------- |
-| personal `/workspace`   | `/workspace/recipes/<name>/`      | the user                                                |
-| group `/ext/groups/<g>` | `/ext/groups/<g>/recipes/<name>/` | members (admins: every group). Invisible to non-members |
-| everyone `/ext/public`  | `/ext/public/recipes/<name>/`     | admins (everyone reads)                                 |
+| layer                   | place                             | who can write                                                                                                              |
+| ----------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| personal `/workspace`   | `/workspace/recipes/<name>/`      | the user                                                                                                                   |
+| group `/ext/groups/<g>` | `/ext/groups/<g>/recipes/<name>/` | members, or only the group's writers when its write mode is `listed` (§3.8; admins: every group). Invisible to non-members |
+| everyone `/ext/public`  | `/ext/public/recipes/<name>/`     | admins (everyone reads)                                                                                                    |
 
 Read / write access is exactly `read_file` / `write_file`'s (§5.7). Deleting is
 `remove_file` on the folder (→ that layer's `trash/`, §5.7) — there is no
@@ -3223,9 +3197,8 @@ separate delete.
 
 `RECIPE.md` is a frontmatter + Markdown body. Required keys: `title`,
 `description`, `author`, `updated` (`YYYY-MM-DD`). Optional: `requires` (what
-`load_recipe` reads before the body — below). **No other key** (2026-10-30 schema:
-the former `on_load` is `requires`, the former `tools` is retired — restricted
-functions are found by name in the text).
+`load_recipe` reads before the body — below). **No other key** (restricted
+functions are found by name in the text, not declared).
 The tools write the frontmatter themselves (`author` = the user's name, `updated`
 = today), so a model never hand-writes a broken one.
 
@@ -3254,8 +3227,7 @@ words the tools use to give the model instructions or marks (`次の手:`
 `返答への指示:` `警告:` `壊れている:` …) are defused (`次の手 -`) and `[` `]` become
 full-width `［` `］`. **A mark is only ever at the head of the line** (right after
 `- `, before the folder) — the description only appears after `—`, so writing
-`(警告: …)` or `[壊れている: …]` in it does not make a mark (2026-10-30, llens
-review). A broken recipe's line shows no description. `]` inside a reason is
+`(警告: …)` or `[壊れている: …]` in it does not make a mark. A broken recipe's line shows no description. `]` inside a reason is
 made full-width too, so a mark cannot be closed early. Folders that break the
 name rule (below), `trash`, and names starting with `.` are not listed. Two
 marks, both **computed every time** and never stored, and both shared with
@@ -3272,8 +3244,8 @@ marks, both **computed every time** and never stored, and both shared with
   (`title` / `description` / `author` one-line strings, `updated` `YYYY-MM-DD`);
   a `requires` entry that does not fit the notation (including `skill:` — a recipe
   never loads a skill; that is the model's call). It stays in the list with its reason, so it can be fixed.
-  **The mark carries no author text** (2026-10-30, llens via ken — it sits in
-  the system prompt / the tool description as the tool's own words): it says
+  **The mark carries no author text** (it sits in the system prompt / the tool
+  description as the tool's own words): it says
   what and where — a line number, the n-th `requires` entry, a key name only
   when it matches `[A-Za-z0-9_-]{1,32}` (otherwise 「知らないキー (名前は原文で)」),
   a retired key's short hint (`on_load (requires に変わった)`, `tools (廃止)`) —
@@ -3282,12 +3254,10 @@ marks, both **computed every time** and never stored, and both shared with
   `RECIPE.md` itself is missing / not a file / not text; 「直せるのは管理者なので、
   壊れていることをユーザーに伝える」 for a non-admin reading a broken `/ext/public`
   recipe), so 「壊れているのを全部
-  直して」 goes read_file → edit_recipe without a `load_recipe` first (on staging
-  it took load_recipe → ERROR → read_file → edit_recipe per recipe).
+  直して」 goes read_file → edit_recipe without a `load_recipe` first.
   `save_recipe` / `edit_recipe`'s check (`check_folder`, on what the model just
   wrote) keeps the detailed reasons (values, the allowed keys, close spellings).
-- **`[警告: …]`** (`reference_warnings`, ken 2026-10-30 "dependencies get deleted
-  all the time — warn, still run, and let the model recover") — the frontmatter is
+- **`[警告: …]`** (`reference_warnings`) — the frontmatter is
   valid but a value does not pass the environment, the permissions or the layer
   rule: a `requires` entry that breaks the **layer rule** (below; `layer_warnings`,
   reader-independent), or a reference the environment no longer provides **for
@@ -3300,7 +3270,7 @@ marks, both **computed every time** and never stored, and both shared with
   boundaries — naming it in a description is enough, the strict side; a `null`
   entry — personal only — is not judged). The recipe still loads; it heals by itself once the reference is back.
 
-**Layer rule for `requires` references** (llens, ken 2026-10-30) — references go
+**Layer rule for `requires` references** — references go
 from a narrower layer to a wider one only, so a shared recipe's hook cannot make
 the reader's `/workspace` (memory, EMR exports) flow into the conversation:
 
@@ -3315,8 +3285,8 @@ A violation is a **warning**, the same for every reader, and the entry is
 **never run** — that, not refusing the recipe, is what blocks the injection
 (`グループ「EMR」のレシピの requires では shell は使えない (共有の層では付属の実行は不可。使うなら個人のレシピから recipe: で読む)`,
 `グループ「EMR」のレシピの requires の read では /workspace/x.csv を読まない (…)`).
-References that break the rule are never stat-ed for the reader. Where an
-older **write rule** overlaps (a shared recipe whose text names
+References that break the rule are never stat-ed for the reader. Where a
+**write rule** overlaps (a shared recipe whose text names
 `/workspace/recipes|imports|exports|trash|memory`: "a path the reader cannot
 see"), the write rule still refuses the write. To use
 `shell` / `python` with a shared recipe, put the attachment and the entry in a
@@ -3336,13 +3306,11 @@ could not answer for counts as unknown — no warning. If the sandbox is too old
 empty list.
 
 **`load_recipe(path)`** — `path` is the folder (`…/RECIPE.md` accepted). It
-reads with the user's read access and returns **one result** (ken 2026-10-30
-"material first, instructions last"): the `requires` entries, run inside the
+reads with the user's read access and returns **one result**: the `requires` entries, run inside the
 tool **in the order written**, each under a heading, and **this recipe's body
 last**. A `recipe:` entry is expanded depth-first at its position — that
-recipe's own `requires`, then its body. (Until this change the body came first
-and the entries followed as separate synthetic tool exchanges; that order broke
-on `/command` and attachment turns, so it is gone.) The card does not show this
+recipe's own `requires`, then its body. The card does not show this
+
 text: the result also carries `results[i].chain` (display only, never sent to
 the model): `{"entries": [node…], "body": "<this recipe's body>", "notes"?:
 [<recipe-wide warnings>]}`, a node per `requires` entry in the order written —
@@ -3402,15 +3370,14 @@ exit_code=0 (0.1s)
 </recipe>
 ```
 
-- **Status is an attribute (2026-10-30, llens review).** Each entry's frame says
+- **Status is an attribute.** Each entry's frame says
   what the tool did: `<recipe-part key="<key>" owner="<folder>" status="ok">` (ran;
   `truncated="true"` is added when its output was cut to fit), `status="loaded"`
   (already loaded earlier in the chat), `<recipe-part status="warning">` (not run —
   the reason line follows the heading) and `<recipe-part status="error">` (failed —
   the ERROR line follows). `owner` is the recipe whose `requires` lists the entry.
-  The model is told (since 2026-10-30 in the result — a first line before the
-  entries when the recipe has `requires`, and the lead before the body; until then
-  in `load_recipe`'s description) that the status attribute (and, for the whole
+  The model is told (in the result — a first line before the entries when the
+  recipe has `requires`, and the lead before the body) that the status attribute (and, for the whole
   recipe, the `<recipe-warning>` frame) is the tool's mark and that material and
   the body are the author's text: a
   file or an output that contains `警告: … 次の手: …` (or `status="warning"`) stays
@@ -3431,7 +3398,7 @@ requires から外す・直す` / `この利用者には使えないので、そ
 実行しない)`). Recipe-wide warnings (a restricted function the reader cannot use) go just
   above the body in a frame only the tool writes —
   `<recipe-warning>\n警告: <reason>。次の手: <next>。\n</recipe-warning>` (`<recipe` is
-  defused in material, so a body or a file cannot forge it; 2026-10-30). A
+  defused in material, so a body or a file cannot forge it). A
   `recipe:` target that is broken shows `警告: requires の recipe <folder> は壊れている:
 … — 読まなかった。` at its position.
 - **Once per chat.** A recipe, and each `read` / `shell` / `python`, runs once per
@@ -3441,7 +3408,7 @@ requires から外す・直す` / `この利用者には使えないので、そ
   `warning` and `error` frames are not counted) — plus the current request. Text
   with the same markers anywhere else (a pasted message, another tool's result)
   is ignored.
-- **After a fix, the new version (2026-10-30, llens review).** A successful
+- **After a fix, the new version.** A successful
   `save_recipe` / `edit_recipe` (including a `from_path` copy, for the folder
   written) ends its reply with `<recipe-reset path="<folder>"> (この後の load_recipe
 はこのレシピの新しい版を最初から返す)`. Reading the history in order, a reset drops
@@ -3466,18 +3433,17 @@ requires から外す・直す` / `この利用者には使えないので、そ
   (any case; `<recipe-part` included) turned into `&lt;recipe` / `&lt;/recipe`. Only
   the server writes the frames (`<recipe path="…">`, `<recipe-part key="…">`), so a
   shared recipe cannot forge the "already loaded" marks (which would stop another
-  recipe or entry from loading) or a frame around a fake warning (2026-10-30).
+  recipe or entry from loading) or a frame around a fake warning.
 
 A **broken** recipe (the light check above) is an ERROR, with no body and no
 entries: `レシピ <folder> は壊れている: <reasons>` (the same reasons as the list
 mark) with the next step
 `edit_recipe(path="<folder>") で直す (原文は read_file で "<folder>/RECIPE.md" を見る。丸ごと書き直すなら save_recipe で上書き)。`
 (`save_recipe(path="<folder>") で作り直す。` when `RECIPE.md` itself is unusable) —
-the fixing tool and the path to pass (the folder) come first since 2026-10-30
-(staging: after `read_file <folder>/RECIPE.md` the model called `edit_file` on
-that path). The list mark says the same with 「この行のフォルダ」 (the folder right
-after the mark — 「このフォルダ」 read as the previous line's folder when broken
-lines follow each other). The folder is embedded as a JSON string (a folder
+the fixing tool and the path to pass (the folder) come first. The list mark
+says the same with 「この行のフォルダ」 (the folder right after the mark —
+「このフォルダ」 would read as the previous line's folder when broken lines follow
+each other). The folder is embedded as a JSON string (a folder
 name is author text and may contain `"`). `write_file` / `edit_file` on a `RECIPE.md` name the recovery
 with the real folder (`edit_recipe(path="<folder>")` / `save_recipe(path="<folder>")`)
 when a recipe tool is on the turn, and `read_file`'s note on a `RECIPE.md` says
@@ -3512,10 +3478,9 @@ creates a recipe or rewrites one completely; the tool builds `RECIPE.md`.
   `<name>.RECIPE.md` (`-2`, `-3` … if taken; the sandbox's `/files/trash` with
   `name`). A broken previous version is accepted and trashed like any other.
 - **Copy (`from_path`).** Copies another recipe folder, attachments included,
-  with no path rewriting (attachments are referred to by relative names). This
-  replaces `promote`, which rewrote `/workspace/recipes/<name>/` paths. A recipe
-  promoted the old way that still names its personal folder is stopped by the
-  "path the reader cannot see" check, and is fixed with `edit_recipe`.
+  with no path rewriting (attachments are referred to by relative names). A
+  copy into a shared layer whose text still names a personal folder is stopped
+  by the "path the reader cannot see" check.
   Omitted `title` / `description` / `body` / `requires` are taken from
   the source, `author` stays the source's, `updated` is today. If the
   destination exists, the whole previous folder goes to the trash.
@@ -3584,8 +3549,8 @@ capability is off for this model and an admin has to turn on "Recipes").
 Attachments are still written with `write_file` / `edit_file`, and the next
 `save_recipe` / `edit_recipe` checks them with the folder. `read_file` on a
 `RECIPE.md` reads it and adds
-`レシピは load_recipe(path) で読み込み、直すなら edit_recipe で直す (load_recipe が無いモデルではレシピが無効)。`
-(「直すなら edit_recipe」2026-10-30 — reading a broken recipe to fix it should not be pulled back to `load_recipe`). `run_shell`'s `mv` / `cp` cannot be
+`レシピは load_recipe(path) で読み込み、直すなら edit_recipe で直す (load_recipe が無いモデルではレシピが無効)。`.
+`run_shell`'s `mv` / `cp` cannot be
 stopped; the next write checks whatever it left.
 
 **Sandbox.** Needs the sandbox endpoints `POST /recipes/index`,
@@ -3595,8 +3560,9 @@ the tools say `sandbox が古く、レシピの tool に対応していない (s
 
 **Host lint — `nucllei recipe-check <path>…`.** It runs the full check on the
 **shared layers only** (`/ext`, `/ext/groups`, `/ext/groups/<g>`, `/ext/public`
-or a recipe folder). The personal layer is not linted: the host cannot read it,
-and ken does not check at user level. `--ext-root` maps the jail's `/ext` to a
+or a recipe folder). The personal layer is not linted: the host cannot read it.
+`--ext-root`
+maps the jail's `/ext` to a
 host directory. It prints one finding per line,
 `stop|note|unchecked<TAB><folder><TAB><finding>`, and a summary on stderr.
 Exit codes: 0 = no stop finding, 1 = stop findings, 2 = usage. It uses no

@@ -168,15 +168,14 @@ builtin tools は自前で `json.dumps(..., ensure_ascii=False, indent=2)` し�
   送られる(モデルは呼ばないだけで無害、コンテキスト消費のみ)。入口別分離が必要になったら
   後から足す(合成 exchange 注入はモデル能力非依存 — この機構は他の強制注入にも流用可能)
 
-### 1b'. 機能「レシピ」チェックボックス(per-model、2026-10-30)
+### 1b'. 機能「レシピ」チェックボックス(per-model)
 
 - `meta.features.recipes`(既定 ON)。ON かつ SANDBOX_URL のある配備なら、middleware が
   load_recipe / save_recipe / edit_recipe を合成して tools に差し込む(`build_recipe_tools`、
-  load_skill の隣)。見えるレシピの一覧は load_recipe の説明に入る(skill の manifest と同じ —
-  旧 `{{USER_RECIPES}}` は廃止)。OFF なら 3 つとも入らず sandbox にも聞かない
-- 経緯(ken 2026-10-30): 最初は builtin_sandbox の関数だった → 「スキルみたいにトグれないとおかしい」。
-  builtin_recipes として Tools 行にしてツール選択で付け外す案も出たが、「スキルみたいに」「能力として」
-  で load_skill と同じ「能力 → 合成の tool」の形に決着。ツール選択の一覧には出ない(load_skill と同じく
+  load_skill の隣)。見えるレシピの一覧は、preset の system prompt に `{{USER_RECIPES}}` があればそこへ、
+  無ければ load_recipe の説明に入る(skill の manifest と `{{SKILLS}}` と同じ)。OFF なら 3 つとも入らず
+  sandbox にも聞かない
+- load_skill と同じ「能力 → 合成の tool」の形。ツール選択の一覧には出ない(load_skill と同じく
   行を持たない)。toolIds 側の同名関数は合成側が勝つ(警告ログ)
 - builtin_sandbox を付けないモデルでも動く: 中に sandbox.Tools のインスタンスを持ち、_post /
   _write_target / _write_bytes / read_file / run_shell を借りる(valve は builtin_sandbox の保存値)。
@@ -411,7 +410,7 @@ sandbox が `privileged: true` を許されているのは中に nsjail を起�
 `sandbox/tests/test_retention.py::test_rename_updates_ctime`)— 古いファイルを含むフォルダを今日移しても即消えない。
 旧「ファイル単位の mtime」は廃止。toolkit 共通注記に「消すときは rm せず trash/ の直下へ mv」、容量切れ(507 /
 No space left)の文面に「/workspace/trash/ を空にすると空く」。モデルへは toolkit 共通注記(`Tools` クラス docstring)で 1 回だけ伝え
-(2026-10-30 batch 2 から注記は「imports/ と trash/ は一定期間で消える」の 1 句だけ。rm せず remove_file は remove_file の説明、
+(注記は「imports/ と trash/ は一定期間で消える」の 1 句だけ。rm せず remove_file は remove_file の説明、
 期限の日付と「残すなら別の場所へ写す」は取り込みの結果、注記は run_python に付く — `toolkit_note_anchor`)、
 この配下が「無い」ときのエラー文に `send_to_workspace(file_id)` で戻せる旨を足す(`_cache_hint`)。
 実際の期限は sandbox が `/files/write` `/exec` `/exec_cell` の応答 `cache_ttl_days` で返し(ken 2026-10-07)、
@@ -1345,13 +1344,12 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
 - 未了: グループ改名時のディレクトリの追従(旧名のディレクトリが残り、メンバーからは見えなくなる。admin には
   見える)、共有チャットを非メンバーが開いたときの 404 は仕様。
 
-### グループの書き込みを絞る(2026-10-31 ken、案 A)— メンバーは読むだけ・指定した人だけ書ける
+### グループの書き込みを絞る — メンバーは読むだけ・指定した人だけ書ける
 
 - **所属(`user_ids`)の意味は一切変えない**(権限の合成・モデルのアクセス・`/ext/groups/<g>` が見えるか・
-  `{{USER_GROUPS}}`・`NUCLLEI_USER_GROUPS`)。足したのは**グループの属性** `data.ext =
-  {"write": "members" | "listed", "writers": [user_id, …]}`(既存の JSON 列 `data` — 列を足すと baseline の上に
-  migration が要り、閉域の DB にも当たる。`data` は upstream 由来で未使用だったので、キー `ext` を名前空間に使う)。
-  無い・`members` = メンバー全員 rw(設定の無いグループは移行不要)、
+  `{{USER_GROUPS}}`・`NUCLLEI_USER_GROUPS`)。書ける人は**グループの属性** `data.ext =
+  {"write": "members" | "listed", "writers": [user_id, …]}`(既存の JSON 列 `data` のキー `ext` — migration 不要)。
+  無い・`members` = メンバー全員 rw、
   `listed` = `writers` のメンバーだけ rw・他のメンバーは ro。admin は role で全グループ rw のまま。
 - **ユーザーの権限(permissions)ではなくグループの属性**(誰がそのグループの置き場に書けるか)。
   permissions の項目も sandbox 専用の権限も作らない。編集は admin だけ(グループの編集と同じ
@@ -1378,7 +1376,7 @@ base の外への redirect・上限超え・2xx 以外は従来どおり「こ�
   人だけ)なので…」)。警告の次の手(`WARN_NEXT_MISSING` / `WARN_NEXT_LAYER`)も同じく置き換える
   (`recipes.readonly_warnings` — 全体の層を管理者でない人が読むときも同じ)。save_recipe の
   結果の「誰が見て直せるか」は `listed` のグループでは「直せるのは管理者が書き込みを許した人だけ」。
-  `recipes.py` は I/O をしない約束なので、ACL を引く `recipe_writable` は `recipe_index.py` へ移した。
+  `recipes.py` は I/O をしない約束なので、ACL を引く `recipe_writable` は `recipe_index.py` に置く。
   ホストの lint(`nucllei recipe-check`)は層の規則だけを見るので影響なし。
 - **途中で変えたとき**: 判定は毎回 DB から引く(キャッシュしない)。常駐 kernel は bind の指紋(rw を含む)が
   変わると次の実行で作り直す = その人の run_python の変数は消える(所属が変わったときと同じ)。走っている
