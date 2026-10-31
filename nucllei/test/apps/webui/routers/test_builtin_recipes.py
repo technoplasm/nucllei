@@ -30,6 +30,9 @@ ADMIN = {"id": "a1", "role": "admin", "name": "管理"}
 TODAY = dt.date.today().isoformat()
 
 MEMBERS = {"u1": ["EMR"], "u2": ["EMR"], "a1": []}
+# 書き込みを「指定した人だけ」にしたグループで指定されていない (uid, グループ) (2026-10-31 案 A)。
+# 既定は空 = 全員が書ける。テストが足す
+READ_ONLY: set = set()
 
 
 @pytest.fixture
@@ -76,7 +79,14 @@ def sbx(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sb, "sandbox_post", fake_post)
     monkeypatch.setattr(nucllei.env, "SANDBOX_URL", "http://sandbox.test")
-    monkeypatch.setattr(ext_acl, "member_group_names", lambda uid: MEMBERS.get(uid, []))
+    READ_ONLY.clear()
+    monkeypatch.setattr(
+        ext_acl,
+        "member_group_access",
+        lambda uid: {
+            g: ("ro" if (uid, g) in READ_ONLY else "rw") for g in MEMBERS.get(uid, [])
+        },
+    )
     monkeypatch.setattr(ext_acl, "all_group_names", lambda: ["EMR", "OTHER"])
     monkeypatch.setattr(task, "user_group_names", lambda uid: MEMBERS.get(uid, []))
     return {
@@ -1590,3 +1600,88 @@ def test_bad_yaml_date_marks_broken_instead_of_failing_the_list(sbx):
         " (原文はその中の RECIPE.md を read_file で)] /workspace/recipes/日付"
     ) in lines
     assert "- /workspace/recipes/集計 — 月次の集計" in lines
+
+
+# ---------------------------------------------------------------------------
+# グループの書き込みを「指定した人だけ」にしたとき (2026-10-31 ken、案 A)
+# ---------------------------------------------------------------------------
+GROUP_RO = (
+    "この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許した人だけ)"
+)
+
+
+def test_group_recipes_for_a_non_writer_member_are_read_only(sbx):
+    """u1 は EMR のメンバーだが書き込みを許されていない (ro)、u2 は書ける。直す案内は書ける人にだけ、
+    書けない人には全体の層 (管理者でない人) と同じく「伝える」。保存・直しは書き先の検査で断る。"""
+    READ_ONLY.add(("u1", "EMR"))
+    emr = sbx["ext"] / "groups" / "EMR"
+    _put(emr, "壊れ", "---\ntitle: a\n")
+    _put(
+        emr,
+        "参照",
+        _md(extra="requires:\n  - read: /ext/groups/EMR/無い.md\n"),
+    )
+
+    # 一覧の印
+    line = next(ln for ln in _recipes_text().splitlines() if "EMR/recipes/壊れ" in ln)
+    assert f"{GROUP_RO}なので、壊れていることをユーザーに伝える" in line
+    assert "edit_recipe" not in line
+    line = next(
+        ln for ln in _recipes_text(OTHER).splitlines() if "EMR/recipes/壊れ" in ln
+    )
+    assert "edit_recipe(path=この行のフォルダ) で直す" in line
+
+    # load_recipe の ERROR (壊れている) と警告の次の手
+    out = _load("/ext/groups/EMR/recipes/壊れ")
+    assert out.endswith(f"次の手: {GROUP_RO}なので、壊れていることをユーザーに伝える。")
+    assert "edit_recipe" not in out
+    out = _load("/ext/groups/EMR/recipes/参照")
+    assert f"次の手: {GROUP_RO}なので、そうユーザーに伝える。" in out
+    assert "edit_recipe で requires から外す" not in out
+    out = _load("/ext/groups/EMR/recipes/参照", user=OTHER)
+    assert "edit_recipe で requires から外す・直す" in out
+
+    # read_file の RECIPE.md の注記
+    out = run(
+        _sb_tool().read_file("/ext/groups/EMR/recipes/参照/RECIPE.md", __user__=USER)
+    )
+    assert "edit_recipe" not in getattr(out, "text", out)
+    out = run(
+        _sb_tool().read_file("/ext/groups/EMR/recipes/参照/RECIPE.md", __user__=OTHER)
+    )
+    assert 'edit_recipe(path="/ext/groups/EMR/recipes/参照")' in getattr(
+        out, "text", out
+    )
+
+    # 保存・直しは断る (書き込みの ERROR と同じ文)。可否は置き場だけで決まる
+    ro_error = (
+        "はこの利用者には読み取り専用 (グループ「EMR」の置き場に書けるのは、"
+        "管理者が書き込みを許した人だけ)。次の手: この置き場には書けないとユーザーに伝える"
+    )
+    out = _save("/ext/groups/EMR/recipes/新", title="t", description="d", body="b")
+    assert out.startswith("ERROR: /ext/groups/EMR/recipes/新/RECIPE.md ") and (
+        ro_error in out
+    ), out
+    assert not (emr / "recipes" / "新").exists()
+    before = (emr / "recipes" / "参照" / "RECIPE.md").read_text()
+    out = _edit("/ext/groups/EMR/recipes/参照", "1. 集める", "1. 消す")
+    assert ro_error in out
+    assert (emr / "recipes" / "参照" / "RECIPE.md").read_text() == before
+    # 書ける人は通る
+    out = _edit("/ext/groups/EMR/recipes/参照", "1. 集める", "1. 数える", user=OTHER)
+    assert "置き換えた" in out
+
+
+def test_group_recipe_audience_in_listed_mode(sbx, monkeypatch):
+    import nucllei.utils.ext_acl as ext_acl
+
+    out = _save("/ext/groups/EMR/recipes/共有", title="共有", description="d", body="b")
+    assert "グループ「EMR」のメンバー全員が見て直せる" in out
+    monkeypatch.setattr(ext_acl, "group_write_mode_by_name", lambda name: "listed")
+    out = _save(
+        "/ext/groups/EMR/recipes/共有2", title="共有", description="d", body="b"
+    )
+    assert (
+        "グループ「EMR」のメンバー全員が見られる。直せるのは管理者が書き込みを許した人だけ"
+        in out
+    )

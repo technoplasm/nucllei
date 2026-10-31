@@ -7,14 +7,15 @@
 |---|---|---|
 | `/workspace/…` | 本人の workspace を rw | 本人の workspace を rw(他人のは見ない) |
 | `/ext/public/…` | ro | rw |
-| `/ext/groups/<g>/…` | メンバーは rw、それ以外は不在(404) | 全グループ rw |
+| `/ext/groups/<g>/…` | メンバーは rw(書き込みが「指定した人だけ」のグループでは指定された人だけ rw・他のメンバーは ro)、それ以外は不在(404) | 全グループ rw |
 
 - パスは jail の絶対パス(`/workspace/notes.md`・`/ext/groups/EMR/a.md`)で受け、返す。
   モデルの tool と同じ文字列なので、画面で見たパスをそのままチャットで言える
 - `/ext/<それ以外>`(doc 等)はこのブラウザの対象外(404)。`/ext/groups` 直下の一覧は
   `places` の中のグループの列挙で代える(`ext_visible_groups` = 見えるグループだけ)
 - ro の場所への書き換え(write / upload / delete / rename / mkdir)は 403。sandbox にも
-  ro の bind として渡すので 2 重に止まる
+  ro の bind として渡すので 2 重に止まる。`places` の `rw` と一覧・読みの応答の `rw` が画面の
+  読み取り専用の表示(書き換えの操作を出さない)の元 — グループの ro もここに乗る(2026-10-31 案 A)
 - `.` 始まりのセグメントは扱わない(400)— 一覧でも隠す(list_workspace と同じ)。
   経路上の symlink は sandbox が辿らない(`/files/*` の O_NOFOLLOW。#152 と同じ仕組み)
 - 平文の判定(`read` の `editable`): テキストの上限(env `SANDBOX_TEXT_MAX_SIZE_MB`)以内・

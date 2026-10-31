@@ -52,7 +52,7 @@ nucllei は中継するだけ。同じ日に一度入れた静的配信の `X` �
 
 - セッション認証必須(get_verified_user)。per-user のアクセス検査は `/ext/groups` `/ext/public`
   だけ(#152。判定は `utils/ext_acl.ext_access` 1 か所): `/ext/groups/<g>/…` はメンバーと admin に
-  だけ配信し、それ以外は不在と同じ 404(`/ext/groups` 直下の一覧も 404 — 一覧は出さない)。
+  だけ配信し(書き込みを許されていない = ro のメンバーにも配信する — ここは読むだけ)、それ以外は不在と同じ 404(`/ext/groups` 直下の一覧も 404 — 一覧は出さない)。
   `/ext/public/…` は全員に配信。この 2 つの応答には `Cache-Control: private, no-cache`
   (共有キャッシュに載せず、所属が外れたら次の取得で 404 になる)。グループの中は
   `<root>/<グループ名>` に閉じる(中の symlink で他グループへ出させない)。

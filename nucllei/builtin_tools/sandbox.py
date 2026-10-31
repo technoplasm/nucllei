@@ -48,6 +48,7 @@ from nucllei.utils.ext_acl import (
     ext_access,
     ext_visible_groups,
     is_acl_rel,
+    member_group_access,
     member_group_names,
     sandbox_ext_mounts,
 )
@@ -541,10 +542,30 @@ def _read_only(abs_path: str) -> ToolError:
     管理者だけ」は `/ext/public` のときだけ正しい (`/ext/doc` 等 ACL 外の置き場は管理者も ro)。"""
     public = f"{_RO_MOUNT_ROOT}/{PUBLIC}"
     admin_only = abs_path == public or abs_path.startswith(public + "/")
+    group = _group_of(abs_path)
+    if group is not None:
+        # 書き込みが「指定した人だけ」のグループで、指定されていないメンバー (2026-10-31 ken、案 A)
+        return ToolCallError(
+            f"{abs_path} はこの利用者には読み取り専用 ({_group_ro_why(group)})",
+            "この置き場には書けないとユーザーに伝える (書けるようにするのは管理者。"
+            "別の置き場に書くかはユーザーが決める)。",
+        )
     return ToolCallError(
         f"{abs_path} は read-only" + (" (書けるのは管理者だけ)" if admin_only else ""),
         "この置き場には書けないとユーザーに伝える (別の置き場に書くかはユーザーが決める)。",
     )
+
+
+def _group_of(abs_path: str) -> Optional[str]:
+    """`/ext/groups/<g>` `/ext/groups/<g>/…` の `<g>` (それ以外は None)。"""
+    if not abs_path.startswith(_GROUPS_ROOT + "/"):
+        return None
+    return abs_path[len(_GROUPS_ROOT) + 1 :].split("/", 1)[0] or None
+
+
+def _group_ro_why(group: str) -> str:
+    """グループの置き場が読み取り専用の理由 (ERROR・list_workspace で同じ文)。"""
+    return f"グループ「{group}」の置き場に書けるのは、管理者が書き込みを許した人だけ"
 
 
 def _files_error(e: Exception, abs_path: str) -> ToolError:
@@ -1228,13 +1249,16 @@ class Tools:
     """ネットワーク不可。/workspace は run_python / run_python_once / run_shell と read_file /
     write_file 等で共有し、会話・実行を跨いで残る (imports/ と trash/ は最後に触ってから一定期間で
     消える)。ユーザーには見えない — 渡すのは fetch_from_workspace。
-    `/ext/groups/<グループ名>/` は所属グループの共有の置き場 (書ける)、`/ext/public/` は全員の共有の
-    置き場 (読むだけ)。管理者はすべてのグループの置き場と `/ext/public/` に書ける。run_* の中でも
-    同じパスで扱える。
+    `/ext/groups/<グループ名>/` は所属グループの共有の置き場
+    (書けるかはグループごと — list_workspace で分かる)、`/ext/public/` は全員の共有の置き場 (読むだけ)。
+    管理者はすべてのグループの置き場と `/ext/public/` に書ける。run_* の中でも同じパスで扱える。
     実行は直列 — run_python は同じ会話内で、run_python_once / run_shell は同一ユーザー内で順番待ちになり、
     background にしても並列にならない (長い background 実行の裏で同系統を呼ぶと終わるまで待たされ、
     待ちが長すぎると失敗する)。"""
 
+    # /ext/groups の書ける・読むだけ (2026-10-31 ken、案 A): ここは規則だけを言い、利用者ごとの
+    # rw / ro は list_workspace の結果 (と書けないときの ERROR) が言う — tool の spec を利用者で
+    # 変えない (preset ごとに同じ = prefix cache を割らない)。
     # ↑ クラス docstring は nucllei の toolkit 共通注記 — `toolkit_note_anchor` (run_python) の
     # description に 1 回だけ前置され、モデルに見える (2026-10-30 まで: 名前順の先頭 spec に付き、
     # edit_file を足してからは edit_file の説明に付いていた)。3 実行ツールの docstring に
@@ -1943,7 +1967,8 @@ class Tools:
             path,
             WORKSPACE_PATH_ARG_FORM,
             "書き込めるのは `/workspace/` 配下と、所属グループの `/ext/groups/<グループ名>/` だけ"
-            " (管理者はすべてのグループの置き場と `/ext/public/` にも書ける)。",
+            " (書ける人を絞ったグループは許された人だけ。管理者はすべてのグループの置き場と"
+            " `/ext/public/` にも書ける)。",
         )
         if allow_dir:
             if rel == ".":
@@ -2393,15 +2418,16 @@ class Tools:
         if end < size:
             body += f"\n\n(続きあり: next_offset={end}。続きは offset={end} で読む)"
         if is_recipe_md_path(abs_path):
-            from nucllei.utils.recipes import recipe_writable
+            from nucllei.utils.recipe_index import recipe_writable
 
             folder = posixpath.dirname(abs_path)
-            # 直せない人 (全体の層を管理者でない人が読む) には edit_recipe を勧めない (敵対レビュー)。
+            # 直せない人 (全体の層を管理者でない人・書き込みを許されていないグループのメンバーが読む)
+            # には edit_recipe を勧めない (敵対レビュー)。
             # フォルダ名は書いた人の文 — JSON の文字列で埋める
             fix = (
                 f" 直すなら edit_recipe(path={json.dumps(folder, ensure_ascii=False)}) で直す"
                 " (path は RECIPE.md でなくフォルダ。edit_file では書かない)。"
-                if recipe_writable(folder, __user__.get("role"))
+                if recipe_writable(folder, __user__)
                 else ""
             )
             body += (
@@ -2528,20 +2554,26 @@ class Tools:
         {{USER_GROUPS}} より tool の結果を信じて見えるだけのグループに上げた)。所属は
         NUCLLEI_USER_GROUPS と同じ (ディレクトリ名にできる所属グループ)。"""
         try:
-            names = ext_visible_groups(user)
-            # 管理者以外に見えるのは所属グループだけ — 引き直さない
             admin = user.get("role") == "admin"
-            member = set(member_group_names(user["id"]) if admin else names)
+            # 所属グループごとの rw / ro (書き込みを「指定した人だけ」にしたグループは ro がある)。
+            # 管理者は全グループ rw — 所属は「所属していない」の注記にだけ使う
+            access = member_group_access(user["id"])
+            names = ext_visible_groups(user) if admin else list(access)
         except Exception as e:
             log.error(f"[sandbox] visible groups for {user.get('id')} failed: {e!r}")
             raise ToolFailure("グループの所属を確かめられない")
         if not names:
             return f"{_GROUPS_ROOT} に見える置き場は無い (所属しているグループが無い)。"
+
+        def mark(n: str) -> str:
+            if admin:
+                return "書ける" + ("" if n in access else f"。{_NOT_MEMBER_NOTE}")
+            if access.get(n) == "rw":
+                return "書ける"
+            return f"読み取り専用 — {_group_ro_why(n)}"
+
         return "\n".join(
-            f"- {_GROUPS_ROOT}/{n}/ (グループの共有の置き場。書ける"
-            + ("" if n in member else f"。{_NOT_MEMBER_NOTE}")
-            + ")"
-            for n in names
+            f"- {_GROUPS_ROOT}/{n}/ (グループの共有の置き場。{mark(n)})" for n in names
         )
 
     async def _list_ext(self, abs_path: str, rel: str, user: dict) -> str:
@@ -2568,7 +2600,13 @@ class Tools:
                 "一覧するならディレクトリを渡す (中身を読むなら read_file、ユーザーに"
                 "渡すなら fetch_from_workspace)。",
             )
-        note = "" if access == "rw" else " (read-only — 書けるのは管理者だけ)"
+        group = _group_of(abs_path)
+        if access == "rw":
+            note = ""
+        elif group is not None:
+            note = f" (読み取り専用 — {_group_ro_why(group)})"
+        else:
+            note = " (read-only — 書けるのは管理者だけ)"
         # 管理者が所属していないグループの中 (直下の一覧と同じ注記 — `_list_groups`)
         # (管理者以外は所属グループの中しか見えないので引かない)
         parts = rel.split("/")

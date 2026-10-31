@@ -261,6 +261,56 @@ class TestSandboxFiles(AbstractPostgresTest):
         assert r.status_code == 200, r.text
         assert {"path": "/ext/public", "rw": True} in fake.calls[0][1]["mounts"]
 
+    def test_group_read_only_for_non_writer(self, monkeypatch):
+        """書き込みを「指定した人だけ」にしたグループ (2026-10-31 ken、案 A): 指定されていないメンバーには
+        読み取り専用 — places / 一覧 / 読みの `rw` は False、書き換えは sandbox を呼ばずに 403、
+        sandbox にも ro の bind で渡る。指定された人は書ける。"""
+        from nucllei.models.groups import GroupExtForm, GroupUpdateForm, Groups
+
+        g = next(x for x in Groups.get_groups() if x.name == "EMR")
+        Groups.update_group_by_id(
+            g.id,
+            GroupUpdateForm(
+                name="EMR",
+                description="",
+                user_ids=["member1", "writer1"],
+                ext=GroupExtForm(write="listed", writers=["writer1"]),
+            ),
+        )
+        writer = {"id": "writer1", "role": "user"}
+        fake = FakeSandbox(
+            monkeypatch,
+            {
+                "/files/ls": {"entries": [], "exists": True, "is_dir": True},
+                "/files/write": {"ok": True, "mtime": 3.0},
+            },
+        )
+        places = self._get(MEMBER, "/places").json()["places"]
+        assert {"path": "/ext/groups/EMR", "kind": "group", "rw": False} in places
+        r = self._post(MEMBER, "/list", {"path": "/ext/groups/EMR"})
+        assert r.status_code == 200 and r.json()["rw"] is False
+        assert {"path": "/ext/groups/EMR", "rw": False} in fake.calls[-1][1]["mounts"]
+        n = len(fake.calls)
+        for ep, body in [
+            ("/write", {"path": "/ext/groups/EMR/x.md", "content": "x"}),
+            ("/delete", {"path": "/ext/groups/EMR/x.md"}),
+            ("/mkdir", {"path": "/ext/groups/EMR/d"}),
+            ("/rename", {"path": "/ext/groups/EMR/a", "dest": "/ext/groups/EMR/b"}),
+            ("/rename", {"path": "/workspace/a", "dest": "/ext/groups/EMR/b"}),
+        ]:
+            r = self._post(MEMBER, ep, body)
+            assert r.status_code == 403, (ep, r.text)
+        assert self._upload(MEMBER, "/ext/groups/EMR", "a.csv", b"x").status_code == 403
+        assert len(fake.calls) == n and fake.raw_puts == []
+
+        places = self._get(writer, "/places").json()["places"]
+        assert {"path": "/ext/groups/EMR", "kind": "group", "rw": True} in places
+        r = self._post(
+            writer, "/write", {"path": "/ext/groups/EMR/x.md", "content": "x"}
+        )
+        assert r.status_code == 200, r.text
+        assert {"path": "/ext/groups/EMR", "rw": True} in fake.calls[-1][1]["mounts"]
+
     def test_read_text_and_binary(self, monkeypatch):
         content = {"data": b"# hello\n"}
 

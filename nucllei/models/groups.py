@@ -5,12 +5,15 @@ import uuid
 
 from nucllei.internal.db import Base, get_db
 from nucllei.env import SRC_LOG_LEVELS
+from nucllei.utils.ext_acl import EXT_DATA_KEY, normalize_group_data
 from nucllei.utils.group_names import (
     GroupNameConflictError,
     normalize_group_name_key,
 )
 
-from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import BigInteger, Column, String, Text, JSON, func
 from sqlalchemy.exc import IntegrityError
 
@@ -86,8 +89,19 @@ class GroupForm(BaseModel):
     permissions: Optional[dict] = None
 
 
+class GroupExtForm(BaseModel):
+    """グループの `/ext/groups/<名前>/` の書き込み (2026-10-31 ken、案 A。`utils/ext_acl`)。
+    `members` = メンバー全員が書ける (無いときと同じ)、`listed` = `writers` のメンバーだけ書ける
+    (他のメンバーは読むだけ)。`writers` は保存時に `user_ids` との積に揃える。"""
+
+    write: Literal["members", "listed"] = "members"
+    writers: list[str] = Field(default_factory=list)
+
+
 class GroupUpdateForm(GroupForm):
     user_ids: Optional[list[str]] = None
+    # 省略 (None) は今の設定を保つ。保存先は `data.ext` (`data` の他のキーは触らない)
+    ext: Optional[GroupExtForm] = None
 
 
 class GroupTable:
@@ -187,6 +201,21 @@ class GroupTable:
                         values["permissions"] = {}
                 if "name" in values:
                     values["name_key"] = normalize_group_name_key(values["name"])
+                # /ext の書き込み (data.ext)。writers は保存のたびに user_ids との積に揃える —
+                # メンバーから外した人 (OAuth の同期も含む) はここで writers からも落ちる
+                ext = values.pop("ext", None)
+                if ext is not None or "user_ids" in values:
+                    # 読んでから書くまでに他の更新で user_ids が変わらないよう行を押さえる
+                    # (PostgreSQL。SQLite は書き込みが直列)
+                    current = db.query(Group).filter_by(id=id).with_for_update().first()
+                    if current is not None:
+                        data = dict(current.data or {})
+                        if ext is not None:
+                            data[EXT_DATA_KEY] = ext
+                        if EXT_DATA_KEY in data:
+                            values["data"] = normalize_group_data(
+                                data, values.get("user_ids", current.user_ids)
+                            )
                 db.query(Group).filter_by(id=id).update(values)
                 db.commit()
                 return self.get_group_by_id(id=id)
@@ -222,13 +251,19 @@ class GroupTable:
                 groups = self.get_groups_by_member_id(user_id)
 
                 for group in groups:
+                    if user_id not in group.user_ids:
+                        continue  # LIKE の取り違え
                     group.user_ids.remove(user_id)
-                    db.query(Group).filter_by(id=group.id).update(
-                        {
-                            "user_ids": group.user_ids,
-                            "updated_at": int(time.time()),
-                        }
-                    )
+                    values = {
+                        "user_ids": group.user_ids,
+                        "updated_at": int(time.time()),
+                    }
+                    # writers からも落とす (data.ext — 判定でも所属を見るが、残さない)
+                    if isinstance(group.data, dict) and EXT_DATA_KEY in group.data:
+                        values["data"] = normalize_group_data(
+                            group.data, group.user_ids
+                        )
+                    db.query(Group).filter_by(id=group.id).update(values)
                     db.commit()
 
                 return True

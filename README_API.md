@@ -474,11 +474,26 @@ sandbox tool and the file browser all call it:
 
 | Path                        | Regular user                          | Admin (`role == "admin"`) |
 | --------------------------- | ------------------------------------- | ------------------------- |
-| `/ext/groups/<group>/…`     | members: rw; everyone else: invisible | rw (all groups)           |
+| `/ext/groups/<group>/…`     | members: rw (ro for members not listed as writers when the group's write mode is `listed`); everyone else: invisible | rw (all groups)           |
 | `/ext/groups` (the listing) | only the groups they belong to        | all groups                |
 | `/ext/public/…`             | ro                                    | rw                        |
 | `/ext/<other>/…` (doc, …)   | ro                                    | ro                        |
 
+- **Who may write a group's folder** (2026-10-31) is a group attribute, not a
+  user permission: `data.ext = {"write": "members" | "listed", "writers":
+  [user_id, …]}`. Absent or `members` = every member is rw (a group without
+  the setting needs no migration). `listed` = only
+  members in `writers` are rw; the other members are ro (they still see and read
+  the folder). Admins are rw on every group by role, whatever the setting.
+  Membership (`user_ids`) keeps its meaning everywhere (permissions, model
+  access, which `/ext/groups/<g>` a user sees). `writers` is normalised to
+  `writers ∩ user_ids` on every save (removing a member — from the editor,
+  OAuth group sync or user deletion — drops them from `writers`; adding them back
+  does not restore it), and the decision also checks membership at read time, so
+  a stale non-member id grants nothing. An unknown `write` value read from the DB
+  is treated as `listed` (fail closed). The jail binds such a group read-only for
+  non-writers (`mounts[].rw = false`), so `run_python` / `run_shell` writes fail
+  with the OS's "Read-only file system".
 - The directory name **is** the group name (membership from
   `Groups.get_groups_by_member_id`). Names that fail
   `utils/group_names.validate_group_name` (#151; e.g. an older `rank:部長`) are
@@ -1395,7 +1410,7 @@ user can open is the `/ext` ACL of §3.8 (`utils/ext_acl.py`, nothing separate):
 | -------------------- | --------------------------------------- | ------------- |
 | `/workspace/…`       | own workspace, rw                       | own, rw       |
 | `/ext/public/…`      | ro                                      | rw            |
-| `/ext/groups/<g>/…`  | members rw, others 404 (does not exist) | all groups rw |
+| `/ext/groups/<g>/…`  | members rw (non-writers ro in `listed` groups), others 404 (does not exist) | all groups rw |
 | other `/ext/<name>/` | 404 (not part of the browser)           | 404           |
 
 Writes to a ro place are 403 (and the sandbox gets the place as a ro bind, so it
@@ -1474,6 +1489,14 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
   `POST /api/v1/chats/{id}/executions/{exec_id}/stop` → stop one execution and
   return its updated row (idempotent — already-terminal rows are unchanged).
 - Users & groups (admin): `/api/v1/users/*`, `/api/v1/groups/*`.
+  `POST /api/v1/groups/id/{id}/update` takes an optional
+  `ext: {"write": "members" | "listed", "writers": [user_id, …]}` (admin only;
+  any other `write` value is 422). Omitted = the current setting is kept; the
+  other keys of `data` are never touched. It is stored as `data.ext` and every
+  group response (`GET /api/v1/groups/`, `/id/{id}`, the update) returns it there,
+  with `writers` already normalised to `writers ∩ user_ids` (in the stored
+  order). Groups never given a setting have no `data.ext` (= `members`). See
+  §3.8 "Group ACL" for what it means.
 - Config import/export (admin): `POST /api/v1/configs/import`, `GET /api/v1/configs/export`.
 - External OpenAPI tool servers (admin): `GET/POST /api/v1/configs/tool_servers`.
 

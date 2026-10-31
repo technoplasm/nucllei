@@ -71,6 +71,14 @@ BROKEN_REWRITE_NEXT = "save_recipe(path=この行のフォルダ) で作り直�
 # 直せない人 (全体の層を管理者でない人が読む) には直させない — read_file → edit_recipe の ERROR の 2 手が
 # 無駄になる (敵対レビュー)
 BROKEN_READONLY_NEXT = "直せるのは管理者なので、壊れていることをユーザーに伝える"
+# 書き込みを「指定した人だけ」にしたグループで、指定されていないメンバーが読む (2026-10-31 ken、案 A)。
+# グループ名は出さない (一覧の印の角括弧の中に入る — 行のフォルダで分かる)
+READONLY_GROUP_WHY = (
+    "この置き場はこの利用者には読み取り専用 (書けるのは管理者が書き込みを許した人だけ)"
+)
+BROKEN_READONLY_GROUP_NEXT = (
+    f"{READONLY_GROUP_WHY}なので、壊れていることをユーザーに伝える"
+)
 # 印に出してよいキーの名前 (キーの名前も書いた人の文 — これ以外の形は名前を出さない。ken 2026-10-30
 # 「不正なキーがあるとわかればいい」)
 RE_SHOWN_KEY = re.compile(r"[A-Za-z0-9_-]{1,32}")
@@ -926,11 +934,21 @@ def md_unusable(reasons: list[str]) -> bool:
     return bool(reasons) and reasons[0].startswith("RECIPE.md が")
 
 
-def broken_next(reasons: list[str], folder: str = "", writable: bool = True) -> str:
+def _in_group_layer(folder: str) -> bool:
+    return folder.startswith(GROUPS + "/")
+
+
+def broken_next(
+    reasons: list[str], folder: str = "", writable: bool = True, place: str = ""
+) -> str:
     """壊れたレシピの次の手。`folder` (load_recipe の ERROR・入れ子の警告) があれば実際のパスで言う
     (一覧の印は行のフォルダを「このフォルダ」と指す)。直す tool と渡す path (フォルダ) を先に言う。
-    `writable` は読む人がその層に書けるか (`recipe_writable`)。"""
+    `writable` は読む人がその層に書けるか (`recipe_index.recipe_writable`)。書けないときの文は
+    層で分ける (全体 = 管理者だけ、グループ = 書き込みを許された人だけ)。`place` は `folder` を
+    文に出さない一覧の印が、層を見分けるためだけに渡すレシピのフォルダ。"""
     if not writable:
+        if _in_group_layer(folder or place):
+            return BROKEN_READONLY_GROUP_NEXT
         return BROKEN_READONLY_NEXT
     if not folder:
         return BROKEN_REWRITE_NEXT if md_unusable(reasons) else BROKEN_NEXT
@@ -1201,15 +1219,26 @@ def _shown(reasons: list[str]) -> str:
     return " ".join(shown.split()).replace("[", "［").replace("]", "］")
 
 
-def recipe_writable(folder: str, role: Optional[str]) -> bool:
-    """読む人がそのレシピの層に書けるか。一覧に出るのは個人・所属グループ (書ける) と全体 (管理者だけ)。"""
-    return role == "admin" or not (folder == PUBLIC or folder.startswith(PUBLIC + "/"))
-
-
-def broken_line(reasons: list[str], writable: bool = True) -> str:
+def broken_line(reasons: list[str], writable: bool = True, folder: str = "") -> str:
     """一覧の印 (`[壊れている: …]`)。行頭 (`- ` の直後) に置く — description は `—` の後にしか
-    出ないので、description に同じ形を書いても印にはならない (2026-10-30 llens のレビュー)。"""
-    return f"[壊れている: {_shown(reasons)}。{broken_next(reasons, writable=writable)}]"
+    出ないので、description に同じ形を書いても印にはならない (2026-10-30 llens のレビュー)。
+    `folder` は書けないときの文を層で分けるためだけに使う (印にパスは出さない)。"""
+    nxt = broken_next(reasons, writable=writable, place=folder)
+    return f"[壊れている: {_shown(reasons)}。{nxt}]"
+
+
+def readonly_warnings(warns: "RefWarnings", folder: str) -> "RefWarnings":
+    """読む人がレシピの層に書けないとき、警告の次の手のうち「edit_recipe で直す」を「直せる人に
+    伝える」に置き換えたもの (壊れたレシピの BROKEN_READONLY_* と同じ考え — 書けない人に直させない)。"""
+    if _in_group_layer(folder):
+        fix = f"{READONLY_GROUP_WHY}なので、そうユーザーに伝える"
+    else:
+        fix = "直せるのは管理者なので、そうユーザーに伝える"
+    swap = {WARN_NEXT_MISSING: fix, WARN_NEXT_LAYER: fix}
+    return RefWarnings(
+        items={n: (r, swap.get(x, x)) for n, (r, x) in warns.items.items()},
+        recipe=[(r, swap.get(x, x)) for r, x in warns.recipe],
+    )
 
 
 def warning_line(reasons: list[str]) -> str:

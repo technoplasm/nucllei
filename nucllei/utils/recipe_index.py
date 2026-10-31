@@ -39,7 +39,7 @@ from nucllei.utils.recipes import (
     name_problem,
     read_frontmatter,
     recipe_refs,
-    recipe_writable,
+    readonly_warnings,
     reference_warnings,
     warning_line,
 )
@@ -64,6 +64,18 @@ def _uid_role(user) -> tuple[Optional[str], Optional[str]]:
     if isinstance(user, dict):
         return user.get("id") or None, user.get("role")
     return getattr(user, "id", None) or None, getattr(user, "role", None)
+
+
+def recipe_writable(folder: str, user) -> bool:
+    """読む人 `user` がレシピのフォルダ `folder` の層に書けるか (直す案内を出すか)。個人の層は書ける、
+    `/ext/…` は ACL (`ext_acl.ext_path_access`) が rw のときだけ — 全体は管理者だけ、グループは
+    書き込みの形と `writers` 次第 (2026-10-31 ken、案 A)。案内の文にだけ使う — 書けるかの最後の
+    判定は save_recipe / edit_recipe の書き先の検査 (`sandbox._write_target`)。"""
+    from nucllei.utils.ext_acl import ext_path_access
+
+    if folder == WORKSPACE or folder.startswith(WORKSPACE + "/"):
+        return True
+    return ext_path_access(user, folder) == "rw"
 
 
 def member_groups(user) -> list[str]:
@@ -197,11 +209,18 @@ async def user_recipes_text(user) -> str:
     path_types = await stat_paths(user, refs.paths) if refs.paths else {}
 
     lines = []
+    writable_of: dict = (
+        {}
+    )  # 層 -> 書けるか (壊れたレシピの印の分だけ ACL を引く。層ごとに 1 回)
     for folder, md, entries in found:
         reasons = assess_recipe(folder, md, safe=True)
         if reasons:
-            writable = recipe_writable(folder, _uid_role(user)[1])
-            lines.append(index_line(folder, "", broken_line(reasons, writable)))
+            writable = writable_of.get(_layer_key(folder))
+            if writable is None:
+                writable = writable_of[_layer_key(folder)] = recipe_writable(
+                    folder, user
+                )
+            lines.append(index_line(folder, "", broken_line(reasons, writable, folder)))
             continue
         fm, _ = read_frontmatter(md["text"])
         warns = reference_warnings(
@@ -212,6 +231,11 @@ async def user_recipes_text(user) -> str:
     took = time.perf_counter() - started
     log.debug(f"[recipes] index for {uid}: {len(lines)} recipes in {took:.3f}s")
     return "\n".join(lines)
+
+
+def _layer_key(folder: str) -> str:
+    """レシピのフォルダ `<層>/recipes/<名前>` の層の部分。"""
+    return folder.rsplit("/", 2)[0]
 
 
 async def assess_loaded_recipe(
@@ -236,7 +260,11 @@ async def assess_loaded_recipe(
     for rel, why in skipped.items():
         if "/" not in rel:
             entries[rel] = "symlink" if why == "symlink" else "other"
-    return [], await reference_warnings_for(user, folder, md["text"], entries)
+    warns = await reference_warnings_for(user, folder, md["text"], entries)
+    if warns and not recipe_writable(folder, user):
+        # 書けない人に「edit_recipe で直す」を勧めない (壊れたレシピの印と同じ)
+        warns = readonly_warnings(warns, folder)
+    return [], warns
 
 
 async def reference_warnings_for(
