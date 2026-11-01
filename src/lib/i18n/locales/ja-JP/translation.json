@@ -890,6 +890,7 @@
 	"Workspace usage (quota). Space is freed when items are deleted from the trash (/workspace/trash/).": "workspace の使用量(上限)。ゴミ箱 (/workspace/trash/) から削除すると空きが増えます。",
 	"Write access": "書き込み",
 	"Write the instructions this model always follows...": "このモデルに常に与える指示を入力...",
+	"Write the steps of this skill...": "このスキルの手順を入力...",
 	"Write the text placed at the head of the first message...": "会話の最初の発言の先頭に入れる文を入力...",
 	"Year": "年",
 	"Yesterday": "昨日",

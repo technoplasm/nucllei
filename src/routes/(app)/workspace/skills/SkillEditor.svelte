@@ -403,6 +403,7 @@
 			id="skill"
 			lang="markdown"
 			value={content}
+			placeholder={$i18n.t('Write the steps of this skill...')}
 			onChange={(e) => {
 				_content = e;
 			}}
