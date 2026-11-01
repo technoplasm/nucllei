@@ -122,8 +122,21 @@
 
 	// llens(#47): タブ切替で「見えていない別タブの編集」をそのまま保存しないよう、ロード時の
 	// 状態へ暗黙リセットする。名前/ID は対象外(リセットしない — リネームは submit 時の confirm で扱う)。
+	// プロンプト・会話の前置きは 1 組: この 2 タブの間の切替ではリセットせず、保存すると両方入る。
+	// 組の外へ出るとき (一般・高度なパラメータとの行き来) は両方まとめてリセットする。
+	const PROMPT_PAIR_TABS = ['prompt', 'context'];
 	let stateSnapshot: string | null = null;
+	// ロード時のプロンプトタブ (提案 + システムプロンプト) と会話の前置き。見えていない方の
+	// タブに未保存の変更があるかを、タブ名の横の印で出すのに使う
+	let loadedPromptTab = $state('');
+	let loadedContext = $state('');
+	const promptTabState = () =>
+		JSON.stringify([info?.meta?.suggestion_prompts ?? [], info?.params?.system ?? '']);
+	const promptTabDirty = $derived(loaded && promptTabState() !== loadedPromptTab);
+	const contextDirty = $derived(loaded && (info?.params?.context ?? '') !== loadedContext);
 	const captureSnapshot = () => {
+		loadedPromptTab = promptTabState();
+		loadedContext = info?.params?.context ?? '';
 		stateSnapshot = JSON.stringify({
 			info,
 			params,
@@ -147,7 +160,9 @@
 
 	const switchTab = (tab: string) => {
 		if (tab === selectedTab) return;
-		if (stateSnapshot) {
+		const withinPromptPair =
+			PROMPT_PAIR_TABS.includes(tab) && PROMPT_PAIR_TABS.includes(selectedTab);
+		if (stateSnapshot && !withinPromptPair) {
 			const s = JSON.parse(stateSnapshot);
 			info = s.info;
 			params = s.params;
@@ -477,6 +492,14 @@
 								<span class="i-lucide-file-text size-4 block"></span>
 							</div>
 							<div class=" self-center">{$i18n.t('Prompt')}</div>
+							<!-- 未保存の印は組のもう一方のタブに居るときだけ (今見ているタブには出さない) -->
+							{#if selectedTab === 'context' && promptTabDirty}
+								<span
+									class="self-center ml-1.5 size-1.5 rounded-full bg-amber-500"
+									title={$i18n.t('Unsaved')}
+								></span>
+								<span class="sr-only">{$i18n.t('Unsaved')}</span>
+							{/if}
 						</button>
 
 						<button
@@ -491,6 +514,13 @@
 								<span class="i-lucide-message-square-quote size-4 block"></span>
 							</div>
 							<div class=" self-center">{$i18n.t('Conversation preamble')}</div>
+							{#if selectedTab === 'prompt' && contextDirty}
+								<span
+									class="self-center ml-1.5 size-1.5 rounded-full bg-amber-500"
+									title={$i18n.t('Unsaved')}
+								></span>
+								<span class="sr-only">{$i18n.t('Unsaved')}</span>
+							{/if}
 						</button>
 
 						<button
