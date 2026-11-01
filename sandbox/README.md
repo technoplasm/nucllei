@@ -213,7 +213,7 @@ nucllei は `/exec` `/exec_cell` に `user_groups` `user_role` を付け、sandb
   chat 履歴に完全に残り、そちらを保全する運用のため二重化しない。
 - **API 認証 = 共有トークン、opt-in** (#132。2026-09-04 に導入、2026-09-05 に
   fail-closed から opt-in へ変更):
-  - **`SANDBOX_TOKEN` を設定すれば認証が有効**になり、`/healthz` `/metrics` 以外の全
+  - **`SANDBOX_TOKEN` を設定すれば認証が有効**になり、`/health` `/metrics` 以外の全
     endpoint が `Authorization: Bearer <SANDBOX_TOKEN>` を要求する。
   - **未設定なら認証は掛からず、従来どおり無認証で動く**。「キーが無ければ元のまま」
     (ken 判断) — トークンを渡していない既存の配備・手元の `docker run` を壊さないことを
@@ -239,7 +239,7 @@ nucllei は `/exec` `/exec_cell` に `user_groups` `user_role` を付け、sandb
     **片側だけ設定すると壊れる**: sandbox 側だけ設定 → nucllei からの呼び出しが全て
     401、nucllei 側だけ設定 → 送ったヘッダは無視されて素通し (認証されていない)。
   - **有効なときは既定 deny**: 認証は middleware で全パスに掛かり、免除は `PUBLIC_PATHS`
-    に書いた `/healthz` と `/metrics` だけ (endpoint を足したときに開く側へ倒れない)。
+    に書いた `/health` と `/metrics` だけ (endpoint を足したときに開く側へ倒れない)。
     この 2 つを免除するのは、配備側の healthcheck / Prometheus が叩く口で、返すのが
     真偽値と label なし集約値だけ = user データを含まないため (docs/health.md ②)。
   - 「トークンが空かどうか」の判定は `main.py` の `AUTH_ENABLED` 1 箇所だけが持つ。
@@ -263,7 +263,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 
 | 叩き方 | 認証あり | 認証なし (未設定) | 何が分かるか |
 |---|---|---|---|
-| `GET /healthz` (トークン無し) | `200` | `200` | 到達できる |
+| `GET /health` (トークン無し) | `200` | `200` | 到達できる |
 | `GET /_auth_probe` など**存在しないパス**にトークン**無し** | **`401`** | `404` | 認証が要求されている |
 | 同じパスにトークン**付き** | **`404`** | `404` | **トークンが受理された** |
 
@@ -273,7 +273,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 認証を通った未知パスが `404` になることも**契約として維持する**
 (`test_unknown_path_with_token_is_404` が固定)。
 
-**これは契約として維持する。** 免除は `/healthz` と `/metrics` の**完全一致 2 つだけ**で、
+**これは契約として維持する。** 免除は `/health` と `/metrics` の**完全一致 2 つだけ**で、
 それ以外は未知パスも含めて routing の前段で 401 になる (`test_unknown_path_is_401_not_404`
 `test_public_path_lookalikes_are_401` が固定)。副作用のないパスで判定できるよう、
 **存在しないパスを使うこと** — `/exec` 等の実処理パスを probe に使わない。
@@ -353,7 +353,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 
 ## API (sandbox サービス、port 8000)
 
-**`SANDBOX_TOKEN` を設定した配備では、`/healthz` と `/metrics` 以外の全 endpoint に
+**`SANDBOX_TOKEN` を設定した配備では、`/health` と `/metrics` 以外の全 endpoint に
 `Authorization: Bearer <SANDBOX_TOKEN>` が要る** (無い/違う → 401)。未設定の配備では
 認証は掛からない (opt-in。上の「セキュリティモデル」参照)。
 
@@ -477,7 +477,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   - 以前は exports の自動添付の上限として `/exec` `/exec_cell` にも渡っていた (2026-10-19 廃止。
     今の nucllei は送らない)。古い nucllei が送ってきても 422 にしない: `/exec` は `imports` の上限
     として受け、`/exec_cell` はモデルに欄が無く pydantic の既定 (extra="ignore") で捨てる
-- `GET /healthz` — `{ok, nsjail, loop, jail_cgroup, jail_pids_max, file_max_size_mb}`
+- `GET /health` — `{ok, nsjail, loop, jail_cgroup, jail_pids_max, file_max_size_mb}`
   (+ `jail_cgroup` が false のときだけ `jail_cgroup_error`)。`jail_cgroup` は jail ごとの pids cgroup
   が起動時に用意できたか、`jail_pids_max` はその上限 (`SANDBOX_JAIL_PIDS_MAX`)。**false なら 503**
   (下の「jail ごとのプロセス数上限」)。`file_max_size_mb` は sandbox の上限
@@ -525,7 +525,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 
 | env | 既定 | 意味 |
 |---|---|---|
-| `SANDBOX_TOKEN` | なし (**未設定 = 認証なし**) | API の共有トークン。設定すると全 endpoint (`/healthz` `/metrics` を除く) が Bearer 認証必須になる。未設定なら従来どおり無認証で動く (起動時に warning)。**値は ASCII 限定** (非 ASCII は全要求 401 になる。起動時に warning)。**配備では設定すること** — 呼び出し元の nucllei にも同じ値を同じ名前で渡す |
+| `SANDBOX_TOKEN` | なし (**未設定 = 認証なし**) | API の共有トークン。設定すると全 endpoint (`/health` `/metrics` を除く) が Bearer 認証必須になる。未設定なら従来どおり無認証で動く (起動時に warning)。**値は ASCII 限定** (非 ASCII は全要求 401 になる。起動時に warning)。**配備では設定すること** — 呼び出し元の nucllei にも同じ値を同じ名前で渡す |
 | `SANDBOX_TIMEOUT_DEFAULT_S` | 120 | wall clock 既定 (tool から実行ごとに指定可) |
 | `SANDBOX_TIMEOUT_MAX_S` | 600 | wall clock 上限 (指定値はこれで clamp) |
 | `SANDBOX_MEM_MB` | 4096 | rlimit_as |
@@ -538,7 +538,7 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
 | `SANDBOX_LOOP_NODES` | 256 | 先に mknod する loop ノード数 = 同時 quota ユーザー上限 |
 | `SANDBOX_MAX_CONCURRENCY` | 4 | 全体の同時実行数 (SGLang と CPU を食い合わないように) |
 | `SANDBOX_STREAM_LIMIT_BYTES` | 524288 | stdout/stderr それぞれの保持上限 |
-| `SANDBOX_FILE_MAX_SIZE_MB` | 1024 | **sandbox の上限** (MB の整数、全員共通): workspace に直接出し入れする 1 ファイルの上限。(1) `/files/raw` (ファイルブラウザのアップロード / ダウンロード、nucllei の `send_to_workspace(url=)`) の上限そのもの、(2) nucllei がリクエストごとに `file_limit_bytes` で渡す添付の上限 (`ATTACHMENT_MAX_SIZE_MB` — `/files/read` `/files/write`・`/exec` の imports) の安全上限 — sandbox は**渡された値とこの値の小さいほう**に従う (渡されなければこの値だけ。渡された値の方が大きければ warning を 1 行、値が変わったときだけ)。(2) の経路は base64 で JSON に載る (**ファイルサイズの約 2.3 倍のメモリを使う**) ため真の無制限にはしない。値は `/healthz` (`file_max_size_mb`) `/metrics` に出し、nucllei が起動時に読む。**旧名 `SANDBOX_FILE_LIMIT_BYTES` は読まない** (設定されていれば起動時に warning を 1 行、値は読み替えない) |
+| `SANDBOX_FILE_MAX_SIZE_MB` | 1024 | **sandbox の上限** (MB の整数、全員共通): workspace に直接出し入れする 1 ファイルの上限。(1) `/files/raw` (ファイルブラウザのアップロード / ダウンロード、nucllei の `send_to_workspace(url=)`) の上限そのもの、(2) nucllei がリクエストごとに `file_limit_bytes` で渡す添付の上限 (`ATTACHMENT_MAX_SIZE_MB` — `/files/read` `/files/write`・`/exec` の imports) の安全上限 — sandbox は**渡された値とこの値の小さいほう**に従う (渡されなければこの値だけ。渡された値の方が大きければ warning を 1 行、値が変わったときだけ)。(2) の経路は base64 で JSON に載る (**ファイルサイズの約 2.3 倍のメモリを使う**) ため真の無制限にはしない。値は `/health` (`file_max_size_mb`) `/metrics` に出し、nucllei が起動時に読む。**旧名 `SANDBOX_FILE_LIMIT_BYTES` は読まない** (設定されていれば起動時に warning を 1 行、値は読み替えない) |
 | `SANDBOX_SESSION_TTL_S` | 43200 (12h) | stateful session の生存上限 (kernel の nsjail time_limit。idle 回収も同値) |
 | `SANDBOX_SESSION_MAX` | 64 | 常駐 session 数の上限 (超過で最も idle を回収) |
 | `SANDBOX_SESSION_GRACE_S` | 5 | 中断不能セルを kill するまでの猶予 (kernel の SIGALRM 後) |
@@ -574,8 +574,8 @@ opt-in なので、**トークンを入れ忘れても止まらない**。`.env`
   `cgroup: host` にしない)。自分の cgroup が namespace の root でなければ、自分の物ではない階層を
   組み替えることになるので**何も書かずに失敗扱い**にする。
 - **用意できなかったら (fail-closed)**: 起動は止めない (ファイルブラウザ等 jail を使わない
-  endpoint とログ・`/healthz` を生かして原因を見られるように) が、**jail を 1 つも起こさない** —
-  `/exec` `/exec_cell` は 503 (`sandbox の設定不良でコードを実行できない (…理由)`)、`/healthz` は
+  endpoint とログ・`/health` を生かして原因を見られるように) が、**jail を 1 つも起こさない** —
+  `/exec` `/exec_cell` は 503 (`sandbox の設定不良でコードを実行できない (…理由)`)、`/health` は
   `jail_cgroup:false` + `jail_cgroup_error` で 503 (= compose healthcheck で unhealthy)、
   起動ログに `[sandbox] ERROR: jail ごとの pids cgroup を用意できない (…)`。上限なしの jail を黙って
   動かすことはしない (nsjail 側も、cgroup を作れなければその jail を起こさずに終わる)。
@@ -823,7 +823,7 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
 - **権限昇格**: uid/gid=65534(nobody) / `setuid(0)` 拒否 / rootfs (/usr /etc /opt/venv) read-only /
   ホスト `/workspaces` (他ユーザー領域) 不可視。
 - **プロセス数の上限が jail ごと**: jail に RLIMIT_NPROC (uid 単位の共有の枠) が無い / 1 つの jail で
-  fork bomb するとちょうど `SANDBOX_JAIL_PIDS_MAX` で止まり (`/healthz` の `jail_pids_max` を読む)、
+  fork bomb するとちょうど `SANDBOX_JAIL_PIDS_MAX` で止まり (`/health` の `jail_pids_max` を読む)、
   その間も別の jail は fork できる。**稼働中の配備に向けると、その数の nobody プロセスを数秒作る**
   (同じホストに旧版の sandbox = `--rlimit_nproc 128` が居ると、その間そちらの実行を詰まらせうる)。
 - **デバイス・ハードウェア・システムの見え方**: /dev は 5 ノード (null/zero/full/random/urandom)
@@ -854,13 +854,13 @@ jail の *中から* 上記セキュリティモデルを実際に突く統合�
   RLIMIT_NPROC は `inf`、stateless と kernel の両方)、起動時の cgroup の組み替え (tmp を cgroup に
   見立てて、root のプロセスを service/ へ 1 つずつ移す・`+pids`・EBUSY のやり直し・namespace の
   root でなければ何も書かない・pids 無し / 上限 0 は失敗)、fail-closed (`/exec` `/exec_cell` 503・
-  kernel を起こさない・`/healthz` 503)、残骸の掃除 (居ない / zombie の pid だけ)。cgroupfs 自体の
+  kernel を起こさない・`/health` 503)、残骸の掃除 (居ない / zombie の pid だけ)。cgroupfs 自体の
   挙動は `test_isolation.py` 側。
 - `sandbox/tests/test_auth.py` — 共有トークン認証 (#132)。トークンを設定したとき
   ヘッダ無し / 誤トークン / 別スキーム / 未知パスが 401、正しい Bearer が通る、
-  `/healthz` `/metrics` は公開、そして**トークン未設定なら認証が掛からず素通しする**
-  (opt-in) ことを固定する。加えて**免除は完全一致だけ** (`/healthz/` `//healthz`
-  `/HEALTHZ` `/healthz/../files/list` 等はすべて 401 — 免除判定を prefix 一致や自前の
+  `/health` `/metrics` は公開、そして**トークン未設定なら認証が掛からず素通しする**
+  (opt-in) ことを固定する。加えて**免除は完全一致だけ** (`/health/` `//health`
+  `/HEALTH` `/health/../files/list` 等はすべて 401 — 免除判定を prefix 一致や自前の
   正規化に変えたら落ちる) と、**非 ASCII トークンは起動ログで名指しする**ことも見る。
   形状のテストは httpx がクライアント側で URL を畳んでしまうため ASGI を直接叩く。
 - `sandbox/tests/test_ext_mounts.py` — グループ・全体の共有の置き場 (#152)。`mounts` の検証

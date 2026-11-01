@@ -61,7 +61,7 @@ Prometheus text 形式を**依存を足さず手書き**(`PlainTextResponse`)。
   そもそも全 endpoint が無認証):
   返すのは label なしの集約 gauge だけで user_id を含まず厳密に低感度。認証すると配備側の
   Prometheus にトークン配布(`bearer_token` 設定)が要り、監視のために秘密を 1 箇所増やす。
-  免除は `main.py` の `PUBLIC_PATHS`(`/healthz` と 2 つだけ)。
+  免除は `main.py` の `PUBLIC_PATHS`(`/health` と 2 つだけ)。
 - Prometheus job(既定 bridge・service DNS): `targets: ["sandbox:8000"]`。
 - Grafana alert: loop `loop_used/loop_nodes_total > 0.75`(host snap baseline を吸収した実効 80%)、
   disk `disk_used/disk_total > 0.80`。
@@ -111,16 +111,16 @@ Prometheus text 形式を**依存を足さず手書き**(`PlainTextResponse`)。
 - **C5**: loop/disk 枯渇の mount 失敗は opaque 500 でなく **503**(「同時利用ユーザー数の上限」)に変換。
   枯渇は ① 導入後も active user > 実効 budget で起きる終端状態。
 
-## ⑤ loop ドライバ実効チェック(healthz)
+## ⑤ loop ドライバ実効チェック(`/health`)
 
 loop ドライバ自体が使えない状態は、①〜④ が守る「リソースの増減」と別軸の **hard fault**
-(全 workspace mount が失敗 = 全実行が 5xx)。かつてこの状態でも healthz は `ok:true` を
+(全 workspace mount が失敗 = 全実行が 5xx)。かつてこの状態でも `/health` は `ok:true` を
 返し続け、`docker ps` は healthy のまま障害が不可視だった(2026-08-10 実障害)。
 
 - **検出**: `/dev/loop-control` を open して確かめる(`_loop_available()`)。ノードの存在
   チェックでは検出できない — ドライバ不在でも devtmpfs のノードは残るため、開いて
   ENODEV になるかが唯一の実効判定。
-- **応答**: healthz が `{ok:false, loop:false}` + **503** → compose healthcheck が落ち、
+- **応答**: `/health` が `{ok:false, loop:false}` + **503** → compose healthcheck が落ち、
   コンテナが unhealthy になる。起動時にも同判定で WARNING ログを出す。
 - **典型例**: ホストのカーネルパッケージ更新が稼働中カーネルの module ツリーを消し、
   そのまま再起動していない場合(ローリングリリースの開発機で発生。閉域本番は
@@ -128,9 +128,9 @@ loop ドライバ自体が使えない状態は、①〜④ が守る「リソ�
   `Module not found` を返すならこれ — **ホストの reboot が必要**(応急処置は
   パッケージキャッシュから稼働カーネル版 `loop.ko` を取り出して insmod)。
 - **C5 との切り分け**: mount 失敗はどちらも 503「同時利用ユーザー数の上限」に丸まる。
-  healthz の `loop:false` なら混雑ではなく恒久障害なので、再試行の案内は当てにならない。
+  `/health` の `loop:false` なら混雑ではなく恒久障害なので、再試行の案内は当てにならない。
 
-## ⑥ jail ごとの pids cgroup(healthz、2026-10-20)
+## ⑥ jail ごとの pids cgroup(`/health`、2026-10-20)
 
 プロセス数の上限は jail ごとの pids cgroup(`SANDBOX_JAIL_PIDS_MAX`、既定 128)。起動時に
 コンテナの cgroup を `service/`(サービス)と `jails/`(nsjail の親)に分けて用意する(仕組みは
@@ -138,7 +138,7 @@ README「jail ごとのプロセス数上限」)。それまでの `--rlimit_npr
 常駐 kernel が溜まると全実行が fork 不能になった(staging。サービスを再起動するまで直らなかった)。
 
 - **用意できなかったら**: jail を起こさない(上限なしで動かさない)。`/exec` `/exec_cell` は 503、
-  healthz は `{ok:false, jail_cgroup:false, jail_cgroup_error:"…"}` + **503** → unhealthy。
+  `/health` は `{ok:false, jail_cgroup:false, jail_cgroup_error:"…"}` + **503** → unhealthy。
   起動ログに `[sandbox] ERROR: jail ごとの pids cgroup を用意できない (…)`。
 - **典型例**: compose で `cgroup: host`(cgroupns=host)にした / privileged を外した /
   `SANDBOX_JAIL_PIDS_MAX` を 0 以下にした。

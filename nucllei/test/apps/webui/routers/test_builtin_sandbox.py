@@ -1723,7 +1723,7 @@ def test_general_url_wording_follows_reason(monkeypatch):
 
 
 def _set_sandbox_limit_mb(monkeypatch, mb):
-    """sandbox の上限 (`/healthz` の file_max_size_mb を読めた値) を差し替える。url= はこれに従う。"""
+    """sandbox の上限 (`/health` の file_max_size_mb を読めた値) を差し替える。url= はこれに従う。"""
     from nucllei.utils import file_limit
 
     monkeypatch.setattr(file_limit, "_sandbox_limit", mb * 1024 * 1024)
@@ -1776,7 +1776,7 @@ def test_too_large_without_content_length_says_at_least(monkeypatch):
 
 
 def test_sandbox_limit_is_the_resolver_limit(monkeypatch):
-    # url= は file_id を作らない経路 — 上限は sandbox の上限 (SANDBOX_FILE_MAX_SIZE_MB。/healthz から
+    # url= は file_id を作らない経路 — 上限は sandbox の上限 (SANDBOX_FILE_MAX_SIZE_MB。/health から
     # 読めていなければ既定 1024 MB)。添付の上限 (RC ATTACHMENT_MAX_SIZE_MB) には従わない。
     # 中身は一時ファイル (sink) に流す
     seen = {}

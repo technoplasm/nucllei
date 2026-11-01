@@ -8,7 +8,7 @@
   (実行 `/exec` `/exec_cell` には渡さない — exports/ の自動添付は廃止)。無制限なら渡さない
   (sandbox の上限だけ)。超過の文は上限の値と
   「管理者の設定 (最大アップロードサイズ)」を言う
-- sandbox の上限 = sandbox の `/healthz` の `file_max_size_mb`(読めるまでは既定 1024 MB)。
+- sandbox の上限 = sandbox の `/health` の `file_max_size_mb`(読めるまでは既定 1024 MB)。
   feed_image(path=) はこれと FETCH_MAX_BYTES の小さいほう(send_to_workspace(url=) とファイルブラウザ
   は test_builtin_sandbox / test_sandbox_files)
 - 添付の上限が sandbox の上限より大きい(無制限を含む)と warning(組が変わったときだけ)
@@ -312,10 +312,10 @@ def test_probe_reads_file_max_size_mb(monkeypatch, limit_mb):
     async def main(body):
         app = web.Application()
 
-        async def healthz(request):
+        async def health(request):
             return web.json_response(body)
 
-        app.router.add_get("/healthz", healthz)
+        app.router.add_get("/health", health)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1", 0)

@@ -15,7 +15,7 @@
   `/files/write`) には `file_limit_bytes` で渡す (`sandbox_limit_fields`)。sandbox は
   渡された値と自分の上限の小さいほうに従う
 - **sandbox の上限** = sandbox の env `SANDBOX_FILE_MAX_SIZE_MB` (既定 1024、全員共通)。workspace に
-  直接出し入れする経路 (file_id を作らない)。sandbox が持つ値で、nucllei は起動時に `/healthz` から
+  直接出し入れする経路 (file_id を作らない)。sandbox が持つ値で、nucllei は起動時に `/health` から
   読む (`probe_sandbox_file_limit`。読めるまでは既定 1024 MB を仮に使う)。運ぶのは sandbox の
   `/files/raw` (ストリーミング) — `feed_image(path=)` だけは中身をメモリに載せて画像・PDF として
   検証し、送信直前にもう一度 resolver (`FETCH_MAX_BYTES`) で読むので、その小さいほう
@@ -40,11 +40,11 @@ _MIB = 1024 * 1024
 ADMIN_SETTING = "ワークスペース > 設定 > ファイルの「最大アップロードサイズ」"
 
 # sandbox の上限の既定 (sandbox/app/main.py の `SANDBOX_FILE_MAX_SIZE_MB` の既定と同じ)。
-# `/healthz` から実際の値を読めるまでの仮の値
+# `/health` から実際の値を読めるまでの仮の値
 SANDBOX_FILE_DEFAULT = 1024 * _MIB
 
 _sandbox_limit: Optional[int] = (
-    None  # sandbox の /healthz の file_max_size_mb をバイトで (読めたら)
+    None  # sandbox の /health の file_max_size_mb をバイトで (読めたら)
 )
 _warned: Optional[tuple] = None  # 最後に warning を出した (上限, 安全上限)
 
@@ -103,12 +103,12 @@ def sandbox_limit_fields(limit_bytes: Optional[int]) -> dict:
 
 
 def sandbox_file_limit_bytes() -> int:
-    """sandbox の上限 (バイト)。`/healthz` から読めていなければ既定 (1024 MB)。"""
+    """sandbox の上限 (バイト)。`/health` から読めていなければ既定 (1024 MB)。"""
     return _sandbox_limit or SANDBOX_FILE_DEFAULT
 
 
 def sandbox_file_limit_probed() -> Optional[int]:
-    """`/healthz` から読めた sandbox の上限 (まだ読めていなければ None)。画面の事前チェック用 —
+    """`/health` から読めた sandbox の上限 (まだ読めていなければ None)。画面の事前チェック用 —
     推測の値を出さない (読めていなければ sandbox の 413 で知る)。"""
     return _sandbox_limit
 
@@ -151,7 +151,7 @@ def set_sandbox_file_limit(value: Optional[int]) -> None:
 async def probe_sandbox_file_limit(
     attempts: int = 20, interval_s: float = 15.0
 ) -> Optional[int]:
-    """sandbox の `/healthz` から上限 (`file_max_size_mb`) を読む。起動時に background で 1 回。
+    """sandbox の `/health` から上限 (`file_max_size_mb`) を読む。起動時に background で 1 回。
 
     sandbox は nucllei と同時に立ち上がるので、繋がるまで `interval_s` ごとに `attempts` 回まで
     やり直す。キーが無い (古い sandbox) なら黙って諦める (既定 1024 MB のまま)。SANDBOX_URL の
@@ -163,7 +163,7 @@ async def probe_sandbox_file_limit(
 
     if not sandbox.SANDBOX_URL:
         return None
-    url = sandbox.SANDBOX_URL.rstrip("/") + "/healthz"
+    url = sandbox.SANDBOX_URL.rstrip("/") + "/health"
     for i in range(attempts):
         try:
             async with aiohttp.ClientSession(
@@ -177,7 +177,7 @@ async def probe_sandbox_file_limit(
             return _sandbox_limit
         except Exception as e:
             if i == attempts - 1:
-                log.info(f"[file_limit] sandbox /healthz unreachable: {e!r}")
+                log.info(f"[file_limit] sandbox /health unreachable: {e!r}")
                 return None
             await asyncio.sleep(interval_s)
     return None

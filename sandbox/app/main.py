@@ -64,7 +64,7 @@ STREAM_LIMIT = int(os.environ.get("SANDBOX_STREAM_LIMIT_BYTES", str(512 * 1024))
 #     `/files/read` `/files/write` の b64・`/exec` の imports) の**安全上限**:
 #     渡された値とこの値の**小さいほう**に従う (`_file_limit`)。b64-in-JSON の経路はファイルサイズの
 #     ~2.3 倍が service プロセスの RAM に載るので、真の無制限にはしない
-# 値は /healthz (`file_max_size_mb`) と /metrics (`sandbox_file_max_size_bytes`) に出す (nucllei が
+# 値は /health (`file_max_size_mb`) と /metrics (`sandbox_file_max_size_bytes`) に出す (nucllei が
 # 起動時に読む)。旧名 `SANDBOX_FILE_LIMIT_BYTES` は読まない (起動時に warning — `_startup`)。
 FILE_MAX_SIZE_MB = int(os.environ.get("SANDBOX_FILE_MAX_SIZE_MB", "1024"))
 FILE_LIMIT = FILE_MAX_SIZE_MB * 1024 * 1024
@@ -190,13 +190,13 @@ TOKEN_IS_ASCII = TOKEN.isascii()
 # 認証が有効なときに免除するパス。**認証有効なら既定は要認証** (パス単位の allow では
 # なく deny がデフォルト) — endpoint を足したときに「書き忘れたら開く」ではなく
 # 「書き忘れたら閉じる」側に倒す。
-#   - `/healthz`: 配備側 compose の healthcheck が叩く。token を持たせると healthcheck の
+#   - `/health`: 配備側 compose の healthcheck が叩く。token を持たせると healthcheck の
 #     コマンド行に平文で載り (`docker inspect` に出る)、値がずれただけで unhealthy になる。
 #     返すのは真偽値 3 つだけでユーザーデータを含まない。
 #   - `/metrics`: 配備側 Prometheus が scrape する (docs/health.md ②)。label なしの集約値
 #     のみで user_id を含まない。認証すると scrape 側にも token 配布が要る。
 # どちらも「同じ境界に居る監視系が無認証で読める」ことを前提にした設計で、機微は無い。
-PUBLIC_PATHS = frozenset({"/healthz", "/metrics"})
+PUBLIC_PATHS = frozenset({"/health", "/metrics"})
 
 
 def _token_ok(authorization: str) -> bool:
@@ -585,7 +585,7 @@ CGROUP_JAILS = "jails"
 JAIL_CGROUP_DIR = CGROUP_ROOT / CGROUP_JAILS
 # 起動時の設定に失敗した理由 (None = 使える)。失敗していれば jail を 1 つも起こさない
 # (`_require_jail_cgroup`) — 上限なしの jail を黙って動かすより、全実行を 503 にして
-# /healthz で見えるようにする (fail-closed)
+# /health で見えるようにする (fail-closed)
 _jail_cgroup_error: Optional[str] = "起動処理 (_startup) がまだ走っていない"
 
 
@@ -696,7 +696,7 @@ def _init_jail_cgroup() -> None:
         _jail_cgroup_error = f"{type(e).__name__}: {e}"
         print(
             f"[sandbox] ERROR: jail ごとの pids cgroup を用意できない ({_jail_cgroup_error})。"
-            "jail を起こさない — /exec /exec_cell は 503、/healthz も 503 になる",
+            "jail を起こさない — /exec /exec_cell は 503、/health も 503 になる",
             flush=True,
         )
         return
@@ -1684,9 +1684,9 @@ async def _startup():
         asyncio.create_task(_ext_trash_loop())
 
 
-@app.get("/healthz")
-async def healthz():
-    # loop 不能は全実行が 5xx になる hard fault なので healthz でも落とす
+@app.get("/health")
+async def health():
+    # loop 不能は全実行が 5xx になる hard fault なので /health でも落とす
     # (compose healthcheck は非 200 で unhealthy になり docker ps で見える)
     loop_ok = _loop_available()
     # jail ごとの pids cgroup が無ければ jail を起こさない (全実行が 503) ので、これも hard fault

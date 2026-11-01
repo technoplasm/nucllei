@@ -27,7 +27,7 @@
 - アップロード / ダウンロードは sandbox の `/files/raw` を**ストリーミングで中継**する(base64-in-JSON を
   使わない。UploadFile は spool されたものをチャンクで送り、ダウンロードは StreamingResponse で
   そのまま流す — メモリに載るのはチャンク分だけ)。上限は sandbox の上限(sandbox の env
-  `SANDBOX_FILE_MAX_SIZE_MB`。sandbox が持つ — nucllei は `/healthz` から読めていれば先に断り、
+  `SANDBOX_FILE_MAX_SIZE_MB`。sandbox が持つ — nucllei は `/health` から読めていれば先に断り、
   読めていなければ sandbox の 413 で知る)と quota(507)
 - アップロードはグループの権限 `chat.file_upload`(「ファイルアップロードを許可」)が要る — 無ければ 403
   (画面もアップロードのボタンとドロップを出さない。`places` の `can_upload`)。新規ファイルの作成と
@@ -221,7 +221,7 @@ def _raw_params(user, place: _Place, **extra) -> dict:
 @router.get("/places")
 async def get_places(request: Request, user=Depends(get_verified_user)):
     """開ける場所の一覧(先頭が本人の workspace)。`/ext` は ACL で見える物だけ。
-    `text_limit_bytes` はテキストの上限、`upload_limit_bytes` は sandbox の上限(`/healthz` から
+    `text_limit_bytes` はテキストの上限、`upload_limit_bytes` は sandbox の上限(`/health` から
     読めていなければ null — 画面は事前チェックをせず sandbox の 413 で知る)、`can_upload` は
     アップロードの権限。`memory_dir` は記憶の目次 (env `USER_MEMORY_INDEX_PATH`) のあるフォルダ
     (無効なら null — 画面は「記憶」の近道を出さない)。"""

@@ -9,7 +9,7 @@
    RLIMIT_NPROC は掛けない (`inf`)。stateless exec と常駐 kernel の両方
 2. 起動時の cgroup の組み替え (`_setup_jail_cgroup`) — root のプロセスを service/ へ移してから
    `+pids`、jails/ にも `+pids`。自分の物でない階層 (namespace の root ではない) には触らない
-3. fail-closed — 用意できなければ jail を起こさない (`/exec` `/exec_cell` は 503、`/healthz` も 503)
+3. fail-closed — 用意できなければ jail を起こさない (`/exec` `/exec_cell` は 503、`/health` も 503)
 4. nsjail が消し損ねた `NSJAIL.<pid>` の掃除
 
 cgroupfs そのものの挙動 (no internal processes の EBUSY・pids.max で fork が止まる) は
@@ -110,7 +110,7 @@ def test_no_jail_without_cgroup(monkeypatch, tmp_path):
         assert "boom" in e.value.detail
 
 
-def test_exec_endpoints_are_503_and_healthz_says_why(monkeypatch, tmp_path):
+def test_exec_endpoints_are_503_and_health_says_why(monkeypatch, tmp_path):
     mod = _load(monkeypatch, tmp_path)
     monkeypatch.setattr(mod, "_jail_cgroup_error", "RuntimeError: boom")
     monkeypatch.setattr(mod, "_loop_available", lambda: True)
@@ -128,7 +128,7 @@ def test_exec_endpoints_are_503_and_healthz_says_why(monkeypatch, tmp_path):
     assert r.status_code == 503 and "boom" in r.json()["detail"]
     assert mod._sessions._sessions == {}  # kernel は起こしていない
 
-    r = c.get("/healthz")
+    r = c.get("/health")
     assert r.status_code == 503
     body = r.json()
     assert body["ok"] is False and body["loop"] is True
@@ -136,7 +136,7 @@ def test_exec_endpoints_are_503_and_healthz_says_why(monkeypatch, tmp_path):
     assert body["jail_pids_max"] == 128
 
     monkeypatch.setattr(mod, "_jail_cgroup_error", None)
-    r = c.get("/healthz")
+    r = c.get("/health")
     assert r.status_code == 200
     assert r.json()["jail_cgroup"] is True and "jail_cgroup_error" not in r.json()
 

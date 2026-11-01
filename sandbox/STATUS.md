@@ -24,7 +24,7 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       PID ns) を実際に突く。稼働中の privileged コンテナ必須 (無ければ skip)
 - [x] **プロセス数の上限を jail ごとに** (2026-10-20)。`--rlimit_nproc 128` (実 uid 単位 = 全 jail で
       共有の枠。常駐 kernel ~18 個で全実行が fork 不能になった) をやめ、jail ごとの pids cgroup
-      (`SANDBOX_JAIL_PIDS_MAX`、既定 128) に。cgroup を用意できなければ jail を起こさない (503・healthz 503)。
+      (`SANDBOX_JAIL_PIDS_MAX`、既定 128) に。cgroup を用意できなければ jail を起こさない (503・`/health` も 503)。
       実機: 60 kernel 常駐 (uid のタスク 240) でも新しい実行が通る / fork bomb は 1 jail の 128 で止まり
       他の jail・既存 kernel は動く / SIGKILL された nsjail の残骸 cgroup の掃除
 - [x] `write_file` tool (モデルが書いたテキストを直接 workspace へ)。裸の HTML/CSV を
@@ -41,7 +41,7 @@ GC policy 運用・監視配線 — は、この repo で image を作れるこ�
       exec/exec_cell 回帰なし・live_session ガード・C9 復旧を実機検証済
 - [x] **API の共有トークン認証 (opt-in)** (#132。2026-09-04 実装、2026-09-05 に
       fail-closed → opt-in へ変更)。`SANDBOX_TOKEN` を**設定すれば** middleware が全パスで
-      `Authorization: Bearer <SANDBOX_TOKEN>` を要求する (免除は `/healthz` `/metrics`
+      `Authorization: Bearer <SANDBOX_TOKEN>` を要求する (免除は `/health` `/metrics`
       のみ、比較は `hmac.compare_digest`)。**未設定なら認証は掛からず従来どおり動く** —
       起動は拒否せず warning を 1 行出すだけ (「キーが無ければ元のまま」、ken 判断)。
       呼び出し元 (nucllei) 側の登録ゲートは `SANDBOX_URL` のみで、トークンがあるときだけ

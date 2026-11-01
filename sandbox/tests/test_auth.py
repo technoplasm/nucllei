@@ -4,10 +4,10 @@
 
 1. **トークンを設定したら要認証** — ヘッダ無し / 誤トークン / 別スキーム / 未知パスは
    401。正しい Bearer だけ通る。
-2. **公開パスは `/healthz` と `/metrics` だけ** (compose の healthcheck と Prometheus)。
+2. **公開パスは `/health` と `/metrics` だけ** (compose の healthcheck と Prometheus)。
 3. **トークン未設定なら認証は掛からない** — 従来どおり素通しし、startup も落ちない
    (警告ログだけ出る)。「キーが無ければ元のまま」。
-4. **免除は完全一致だけ** — `/healthz/` `//healthz` `/HEALTHZ` `/healthz/../…` 等の
+4. **免除は完全一致だけ** — `/health/` `//health` `/HEALTH` `/health/../…` 等の
    似た形は 401。免除判定を prefix 一致や正規化に変えたら落ちる。
 5. **非 ASCII のトークン**は HTTP ヘッダの latin-1 解釈のため一致せず全要求が 401 に
    なるので、起動ログで理由を名指しする (起動は止めない)。
@@ -123,11 +123,11 @@ def test_correct_token_passes(monkeypatch, tmp_path):
     assert r.json()["entries"] == []
 
 
-def test_healthz_and_metrics_are_public(monkeypatch, tmp_path):
+def test_health_and_metrics_are_public(monkeypatch, tmp_path):
     """compose の healthcheck / Prometheus が token 無しで叩ける (PUBLIC_PATHS)。"""
     c = _client(monkeypatch, tmp_path)
     # loop ドライバの有無で 200/503 が変わるので「401 でない」ことだけ見る
-    assert c.get("/healthz").status_code in (200, 503)
+    assert c.get("/health").status_code in (200, 503)
     m = c.get("/metrics")
     assert m.status_code == 200
     assert "sandbox_loop_used" in m.text
@@ -187,16 +187,16 @@ def test_empty_bearer_is_not_a_match_when_auth_is_on(monkeypatch, tmp_path):
 # ので、開かないことをテストで宣言しておく (レビュー指摘 #132)。
 #
 # **ASGI を直接叩く** (TestClient を使わない): httpx はクライアント側で URL を正規化して
-# しまい、`//healthz` を protocol-relative URL (host=healthz, path=/) と見なし、
-# `/healthz/../files/list` を `/files/list` に解決するため、これらの形が middleware に
+# しまい、`//health` を protocol-relative URL (host=health, path=/) と見なし、
+# `/health/../files/list` を `/files/list` に解決するため、これらの形が middleware に
 # 届かない。uvicorn はリクエストラインを percent-decode するだけで dot-segment を畳まない
 # ので、実配備で middleware が見るのは下の生パスそのもの。
 PUBLIC_PATH_LOOKALIKES = [
-    "/healthz/",  # 末尾スラッシュ
-    "//healthz",  # 先頭二重スラッシュ
-    "/HEALTHZ",  # 大文字 (パスは case-sensitive)
-    "/healthz/../files/list",  # 相対参照で免除パスを頭に付ける (uvicorn は畳まない)
-    "/healthz%2f../files/list",  # 同上をパーセントエンコードのまま渡した形
+    "/health/",  # 末尾スラッシュ
+    "//health",  # 先頭二重スラッシュ
+    "/HEALTH",  # 大文字 (パスは case-sensitive)
+    "/health/../files/list",  # 相対参照で免除パスを頭に付ける (uvicorn は畳まない)
+    "/health%2f../files/list",  # 同上をパーセントエンコードのまま渡した形
     "/metrics/",  # 末尾スラッシュ (/metrics 側)
 ]
 
@@ -233,7 +233,7 @@ def _asgi_status(
 
 
 def test_public_path_lookalikes_are_401(monkeypatch, tmp_path):
-    """免除は `/healthz` `/metrics` への**完全一致だけ**。似た形のパスは通さない。
+    """免除は `/health` `/metrics` への**完全一致だけ**。似た形のパスは通さない。
 
     末尾スラッシュ・二重スラッシュ・大文字・`..` の混入 (パーセントエンコード由来も
     含む) のいずれでも認証を迂回できないこと (= 免除判定を prefix 一致や自前の正規化に
@@ -261,8 +261,18 @@ def test_public_path_lookalikes_pass_with_token(monkeypatch, tmp_path):
 def test_exact_public_paths_are_exempt(monkeypatch, tmp_path):
     """同じ経路で「完全一致は素通し」も見る (上の 401 が全部落としているだけではない)。"""
     mod = _load_main(monkeypatch, tmp_path)
-    assert _asgi_status(mod.app, "/healthz") in (200, 503)
+    assert _asgi_status(mod.app, "/health") in (200, 503)
     assert _asgi_status(mod.app, "/metrics") == 200
+
+
+def test_healthz_is_not_a_path(monkeypatch, tmp_path):
+    """生存確認の口は `/health` だけ。`/healthz` は免除されず、無いパスなので 404。"""
+    mod = _load_main(monkeypatch, tmp_path)
+    assert _asgi_status(mod.app, "/healthz") == 401
+    auth = [(b"authorization", f"Bearer {TOKEN}".encode())]
+    assert _asgi_status(mod.app, "/healthz", auth) == 404
+    open_mod = _load_main(monkeypatch, tmp_path, token=None)
+    assert _asgi_status(open_mod.app, "/healthz") == 404
 
 
 def test_duplicate_authorization_header_uses_first(monkeypatch, tmp_path):

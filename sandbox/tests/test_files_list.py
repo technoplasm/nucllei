@@ -211,9 +211,9 @@ def test_sandbox_limit_default_is_1024_mb(monkeypatch, tmp_path):
     mod = sys.modules["sandbox_main_files_test"]
     assert mod.FILE_MAX_SIZE_MB == 1024
     assert mod.FILE_LIMIT == 1024 * 1024 * 1024
-    # /healthz と /metrics に出す (nucllei が起動時に読む)
+    # /health と /metrics に出す (nucllei が起動時に読む)
     monkeypatch.setattr(mod, "_loop_available", lambda: True)
-    assert c.get("/healthz").json()["file_max_size_mb"] == 1024
+    assert c.get("/health").json()["file_max_size_mb"] == 1024
     monkeypatch.setattr(mod, "WORKSPACES", tmp_path)
     monkeypatch.setattr(mod, "IMAGES", tmp_path / ".images")
     assert f"sandbox_file_max_size_bytes {1024 * 1024 * 1024}" in c.get("/metrics").text

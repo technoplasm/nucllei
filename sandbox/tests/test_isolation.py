@@ -227,7 +227,7 @@ def test_pid_namespace_hides_host_processes():
 # ---------------------------------------------------------------------------
 # 2026-10-20 まで `--rlimit_nproc 128` で、RLIMIT_NPROC は実 uid 単位 = 全 jail (とホストの
 # uid 65534) で 1 つの枠だった。常駐 kernel が溜まると無関係な chat の fork が全部落ちた。
-def _healthz() -> dict:
+def _health() -> dict:
     p = subprocess.run(
         [
             "docker",
@@ -236,7 +236,7 @@ def _healthz() -> dict:
             "/opt/app/bin/python",
             "-c",
             "import urllib.request,sys;sys.stdout.write(urllib.request.urlopen("
-            "'http://localhost:8000/healthz',timeout=10).read().decode())",
+            "'http://localhost:8000/health',timeout=10).read().decode())",
         ],
         capture_output=True,
         text=True,
@@ -295,7 +295,7 @@ _FORK_BOMB = (
 def test_fork_bomb_is_capped_per_jail_and_other_jails_keep_working():
     # 1 つの jail が fork できるだけ fork する → その jail の pids.max で止まる。
     # 止まっている (枠を使い切ったまま握っている) 間に、別の jail は普通に fork できる。
-    h = _healthz()
+    h = _health()
     assert h.get("jail_cgroup") is True, h
     pids_max = h["jail_pids_max"]
     bomb = {}

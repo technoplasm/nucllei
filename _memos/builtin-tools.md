@@ -21,7 +21,7 @@
 > (実行前後差分の回収)は 2026-10-19 に exports/ の自動添付ごと廃止(「exports/ の自動添付の廃止」)。
 > API の単一情報源は `sandbox/README.md`。
 
-- `GET /healthz` → `{ok, nsjail: true}`
+- `GET /health` → `{ok, nsjail: true}`
 - `POST /exec` (user_id, lang: python|shell, code, timeout_s?, inputs[]?) →
   `{exit_code, timed_out, duration_s, stdout, stderr, *_truncated, outputs[]}`
 - `POST /exec_cell` (user_id, **chat_id**, code, timeout_s?) →
@@ -1518,8 +1518,8 @@ RuntimeConfig を包むだけなので同じ値)。
   413 の文面 `file too large: N bytes (limit L)` の L は効いた上限、exports の truncated entry には
   `limit` を付ける — nucllei のエラー文はこれを言う(安全上限が勝った配備でも嘘の値を言わない)。
   `image_refs._load_workspace` も resolver の上限を `file_limit_bytes` で渡す(転送してから断らない)。
-- 安全上限は sandbox の `/healthz`(`file_limit_bytes`)と `/metrics`(`sandbox_file_limit_bytes`)に出す。
-  nucllei は起動時に background で `/healthz` を読み(`probe_sandbox_safety_limit`、繋がるまで 15 秒
+- 安全上限は sandbox の `/health`(`file_limit_bytes`)と `/metrics`(`sandbox_file_limit_bytes`)に出す。
+  nucllei は起動時に background で `/health` を読み(`probe_sandbox_safety_limit`、繋がるまで 15 秒
   おきに 20 回)、RC の方が大きい(無制限を含む)と warning — 組 (上限, 安全上限) が変わったときだけ。
   RC が無制限のとき nucllei 自身がメモリに載せる経路(URL の取得・Storage の読み出し)は安全上限
   (未取得なら 1 GiB)で抑える(`transfer_cap`)。
@@ -1534,7 +1534,7 @@ RuntimeConfig を包むだけなので同じ値)。
 - 回帰: `nucllei/test/apps/webui/utils/test_file_limit.py`(上限関数・warning・各経路が RC に従う・
   sandbox に値が渡る)、`test_builtin_sandbox.py::test_valve_url_max_mb_is_gone` /
   `test_attachment_limit_is_the_resolver_limit`、sandbox 側は `sandbox/tests/test_files_list.py` 末尾
-  (小さいほう・渡されないとき・warning・exports・/healthz /metrics)。
+  (小さいほう・渡されないとき・warning・exports・/health /metrics)。
 
 ## 上限を 2 つに・名前を `*_MAX_SIZE_MB` に・ファイルブラウザと url= をストリーミングに(2026-10-07 夜、ken 決定・llens 依頼)
 
@@ -1555,7 +1555,7 @@ RuntimeConfig を包むだけなので同じ値)。
   write_file の本文 = 壊れたモデルの繰り返し出力の歯止め、とファイルブラウザのテキスト編集。read_file には
   使わない)、sandbox `SANDBOX_FILE_LIMIT_BYTES` → **`SANDBOX_FILE_MAX_SIZE_MB`**(既定 1024)。旧名は**読まない**
   (旧データ互換を持たない方針の延長)— 設定されていれば起動時に warning 1 行で新名を案内(nucllei は
-  `file_limit.warn_renamed_env`、sandbox は `_startup`)。公開キーも揃えた: `/healthz` は `file_max_size_mb`、
+  `file_limit.warn_renamed_env`、sandbox は `_startup`)。公開キーも揃えた: `/health` は `file_max_size_mb`、
   `/metrics` は `sandbox_file_max_size_bytes`。リクエストごとの `file_limit_bytes`(添付の上限を渡す wire の名前)は
   そのまま
 - nucllei の名前: `TEXT_MAX_BYTES`(旧 `WRITE_FILE_LIMIT`、`READ_FILE_LIMIT` は撤去)、`file_limit` の
