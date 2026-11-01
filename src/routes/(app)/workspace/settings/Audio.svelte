@@ -53,6 +53,10 @@
 	let STT_WHISPER_MODEL_LOADING = $state(false);
 
 	let voices = $state<any[]>([]);
+	// Web API の声の選択欄に出す値。設定の声がこの端末の声の一覧に無いとき (他の engine の声
+	// 'alloy' など) は、読み上げと同じく「デフォルト」を出す (utils/speech-synthesis.ts)。
+	// 設定値は利用者が選び直したときだけ変える。
+	const webApiVoice = $derived(voices.some((v) => v.voiceURI === TTS_VOICE) ? TTS_VOICE : '');
 	let models = $state<any[]>([]);
 
 	const getModels = async () => {
@@ -452,13 +456,12 @@
 							<div class="flex-1">
 								<select
 									class="w-full text-sm px-2 py-1 bg-surface-form hover:bg-surface-hover rounded-xs outline-hidden"
-									bind:value={TTS_VOICE}
+									value={webApiVoice}
+									onchange={(e) => (TTS_VOICE = e.currentTarget.value)}
 								>
-									<option value="" selected={TTS_VOICE !== ''}>{$i18n.t('Default')}</option>
+									<option value="">{$i18n.t('Default')}</option>
 									{#each voices as voice}
-										<option value={voice.voiceURI} selected={TTS_VOICE === voice.voiceURI}
-											>{voice.name}</option
-										>
+										<option value={voice.voiceURI}>{voice.name}</option>
 									{/each}
 								</select>
 							</div>
