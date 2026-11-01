@@ -193,6 +193,9 @@
 	};
 
 	const submitHandler = async () => {
+		// 保存中の 2 度押し (ボタンは disabled だが Ctrl+S は届く) は無視する
+		if (loading) return;
+
 		if (id === '') {
 			toast.error($i18n.t('Model ID is required.'));
 			return;
@@ -307,10 +310,14 @@
 		await doSubmit();
 	};
 
+	// 失敗の知らせ (トースト) は onSubmit 側が出す。ここは失敗しても保存中の表示を必ず戻す
 	const doSubmit = async () => {
 		loading = true;
-		await onSubmit($state.snapshot(info));
-		loading = false;
+		try {
+			await onSubmit($state.snapshot(info));
+		} finally {
+			loading = false;
+		}
 	};
 
 	onMount(async () => {

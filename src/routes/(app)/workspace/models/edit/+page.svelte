@@ -39,7 +39,10 @@
 			return;
 		}
 
-		const res = await updateModelById(modelInfo.id, modelInfo);
+		const res = await updateModelById(modelInfo.id, modelInfo).catch((error) => {
+			toast.error(`${error?.detail ?? error}`);
+			return null;
+		});
 
 		if (res) {
 			await refreshModels();
