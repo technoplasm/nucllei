@@ -889,6 +889,8 @@
 	"Workspace": "工作空间",
 	"Workspace usage (quota). Space is freed when items are deleted from the trash (/workspace/trash/).": "workspace 用量（上限）。从回收站（/workspace/trash/）删除后才会释放空间。",
 	"Write access": "写入",
+	"Write the instructions this model always follows...": "",
+	"Write the text placed at the head of the first message...": "",
 	"Year": "年",
 	"Yesterday": "昨天",
 	"You": "你",

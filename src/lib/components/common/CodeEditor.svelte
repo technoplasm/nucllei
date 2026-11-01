@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { basicSetup, EditorView } from 'codemirror';
-	import { keymap, placeholder } from '@codemirror/view';
+	import { keymap, placeholder as placeholderText } from '@codemirror/view';
 	import { Compartment, EditorState } from '@codemirror/state';
 
 	import { acceptCompletion } from '@codemirror/autocomplete';
@@ -36,6 +36,7 @@
 		boilerplate = '',
 		value = $bindable(''),
 		lineWrapping = false,
+		placeholder = '',
 		onSave = () => {},
 		onChange = () => {}
 	}: {
@@ -45,6 +46,8 @@
 		value?: string;
 		// 長行を soft-wrap する(system prompt など散文向け。コードは既定 false のまま)。
 		lineWrapping?: boolean;
+		// 空欄のときの案内。未指定ならコード向けの既定文
+		placeholder?: string;
 		onSave?: () => void;
 		onChange?: (value: string) => void;
 	} = $props();
@@ -168,7 +171,6 @@
 		basicSetup,
 		keymap.of([{ key: 'Tab', run: acceptCompletion }, indentWithTab]),
 		indentUnit.of('    '),
-		placeholder($i18n.t('Enter your code here...')),
 		EditorView.updateListener.of((e) => {
 			if (e.docChanged) {
 				_value = e.state.doc.toString();
@@ -206,8 +208,12 @@
 
 		// 散文向け(system prompt 等)は横スクロールでなく折り返す。コード編集は既定 false。
 		// prop 参照は onMount 内(=マウント時に一度読む)に置く: top-level 配列で参照すると
-		// runes の state_referenced_locally 警告になる(lineWrapping は静的 prop なので初回読みで十分)。
-		const initExtensions = lineWrapping ? [...extensions, EditorView.lineWrapping] : extensions;
+		// runes の state_referenced_locally 警告になる(lineWrapping・placeholder は静的 prop なので初回読みで十分)。
+		const initExtensions = [
+			...extensions,
+			placeholderText(placeholder || $i18n.t('Enter your code here...')),
+			...(lineWrapping ? [EditorView.lineWrapping] : [])
+		];
 
 		// python code editor, highlight python code
 		codeEditor = new EditorView({

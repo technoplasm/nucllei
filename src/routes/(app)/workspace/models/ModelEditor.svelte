@@ -737,6 +737,7 @@
 											value={info.params.system ?? ''}
 											lang="markdown"
 											lineWrapping={true}
+											placeholder={$i18n.t('Write the instructions this model always follows...')}
 											onChange={(value: string) => {
 												info.params.system = value;
 											}}
@@ -785,6 +786,9 @@
 											value={info.params.context ?? ''}
 											lang="markdown"
 											lineWrapping={true}
+											placeholder={$i18n.t(
+												'Write the text placed at the head of the first message...'
+											)}
 											onChange={(value: string) => {
 												info.params.context = value;
 											}}
