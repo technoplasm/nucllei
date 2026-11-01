@@ -38,11 +38,13 @@
 		edit?: boolean;
 	} = $props();
 
-	// 基本設定 | プロンプト | 高度なパラメータ(Admin > Users の様式)
+	// 基本設定 | プロンプト | 会話の前置き | 高度なパラメータ(Admin > Users の様式)
 	let selectedTab = $state('general');
-	// プロンプトタブの System Prompt 欄・会話の前置き欄: それぞれ 編集 | プレビュー
+	// プロンプトタブの System Prompt 欄・会話の前置きタブの欄: それぞれ 編集 | プレビュー
 	let systemView = $state<'edit' | 'preview'>('edit');
 	let contextView = $state<'edit' | 'preview'>('edit');
+	// エディタを残り全高に貼るタブ
+	const fullHeightTab = $derived(selectedTab === 'prompt' || selectedTab === 'context');
 
 	let loading = $state(false);
 	let loaded = $state(false);
@@ -136,6 +138,13 @@
 			accessControl
 		});
 	};
+	// プレビューに渡す編集中 (保存前) のモデル
+	const previewModelForm = () => ({
+		...$state.snapshot(info),
+		id: id || info.id,
+		name: name || info.name
+	});
+
 	const switchTab = (tab: string) => {
 		if (tab === selectedTab) return;
 		if (stateSnapshot) {
@@ -354,7 +363,7 @@
 		</a>
 
 		<!-- 高さは settings と同型: 全体を h-full で貼り、スクロールは右コンテンツ列の内部で行う
-	 (Prompt タブの CodeEditor を残り全高に貼るため)。tabs は shrink-0 で保護済み —
+	 (プロンプト・会話の前置きタブの CodeEditor を残り全高に貼るため)。tabs は shrink-0 で保護済み —
 	     素の overflow-x-auto は min-height 0 扱いで高さ 0 に潰れる(#47 の罠)。 -->
 		<div class="w-full flex-1 min-h-0 flex justify-center">
 			<input
@@ -472,6 +481,20 @@
 
 						<button
 							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
+							'context'
+								? ''
+								: ' text-content-subtle hover:text-content'}"
+							type="button"
+							onclick={() => switchTab('context')}
+						>
+							<div class=" self-center mr-2">
+								<span class="i-lucide-message-square-quote size-4 block"></span>
+							</div>
+							<div class=" self-center">{$i18n.t('Conversation preamble')}</div>
+						</button>
+
+						<button
+							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
 							'advanced'
 								? ''
 								: ' text-content-subtle hover:text-content'}"
@@ -487,8 +510,35 @@
 
 					<!-- 右コンテンツ。横幅は layout 側で管理。縦は内部スクロール(settings 同型)。 -->
 					<div class="flex-1 min-w-0 overflow-y-auto pr-1">
-						<!-- Prompt タブだけ全高 flex(CodeEditor を flex-1 で下に伸ばす) -->
-						<div class={selectedTab === 'prompt' ? 'h-full flex flex-col' : ''}>
+						<!-- プロンプト・会話の前置きタブだけ全高 flex(CodeEditor を flex-1 で下に伸ばす) -->
+						<div class={fullHeightTab ? 'h-full flex flex-col' : ''}>
+							{#snippet viewToggle(
+								label: string,
+								current: 'edit' | 'preview',
+								onSelect: (view: 'edit' | 'preview') => void
+							)}
+								<div
+									class="inline-flex gap-0.5 p-0.5 bg-surface-muted rounded-lg"
+									role="group"
+									aria-label={label}
+								>
+									{#each [{ view: 'edit', icon: 'i-lucide-pencil', label: $i18n.t('Edit') }, { view: 'preview', icon: 'i-lucide-eye', label: $i18n.t('Preview') }] as segment (segment.view)}
+										{@const active = current === segment.view}
+										<button
+											class="flex items-center gap-1.5 px-3 py-0.5 text-xs font-medium rounded-md transition {active
+												? 'bg-surface-raised text-content shadow-sm'
+												: 'text-content-muted hover:text-content'}"
+											type="button"
+											aria-pressed={active}
+											onclick={() => onSelect(segment.view as 'edit' | 'preview')}
+										>
+											<span class="{segment.icon} size-3.5 block"></span>
+											{segment.label}
+										</button>
+									{/each}
+								</div>
+							{/snippet}
+
 							{#if selectedTab === 'general'}
 								<!-- llens(#70): 名前/ID/Base Model を左カラムに、モデル画像は右端へ。
 							 画像は行ブロックの高さに合わせた正方形(max-h-40 キャップ)。absolute で
@@ -718,44 +768,7 @@
 									</div>
 								</div>
 
-								{#snippet viewToggle(
-									label: string,
-									current: 'edit' | 'preview',
-									onSelect: (view: 'edit' | 'preview') => void
-								)}
-									<div
-										class="inline-flex gap-0.5 p-0.5 bg-surface-muted rounded-lg"
-										role="group"
-										aria-label={label}
-									>
-										{#each [{ view: 'edit', icon: 'i-lucide-pencil', label: $i18n.t('Edit') }, { view: 'preview', icon: 'i-lucide-eye', label: $i18n.t('Preview') }] as segment (segment.view)}
-											{@const active = current === segment.view}
-											<button
-												class="flex items-center gap-1.5 px-3 py-0.5 text-xs font-medium rounded-md transition {active
-													? 'bg-surface-raised text-content shadow-sm'
-													: 'text-content-muted hover:text-content'}"
-												type="button"
-												aria-pressed={active}
-												onclick={() => onSelect(segment.view as 'edit' | 'preview')}
-											>
-												<span class="{segment.icon} size-3.5 block"></span>
-												{segment.label}
-											</button>
-										{/each}
-									</div>
-								{/snippet}
-								{@const previewModelForm = () => ({
-									...$state.snapshot(info),
-									id: id || info.id,
-									name: name || info.name
-								})}
-
-								<!-- System Prompt (上) と会話の前置き (下) で残りの高さを分ける (前置きだけプレビュー中は前置きを広く) -->
-								<div
-									class="{contextView === 'preview' && systemView === 'edit'
-										? 'flex-[2]'
-										: 'flex-[3]'} min-h-48 flex flex-col"
-								>
+								<div class="flex-1 min-h-48 flex flex-col">
 									<div class="flex items-center justify-between gap-2 px-1 mb-1">
 										<div class="text-sm font-semibold">{$i18n.t('System Prompt')}</div>
 										{@render viewToggle($i18n.t('System Prompt'), systemView, (view) => {
@@ -769,7 +782,6 @@
 											? ''
 											: 'hidden'}"
 									>
-										<!-- id は 2 つのエディタで別に (CodeEditor は code-textarea-{id} に描く) -->
 										<CodeEditor
 											id="model-system"
 											value={info.params.system ?? ''}
@@ -792,12 +804,10 @@
 										</div>
 									{/if}
 								</div>
-
-								<div
-									class="{contextView === 'preview' && systemView === 'edit'
-										? 'flex-[3]'
-										: 'flex-[2]'} min-h-40 flex flex-col mt-3"
-								>
+							{:else if selectedTab === 'context'}
+								<!-- 説明の下に会話の前置き(残り全高)。Ctrl+S は CodeEditor が document で拾う —
+								     エディタはタブごとに 1 つだけマウントされるので、保存も 1 回 -->
+								<div class="flex-1 min-h-48 flex flex-col mt-2">
 									<div class="flex items-center justify-between gap-2 px-1">
 										<div class="text-sm font-semibold">{$i18n.t('Conversation preamble')}</div>
 										{@render viewToggle($i18n.t('Conversation preamble'), contextView, (view) => {
@@ -820,7 +830,6 @@
 											? ''
 											: 'hidden'}"
 									>
-										<!-- Ctrl+S は CodeEditor が document で拾うので、保存は System Prompt のエディタの onSave 1 つだけ -->
 										<CodeEditor
 											id="model-context"
 											value={info.params.context ?? ''}
@@ -828,6 +837,9 @@
 											lineWrapping={true}
 											onChange={(value: string) => {
 												info.params.context = value;
+											}}
+											onSave={() => {
+												submitHandler();
 											}}
 										/>
 									</div>
@@ -849,7 +861,7 @@
 								</div>
 							{/if}
 
-							<div class="flex justify-start {selectedTab === 'prompt' ? 'my-3' : 'my-4 pb-20'}">
+							<div class="flex justify-start {fullHeightTab ? 'my-3' : 'my-4 pb-20'}">
 								<button
 									class="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary-hover text-primary-content rounded-lg {loading
 										? ' cursor-not-allowed opacity-50'
