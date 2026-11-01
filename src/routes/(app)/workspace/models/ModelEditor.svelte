@@ -340,14 +340,6 @@
 			id = model.id;
 			originalId = id;
 
-			if (model.base_model_id) {
-				const base_model = baseModels.find((m) =>
-					[model.base_model_id, `${model.base_model_id}:latest`].includes(m.id)
-				);
-
-				model.base_model_id = base_model ? base_model.id : null;
-			}
-
 			params = { ...params, ...model?.params };
 			params.stop = params?.stop
 				? (typeof params.stop === 'string' ? params.stop.split(',') : (params?.stop ?? [])).join(
@@ -370,6 +362,15 @@
 				...info,
 				...JSON.parse(JSON.stringify(model))
 			};
+
+			// ベースモデルは一覧の id に合わせる (`:latest` 付きで登録されたもの)。一覧に無ければ未選択。
+			// model は呼び出し側の state なので書き換えず、編集用の写し (info) にだけ入れる
+			if (model.base_model_id) {
+				const baseModel = baseModels.find((m) =>
+					[model.base_model_id, `${model.base_model_id}:latest`].includes(m.id)
+				);
+				info.base_model_id = baseModel ? baseModel.id : null;
+			}
 		}
 
 		// タブ切替の暗黙リセット用に、ロード直後の状態を控える
