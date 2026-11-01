@@ -5,12 +5,12 @@
 	import { toast } from 'svelte-sonner';
 
 	import panzoom, { type PanZoom } from 'panzoom';
-	import DOMPurify from 'dompurify';
 
 	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import { copyToClipboard } from '$lib/utils';
+	import { sanitizeDiagramSvg } from '$lib/utils/diagram-svg';
 
 	import Tooltip from './Tooltip.svelte';
 
@@ -48,10 +48,10 @@
 
 <div class="relative {className}">
 	<div bind:this={sceneElement} class="flex h-full max-h-full justify-center items-center">
-		<!-- llens(GHSA-r29h-37fj-x2w6): SVG レンダラの XSS 対策。mermaid/Artifacts 由来の
-		     SVG を DOMPurify で無害化(script / on* ハンドラ / foreignObject 内の危険 HTML を除去)。 -->
+		<!-- llens(GHSA-r29h-37fj-x2w6): SVG レンダラの XSS 対策。mermaid の SVG を DOMPurify で
+		     無害化する(script / on* ハンドラ / javascript: URL を除去。ラベルの foreignObject は残す)。 -->
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
-		{@html DOMPurify.sanitize(svg)}
+		{@html sanitizeDiagramSvg(svg)}
 	</div>
 
 	{#if content}

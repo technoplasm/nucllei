@@ -67,7 +67,10 @@
 - **コア markdown の html トークンは既に DOMPurify 済み**(`MarkdownTokens.svelte` / `MarkdownInlineTokens.svelte`、
   iframe は `sanitizeIframeHtml`=7c8eba59b)。9f4f 相当のチャット本文経路はサニタイズ済みと確認。
 - **v8qj(mermaid)**: `CodeBlock.svelte` の `securityLevel` を `'loose'`→`'strict'`(ラベル HTML/click を無効化)。
-- **r29h(SVG)**: `SVGPanZoom.svelte` の `{@html svg}` に `DOMPurify.sanitize` を適用(import 済みだが未使用だった)。
+- **r29h(SVG)**: `SVGPanZoom.svelte` の `{@html svg}` を `sanitizeDiagramSvg`(`utils/diagram-svg.ts`)で無害化。
+  DOMPurify 既定 + `<foreignObject>` を足してその中を HTML の統合点にする(mermaid が strict で自分に掛けるのと同じ設定)。
+  ノード・辺のラベルは foreignObject の中の HTML なので、既定のままだとラベルが消える。foreignObject の中も
+  script / on* / javascript: は除去される(`utils/diagram-svg.test.ts`)。
 - **cqp4(Banner)**: `DOMPurify.sanitize(marked.parse(...))` へ順序修正(旧: 生 md を sanitize→parse は生成 HTML 素通し)。
 - **gf5m(Model Description)**: `ChatPlaceholder.svelte` / `Placeholder.svelte` の marked 出力を DOMPurify で包む。
 - **8gh5(HTML アップロード配信)**: `{{HTML_FILE_ID}}` は `/files/{id}/content/html` を iframe で読み込み、
@@ -75,8 +78,9 @@
   (same-origin 剥奪)にし、`utils/index.ts` の生成側と `MARKDOWN_IFRAME_SANITIZE_CONFIG` の ADD_ATTR に `sandbox` を追加。
   バックエンド `routers/files.py` の `/content/html` に CSP `sandbox allow-scripts` + `nosniff` を付与(多層防御)。
   回帰テスト: `test/apps/webui/routers/test_file_html_serving.py`。
-- 型チェック(svelte-check)は変更行にエラー無し。**mermaid/Artifacts の描画は視覚スモーク未実施**(#12 に合流可能。
-  strict は mermaid 既定で図は描画されるが HTML ラベルは文字表示・click 無効になる)。
+- 型チェック(svelte-check)は変更行にエラー無し。mermaid の描画は実画面で確認済み(flowchart のノード・辺のラベル、
+  sequenceDiagram の文字が出る。ラベルに `<img src=x onerror=...>` を書いても onerror は残らず実行されない)。
+  strict では click バインドは無効。
 
 **#36 の残トリアージ(2026-07-05、実コード確認)**:
 - **w7xj(Insert Prompt as Rich Text)= 構造的に低リスク**: `RichTextInput.svelte` は TipTap/ProseMirror。
