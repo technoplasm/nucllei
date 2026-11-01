@@ -38,13 +38,25 @@
 		edit?: boolean;
 	} = $props();
 
-	// 基本設定 | プロンプト | 会話の前置き | 高度なパラメータ(Admin > Users の様式)
+	// 一般 | システムプロンプト | 会話の前置き | プロンプトの提案 | 高度なパラメータ(Admin > Users の様式)
 	let selectedTab = $state('general');
-	// プロンプトタブの System Prompt 欄・会話の前置きタブの欄: それぞれ 編集 | プレビュー
+	const tabs = $derived([
+		{ id: 'general', icon: 'i-lucide-settings', label: $i18n.t('General') },
+		{ id: 'system', icon: 'i-lucide-file-text', label: $i18n.t('System Prompt') },
+		{
+			id: 'context',
+			icon: 'i-lucide-message-square-quote',
+			label: $i18n.t('Conversation preamble')
+		},
+		// チャット画面の提案の見出し (Suggestions.svelte) と同じアイコン
+		{ id: 'suggestions', icon: 'i-lucide-zap', label: $i18n.t('Prompt suggestions') },
+		{ id: 'advanced', icon: 'i-lucide-sliders-horizontal', label: $i18n.t('Advanced Params') }
+	]);
+	// システムプロンプト・会話の前置きの欄: それぞれ 編集 | プレビュー
 	let systemView = $state<'edit' | 'preview'>('edit');
 	let contextView = $state<'edit' | 'preview'>('edit');
 	// エディタを残り全高に貼るタブ
-	const fullHeightTab = $derived(selectedTab === 'prompt' || selectedTab === 'context');
+	const fullHeightTab = $derived(selectedTab === 'system' || selectedTab === 'context');
 
 	let loading = $state(false);
 	let loaded = $state(false);
@@ -122,21 +134,23 @@
 
 	// llens(#47): タブ切替で「見えていない別タブの編集」をそのまま保存しないよう、ロード時の
 	// 状態へ暗黙リセットする。名前/ID は対象外(リセットしない — リネームは submit 時の confirm で扱う)。
-	// プロンプト・会話の前置きは 1 組: この 2 タブの間の切替ではリセットせず、保存すると両方入る。
-	// 組の外へ出るとき (一般・高度なパラメータとの行き来) は両方まとめてリセットする。
-	const PROMPT_PAIR_TABS = ['prompt', 'context'];
+	// システムプロンプト・会話の前置き・プロンプトの提案は 1 組: この 3 タブの間の切替ではリセットせず、
+	// 保存すると 3 つとも入る。組の外へ出るとき (一般・高度なパラメータとの行き来) は 3 つまとめてリセットする。
+	const TEXT_GROUP_TABS = ['system', 'context', 'suggestions'];
 	let stateSnapshot: string | null = null;
-	// ロード時のプロンプトタブ (提案 + システムプロンプト) と会話の前置き。見えていない方の
-	// タブに未保存の変更があるかを、タブ名の横の印で出すのに使う
-	let loadedPromptTab = $state('');
-	let loadedContext = $state('');
-	const promptTabState = () =>
-		JSON.stringify([info?.meta?.suggestion_prompts ?? [], info?.params?.system ?? '']);
-	const promptTabDirty = $derived(loaded && promptTabState() !== loadedPromptTab);
-	const contextDirty = $derived(loaded && (info?.params?.context ?? '') !== loadedContext);
+	// 組の各タブの値 (比較用の文字列)。ロード時の値と比べて、見えていないタブに未保存の変更が
+	// あるかをタブ名の横の印で出す
+	const textTabValue = (tab: string) => {
+		if (tab === 'system') return info?.params?.system ?? '';
+		if (tab === 'context') return info?.params?.context ?? '';
+		return JSON.stringify(info?.meta?.suggestion_prompts ?? []);
+	};
+	let loadedTextTabs = $state<Record<string, string>>({});
+	const dirtyTextTabs = $derived(
+		loaded ? TEXT_GROUP_TABS.filter((tab) => textTabValue(tab) !== loadedTextTabs[tab]) : []
+	);
 	const captureSnapshot = () => {
-		loadedPromptTab = promptTabState();
-		loadedContext = info?.params?.context ?? '';
+		loadedTextTabs = Object.fromEntries(TEXT_GROUP_TABS.map((tab) => [tab, textTabValue(tab)]));
 		stateSnapshot = JSON.stringify({
 			info,
 			params,
@@ -160,9 +174,8 @@
 
 	const switchTab = (tab: string) => {
 		if (tab === selectedTab) return;
-		const withinPromptPair =
-			PROMPT_PAIR_TABS.includes(tab) && PROMPT_PAIR_TABS.includes(selectedTab);
-		if (stateSnapshot && !withinPromptPair) {
+		const withinTextGroup = TEXT_GROUP_TABS.includes(tab) && TEXT_GROUP_TABS.includes(selectedTab);
+		if (stateSnapshot && !withinTextGroup) {
 			const s = JSON.parse(stateSnapshot);
 			info = s.info;
 			params = s.params;
@@ -365,6 +378,17 @@
 	});
 </script>
 
+<!-- Ctrl+S: システムプロンプト・会話の前置きタブは CodeEditor が拾う。エディタの無いプロンプトの提案タブは
+     ここで拾う (どのタブでも保存は 1 回) -->
+<svelte:document
+	onkeydown={(e) => {
+		if (selectedTab === 'suggestions' && (e.ctrlKey || e.metaKey) && e.key === 's') {
+			e.preventDefault();
+			submitHandler();
+		}
+	}}
+/>
+
 {#if loaded}
 	<!-- 全高を戻るリンク + エディタ本体で分ける(SkillEditor 系の h-full 貼りの前提) -->
 	<div class="flex flex-col h-full">
@@ -464,83 +488,36 @@
 				>
 					<!-- 左サブメニュー(縦タブ)— /workspace/settings と同じ様式 + アイコン -->
 					<div
-						class="tabs shrink-0 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 text-content text-sm font-medium text-left scrollbar-none"
+						class="tabs shrink-0 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-44 text-content text-sm font-medium text-left scrollbar-none"
 					>
-						<button
-							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
-							'general'
-								? ''
-								: ' text-content-subtle hover:text-content'}"
-							type="button"
-							onclick={() => switchTab('general')}
-						>
-							<div class=" self-center mr-2">
-								<span class="i-lucide-settings size-4 block"></span>
-							</div>
-							<div class=" self-center">{$i18n.t('General')}</div>
-						</button>
-
-						<button
-							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
-							'prompt'
-								? ''
-								: ' text-content-subtle hover:text-content'}"
-							type="button"
-							onclick={() => switchTab('prompt')}
-						>
-							<div class=" self-center mr-2">
-								<span class="i-lucide-file-text size-4 block"></span>
-							</div>
-							<div class=" self-center">{$i18n.t('Prompt')}</div>
-							<!-- 未保存の印は組のもう一方のタブに居るときだけ (今見ているタブには出さない) -->
-							{#if selectedTab === 'context' && promptTabDirty}
-								<span
-									class="self-center ml-1.5 size-1.5 rounded-full bg-amber-500"
-									title={$i18n.t('Unsaved')}
-								></span>
-								<span class="sr-only">{$i18n.t('Unsaved')}</span>
-							{/if}
-						</button>
-
-						<button
-							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
-							'context'
-								? ''
-								: ' text-content-subtle hover:text-content'}"
-							type="button"
-							onclick={() => switchTab('context')}
-						>
-							<div class=" self-center mr-2">
-								<span class="i-lucide-message-square-quote size-4 block"></span>
-							</div>
-							<div class=" self-center">{$i18n.t('Conversation preamble')}</div>
-							{#if selectedTab === 'prompt' && contextDirty}
-								<span
-									class="self-center ml-1.5 size-1.5 rounded-full bg-amber-500"
-									title={$i18n.t('Unsaved')}
-								></span>
-								<span class="sr-only">{$i18n.t('Unsaved')}</span>
-							{/if}
-						</button>
-
-						<button
-							class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
-							'advanced'
-								? ''
-								: ' text-content-subtle hover:text-content'}"
-							type="button"
-							onclick={() => switchTab('advanced')}
-						>
-							<div class=" self-center mr-2">
-								<span class="i-lucide-sliders-horizontal size-4 block"></span>
-							</div>
-							<div class=" self-center">{$i18n.t('Advanced Params')}</div>
-						</button>
+						{#each tabs as tab (tab.id)}
+							<button
+								class="px-0.5 py-1 min-w-fit rounded-lg flex-none flex text-left {selectedTab ===
+								tab.id
+									? ''
+									: ' text-content-subtle hover:text-content'}"
+								type="button"
+								onclick={() => switchTab(tab.id)}
+							>
+								<div class=" self-center mr-2">
+									<span class="{tab.icon} size-4 block"></span>
+								</div>
+								<div class=" self-center whitespace-nowrap">{tab.label}</div>
+								<!-- 未保存の印は組の別のタブに居るときだけ (今見ているタブには出さない) -->
+								{#if tab.id !== selectedTab && dirtyTextTabs.includes(tab.id)}
+									<span
+										class="self-center ml-1.5 size-1.5 rounded-full bg-amber-500"
+										title={$i18n.t('Unsaved')}
+									></span>
+									<span class="sr-only">{$i18n.t('Unsaved')}</span>
+								{/if}
+							</button>
+						{/each}
 					</div>
 
 					<!-- 右コンテンツ。横幅は layout 側で管理。縦は内部スクロール(settings 同型)。 -->
 					<div class="flex-1 min-w-0 overflow-y-auto pr-1">
-						<!-- プロンプト・会話の前置きタブだけ全高 flex(CodeEditor を flex-1 で下に伸ばす) -->
+						<!-- システムプロンプト・会話の前置きタブだけ全高 flex(CodeEditor を flex-1 で下に伸ばす) -->
 						<div class={fullHeightTab ? 'h-full flex flex-col' : ''}>
 							{#snippet viewToggle(
 								label: string,
@@ -731,74 +708,9 @@
 										)}
 									/>
 								</div>
-							{:else if selectedTab === 'prompt'}
-								<!-- 上に suggestions・下に System Prompt(残り全高、tool/skill エディタ同型) -->
-								<div class="my-2">
-									<div class="flex w-full justify-between items-center">
-										<div class=" self-center text-sm font-semibold">
-											{$i18n.t('Prompt suggestions')}
-										</div>
-
-										<button
-											class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content"
-											type="button"
-											aria-label={$i18n.t('Add prompt suggestion')}
-											onclick={() => {
-												const prompts = info.meta.suggestion_prompts ?? [];
-												if (
-													prompts.length === 0 ||
-													(prompts.at(-1).title !== '' && prompts.at(-1).content !== '')
-												) {
-													info.meta.suggestion_prompts = [...prompts, { title: '', content: '' }];
-												}
-											}}
-										>
-											<span class="i-lucide-plus size-4 block"></span>
-										</button>
-									</div>
-
-									<div class="flex flex-col space-y-1.5 mt-1 mb-3">
-										{#if (info.meta.suggestion_prompts ?? []).length > 0}
-											{#each info.meta.suggestion_prompts as prompt, promptIdx}
-												<div class=" flex border border-line rounded-lg">
-													<div class="flex flex-col flex-1">
-														<input
-															class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden border-b border-line"
-															placeholder={$i18n.t('Title (e.g. Greeting)')}
-															bind:value={prompt.title}
-															required
-														/>
-														<input
-															class=" text-sm px-2 py-1 w-full bg-transparent outline-hidden"
-															placeholder={$i18n.t(
-																'Prompt (e.g. Who are you? Show me a quick demo.)'
-															)}
-															bind:value={prompt.content}
-															required
-														/>
-													</div>
-
-													<button
-														class="px-2 text-content-muted hover:text-content"
-														type="button"
-														aria-label={$i18n.t('Delete')}
-														onclick={() => {
-															info.meta.suggestion_prompts.splice(promptIdx, 1);
-														}}
-													>
-														<span class="i-lucide-x size-4 block"></span>
-													</button>
-												</div>
-											{/each}
-										{:else}
-											<div class="text-xs text-center text-content-subtle py-2">
-												{$i18n.t('No prompt suggestions')}
-											</div>
-										{/if}
-									</div>
-								</div>
-
-								<div class="flex-1 min-h-48 flex flex-col">
+							{:else if selectedTab === 'system'}
+								<!-- System Prompt(残り全高、tool/skill エディタ同型) -->
+								<div class="flex-1 min-h-48 flex flex-col mt-2">
 									<div class="flex items-center justify-between gap-2 px-1 mb-1">
 										<div class="text-sm font-semibold">{$i18n.t('System Prompt')}</div>
 										{@render viewToggle($i18n.t('System Prompt'), systemView, (view) => {
@@ -878,6 +790,73 @@
 											<PreamblePreview model={previewModelForm} />
 										</div>
 									{/if}
+								</div>
+							{:else if selectedTab === 'suggestions'}
+								<!-- 1 件 = 1 行: タイトル (幅固定) | プロンプト (残り幅、内容に合わせて伸びる)。
+								     sm 未満は縦に積む。件数が多いときは右コンテンツ列ごとスクロールする -->
+								<div class="my-2">
+									<div class="flex w-full justify-between items-center">
+										<div class=" self-center text-sm font-semibold">
+											{$i18n.t('Prompt suggestions')}
+										</div>
+
+										<button
+											class="p-1 px-2 flex rounded-lg text-content-muted hover:text-content"
+											type="button"
+											aria-label={$i18n.t('Add prompt suggestion')}
+											onclick={() => {
+												const prompts = info.meta.suggestion_prompts ?? [];
+												if (
+													prompts.length === 0 ||
+													(prompts.at(-1).title !== '' && prompts.at(-1).content !== '')
+												) {
+													info.meta.suggestion_prompts = [...prompts, { title: '', content: '' }];
+												}
+											}}
+										>
+											<span class="i-lucide-plus size-4 block"></span>
+										</button>
+									</div>
+
+									<div class="flex flex-col space-y-1.5 mt-1">
+										{#if (info.meta.suggestion_prompts ?? []).length > 0}
+											{#each info.meta.suggestion_prompts as prompt, promptIdx}
+												<div class=" flex border border-line rounded-lg">
+													<div class="flex flex-col sm:flex-row flex-1 min-w-0">
+														<input
+															class=" text-sm px-2 py-1 w-full sm:w-56 sm:shrink-0 bg-transparent outline-hidden border-b sm:border-b-0 sm:border-r border-line"
+															placeholder={$i18n.t('Title (e.g. Greeting)')}
+															bind:value={prompt.title}
+															required
+														/>
+														<Textarea
+															className="text-sm px-2 py-1 w-full bg-transparent outline-hidden resize-none"
+															placeholder={$i18n.t(
+																'Prompt (e.g. Who are you? Show me a quick demo.)'
+															)}
+															bind:value={prompt.content}
+															required
+														/>
+													</div>
+
+													<button
+														class="px-2 text-content-muted hover:text-content"
+														type="button"
+														aria-label={$i18n.t('Delete')}
+														onclick={() => {
+															info.meta.suggestion_prompts.splice(promptIdx, 1);
+														}}
+													>
+														<span class="i-lucide-x size-4 block"></span>
+													</button>
+												</div>
+											{/each}
+										{:else}
+											<div class="text-xs text-center text-content-subtle py-2">
+												{$i18n.t('No prompt suggestions')}
+											</div>
+										{/if}
+									</div>
 								</div>
 							{:else if selectedTab === 'advanced'}
 								<div class="my-2">

@@ -425,7 +425,7 @@ before / after も毎回動く。
 
 ## プレビュー
 
-- preset の編集画面「プロンプト」タブの System Prompt 欄と、skill の編集画面の本文欄に「編集 / プレビュー」。
+- preset の編集画面「システムプロンプト」タブと、skill の編集画面の本文欄に「編集 / プレビュー」。
   endpoint は `POST /api/v1/models/preview`(admin)・`POST /api/v1/skills/preview`(skill editor)。
 - **プレビュー専用の展開を書かない**: tools は process_chat_payload と同じ関数を同じ並びで呼ぶ
   (`get_tools` → `middleware.build_capability_tools` → `mount_recall_tools_if_needed` → `model_tool_specs`)。
@@ -435,7 +435,7 @@ before / after も毎回動く。
 - 本人としてだけ展開する(他の利用者として見る口は作らない — 個人のレシピ名が見える)。前提は
   「新しいチャットの最初のターン」(履歴・添付・`/command` の skill の tool・Filter inlet の変更は入らない)。
   preset の tool・skill・能力は保存済みの値(編集画面はタブ切替で「一般」の未保存の変更を戻すので、
-  プロンプトタブから見えるのは保存済みの値 — 画面の注記どおり)、system prompt は編集中の値。
+  システムプロンプトタブから見えるのは保存済みの値 — 画面の注記どおり)、system prompt は編集中の値。
 - 利用者ごとの印: 変数の scope は `utils/task.PROMPT_VARIABLE_SCOPES`(user / time / preset)、tool は
   エントリの `varies`(load_skill・load_recipe の一覧 = `description_from`、load_skill の enum = `params`、
   get_tools の spec_overrides で差し替わった tool = `overridden`)。断片をつないで全体の展開と一致しない
