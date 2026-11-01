@@ -160,7 +160,7 @@ pnpm dev        # = vite dev --host。:5173 使用中なら 5174 等へ自動退
   `--reload` は .env を見ないので変更時は BE 再起動)。dev では配備層ブランドの確認用に
   `WEBUI_NAME` / `WEBUI_VERSION` / `WEBUI_COPYRIGHT` を入れてある。
   ログイン画面と承認待ち/無効化の画面の案内は `WEBUI_FOOTER_TEXT`(平文。HTML / Markdown に
-  しない、改行は保つ)と `WEBUI_CONTACT_EMAIL`(メールの形なら `mailto:` リンク、でなければ平文)。
+  しない、改行は保つ)と `WEBUI_CONTACT_EMAIL`(平文。リンクにしない)。
   どちらも空なら出ない。`/api/config` の `footer_text` / `contact_email` で未認証でも読める。
 - **バージョン**(2026-07-16、0d69f2da4): 真実源は git tag(リリース `vYYYYMMDD-NN` の
   1 形式だけを describe --match `v[0-9]*` で拾う)。BE は起動時・FE は vite 起動時に解決

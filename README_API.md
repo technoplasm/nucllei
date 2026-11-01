@@ -210,7 +210,7 @@ is read per request (edits apply without a restart):
 | `WEBUI_NAME`                                                                                                                | env  | `Nucllei`                                     | brand name shown in the UI                                                                |
 | `WEBUI_VERSION` / `WEBUI_COPYRIGHT`                                                                                         | env  | `""`                                          | deployment-layer version / copyright on the License tab (empty = hidden)                  |
 | `WEBUI_FOOTER_TEXT`                                                                                                         | env  | `""`                                          | plain-text notice under the sign-in card and the pending/disabled page (empty = hidden)   |
-| `WEBUI_CONTACT_EMAIL`                                                                                                       | env  | `""`                                          | contact email after the footer text; `mailto:` link if address-shaped (empty = hidden)    |
+| `WEBUI_CONTACT_EMAIL`                                                                                                       | env  | `""`                                          | contact email after the footer text; plain text, not a link (empty = hidden)              |
 | `ENABLE_FORWARD_USER_INFO_HEADERS`                                                                                          | env  | `false`                                       | send `X-Nucllei-User-{Name,Id,Email,Role}` to the upstream engine                         |
 | `CORS_ALLOW_ORIGIN`                                                                                                         | env  | `*`                                           | `;`-separated origins; empty = same-origin only (no CORS, no warning)                     |
 | `ENABLE_PWA`                                                                                                                | env  | `false`                                       | serve an installable `/manifest.json` (name follows `WEBUI_NAME`); off returns `{}`       |
@@ -1617,8 +1617,8 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
   with a session also default models, audio config, file limits, permissions).
   The unauthenticated part also carries `footer_text` / `contact_email`
   (`WEBUI_FOOTER_TEXT` / `WEBUI_CONTACT_EMAIL`, `""` when unset).
-  The UI renders `footer_text` as text (no HTML / Markdown, newlines kept) and
-  links `contact_email` with `mailto:` only when it has an address shape.
+  The UI renders both as plain text (no HTML / Markdown, no link; newlines in
+  `footer_text` kept).
   `GET /api/version`.
 - Audio: `POST /api/v1/audio/transcriptions` (STT; multipart `file`, plus optional
   `prompt` — context such as a term list, like the OpenAI field of the same name; only the
