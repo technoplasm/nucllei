@@ -297,6 +297,7 @@
 	"Enter the public URL of your WebUI. This URL will be used to generate links in the notifications.": "WebUI の公開 URL を入力します。この URL は通知内のリンク生成に使用されます。",
 	"Enter to Send": "Enter で送信",
 	"Enter URL (e.g. http://localhost:11434)": "URL を入力してください (例: http://localhost:11434)",
+	"Enter your code here...": "ここにコードを入力...",
 	"Enter your current password": "現在のパスワードを入力",
 	"Enter Your Email": "メールアドレスを入力してください",
 	"Enter Your Full Name": "フルネームを入力してください",

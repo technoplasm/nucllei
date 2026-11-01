@@ -297,6 +297,7 @@
 	"Enter the public URL of your WebUI. This URL will be used to generate links in the notifications.": "输入 WebUI 的公共 URL。此 URL 将用于在通知中生成链接。",
 	"Enter to Send": "Enter 键发送",
 	"Enter URL (e.g. http://localhost:11434)": "输入地址 (例如：http://localhost:11434)",
+	"Enter your code here...": "",
 	"Enter your current password": "输入当前密码",
 	"Enter Your Email": "输入您的电子邮箱",
 	"Enter Your Full Name": "输入您的名称",
