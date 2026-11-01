@@ -21,8 +21,7 @@
 		{/if}
 		{#if contactEmail}
 			<p class:mt-1={footerText}>
-				<!-- キーに `:` があるので名前空間の区切りとして読ませない -->
-				{$i18n.t('Contact:', { nsSeparator: false })}
+				{$i18n.t('Contact:')}
 				<span>{contactEmail}</span>
 			</p>
 		{/if}

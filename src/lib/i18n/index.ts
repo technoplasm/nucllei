@@ -1,7 +1,7 @@
 import i18next from 'i18next';
 import resourcesToBackend from 'i18next-resources-to-backend';
 import LanguageDetector from 'i18next-browser-languagedetector';
-import type { i18n as i18nType } from 'i18next';
+import type { i18n as i18nType, InitOptions } from 'i18next';
 import { writable } from 'svelte/store';
 
 const createI18nStore = (i18n: i18nType) => {
@@ -37,6 +37,17 @@ const createIsLoadingStore = (i18n: i18nType) => {
 	return isLoading;
 };
 
+// キーは英語の原文そのもの(namespace は translation だけ)。原文に `:` が入る
+// ('Contact:' / 'Warning:' など)ので、`:` を名前空間の区切りとして読ませない。
+export const i18nOptions: InitOptions = {
+	ns: 'translation',
+	nsSeparator: false,
+	returnEmptyString: false,
+	interpolation: {
+		escapeValue: false // not needed for svelte as it escapes by default
+	}
+};
+
 export const initI18n = (defaultLocale?: string | undefined) => {
 	const detectionOrder = defaultLocale
 		? ['querystring', 'localStorage']
@@ -60,11 +71,7 @@ export const initI18n = (defaultLocale?: string | undefined) => {
 			fallbackLng: {
 				default: fallbackDefaultLocale
 			},
-			ns: 'translation',
-			returnEmptyString: false,
-			interpolation: {
-				escapeValue: false // not needed for svelte as it escapes by default
-			}
+			...i18nOptions
 		});
 
 	const lang = i18next?.language || defaultLocale || 'en-US';
