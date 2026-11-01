@@ -8,6 +8,8 @@
 	// もう一度押すと閉じる(bits-ui の挙動)。
 	// 角括弧は範囲選択のコピーで「[1]」になるよう見えない文字で残す(button 要素は選択から外れる
 	// ブラウザがあるので、トリガーは span role=button)。
+	// 開けない出典(cite.openable が false — 判定は resolveBracketRef)は押せないチップ: 破線の枠に
+	// 打ち消し線の番号、吹き出しは出さず、title で開けない理由を出す。
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
@@ -38,96 +40,112 @@
 		if (on) citations.active = n;
 		else if (citations.active === n) citations.active = null;
 	};
+
+	const unopenableLabel = $derived(
+		`${$i18n.t('Unopenable source')}: ${citeLabel(cite)} — ${
+			cite.kind === 'sandbox'
+				? $i18n.t('It points to a file in the sandbox, which cannot be opened from the chat.')
+				: $i18n.t('It points to a file that is not attached to this chat, so it cannot be opened.')
+		}`
+	);
 </script>
 
 <sup class="cite-ref"
-	><Popover.Root
-		bind:open
-		onOpenChange={(state) => {
-			setActive(state);
-		}}
-		><Popover.Trigger openOnHover openDelay={200} closeDelay={300}
-			>{#snippet child({ props })}
-				{@const { type: _type, disabled: _disabled, ...triggerProps } = props}
-				<span
-					{...triggerProps}
-					role="button"
-					tabindex="0"
-					aria-label={`[${n}] ${citeLabel(cite)}`}
-					class="inline-flex items-center justify-center min-w-[1.45em] h-[1.45em] px-[0.35em] mx-[0.15em] rounded-full text-[0.95em] leading-none font-medium tabular-nums cursor-pointer select-text outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 bg-black/5 dark:bg-white/10 text-content-muted hover:bg-black/10 dark:hover:bg-white/20 hover:text-content data-[state=open]:bg-black/10 dark:data-[state=open]:bg-white/20 data-[state=open]:text-content transition-colors"
-					onmouseenter={() => setActive(true)}
-					onmouseleave={() => setActive(open)}
-					onfocus={() => setActive(true)}
-					onblur={() => setActive(open)}
-					><span class="sr-only">[</span>{n}<span class="sr-only">]</span></span
+	>{#if !cite.openable}<span
+			role="img"
+			aria-label={`[${n}] ${unopenableLabel}`}
+			title={unopenableLabel}
+			class="inline-flex items-center justify-center min-w-[1.45em] h-[1.45em] px-[0.3em] mx-[0.15em] rounded-full text-[0.95em] leading-none font-medium tabular-nums cursor-help select-text border border-dashed border-black/25 dark:border-white/30 text-content-muted line-through"
+			onmouseenter={() => setActive(true)}
+			onmouseleave={() => setActive(false)}
+			><span class="sr-only">[</span>{n}<span class="sr-only">]</span></span
+		>{:else}<Popover.Root
+			bind:open
+			onOpenChange={(state) => {
+				setActive(state);
+			}}
+			><Popover.Trigger openOnHover openDelay={200} closeDelay={300}
+				>{#snippet child({ props })}
+					{@const { type: _type, disabled: _disabled, ...triggerProps } = props}
+					<span
+						{...triggerProps}
+						role="button"
+						tabindex="0"
+						aria-label={`[${n}] ${citeLabel(cite)}`}
+						class="inline-flex items-center justify-center min-w-[1.45em] h-[1.45em] px-[0.35em] mx-[0.15em] rounded-full text-[0.95em] leading-none font-medium tabular-nums cursor-pointer select-text outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 bg-black/5 dark:bg-white/10 text-content-muted hover:bg-black/10 dark:hover:bg-white/20 hover:text-content data-[state=open]:bg-black/10 dark:data-[state=open]:bg-white/20 data-[state=open]:text-content transition-colors"
+						onmouseenter={() => setActive(true)}
+						onmouseleave={() => setActive(open)}
+						onfocus={() => setActive(true)}
+						onblur={() => setActive(open)}
+						><span class="sr-only">[</span>{n}<span class="sr-only">]</span></span
+					>
+				{/snippet}</Popover.Trigger
+			><Popover.Portal
+				><Popover.Content
+					side="top"
+					align="center"
+					sideOffset={6}
+					collisionPadding={12}
+					forceMount
+					aria-label={$i18n.t('Sources')}
 				>
-			{/snippet}</Popover.Trigger
-		><Popover.Portal
-			><Popover.Content
-				side="top"
-				align="center"
-				sideOffset={6}
-				collisionPadding={12}
-				forceMount
-				aria-label={$i18n.t('Sources')}
-			>
-				{#snippet child({ wrapperProps, props, open: shown })}
-					{#if shown && entry}
-						<div {...wrapperProps}>
-							<div
-								{...props}
-								transition:flyAndScale
-								class="z-50 w-max max-w-[min(22rem,calc(100vw-1.5rem))] rounded-xl border border-black/5 dark:border-white/10 bg-white dark:bg-gray-850 px-3 py-2 text-xs leading-relaxed text-content shadow-lg font-primary outline-none"
-							>
-								<div class="flex items-start gap-1.5 font-medium">
-									<span class="shrink-0 tabular-nums text-content-muted">{entry.n}.</span>
-									<span
-										class="{entry.kind === 'file'
-											? 'i-lucide-paperclip'
-											: 'i-lucide-file-text'} size-3.5 shrink-0 mt-0.5 text-content-muted"
-									></span>
-									{#if entry.kind === 'file'}
-										<a
-											href={entry.pageHref}
-											target="_blank"
-											rel="nofollow"
-											class="min-w-0 break-all hover:underline">{entry.title}</a
-										>
-									{:else}
-										<span class="min-w-0 break-all">{entry.title}</span>
-									{/if}
-								</div>
-								{#if entry.kind === 'ext'}
-									{#each entry.sections as section (section.href)}
-										<div class="pl-[1.125rem]">
+					{#snippet child({ wrapperProps, props, open: shown })}
+						{#if shown && entry}
+							<div {...wrapperProps}>
+								<div
+									{...props}
+									transition:flyAndScale
+									class="z-50 w-max max-w-[min(22rem,calc(100vw-1.5rem))] rounded-xl border border-black/5 dark:border-white/10 bg-white dark:bg-gray-850 px-3 py-2 text-xs leading-relaxed text-content shadow-lg font-primary outline-none"
+								>
+									<div class="flex items-start gap-1.5 font-medium">
+										<span class="shrink-0 tabular-nums text-content-muted">{entry.n}.</span>
+										<span
+											class="{entry.kind === 'file'
+												? 'i-lucide-paperclip'
+												: 'i-lucide-file-text'} size-3.5 shrink-0 mt-0.5 text-content-muted"
+										></span>
+										{#if entry.kind === 'file'}
 											<a
-												href={section.href}
+												href={entry.pageHref}
 												target="_blank"
 												rel="nofollow"
-												class="inline-block max-w-full break-all hover:underline {section.href ===
-												cite.href
-													? 'text-content font-medium'
-													: 'text-content-muted hover:text-content'}">› {section.label}</a
+												class="min-w-0 break-all hover:underline">{entry.title}</a
 											>
-										</div>
-									{/each}
-									<div class="mt-1.5 pt-1.5 border-t border-black/5 dark:border-white/10">
-										<a
-											href={entry.pageHref}
-											target="_blank"
-											rel="nofollow"
-											class="inline-flex items-center gap-1 text-content-muted hover:text-content hover:underline"
-										>
-											<span class="i-lucide-external-link size-3.5 shrink-0"></span>
-											{$i18n.t('Open the whole page')}
-										</a>
+										{:else}
+											<span class="min-w-0 break-all">{entry.title}</span>
+										{/if}
 									</div>
-								{/if}
+									{#if entry.kind === 'ext'}
+										{#each entry.sections as section (section.href)}
+											<div class="pl-[1.125rem]">
+												<a
+													href={section.href}
+													target="_blank"
+													rel="nofollow"
+													class="inline-block max-w-full break-all hover:underline {section.href ===
+													cite.href
+														? 'text-content font-medium'
+														: 'text-content-muted hover:text-content'}">› {section.label}</a
+												>
+											</div>
+										{/each}
+										<div class="mt-1.5 pt-1.5 border-t border-black/5 dark:border-white/10">
+											<a
+												href={entry.pageHref}
+												target="_blank"
+												rel="nofollow"
+												class="inline-flex items-center gap-1 text-content-muted hover:text-content hover:underline"
+											>
+												<span class="i-lucide-external-link size-3.5 shrink-0"></span>
+												{$i18n.t('Open the whole page')}
+											</a>
+										</div>
+									{/if}
+								</div>
 							</div>
-						</div>
-					{/if}
-				{/snippet}
-			</Popover.Content></Popover.Portal
-		></Popover.Root
-	></sup
+						{/if}
+					{/snippet}
+				</Popover.Content></Popover.Portal
+			></Popover.Root
+		>{/if}</sup
 >

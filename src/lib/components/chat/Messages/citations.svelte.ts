@@ -10,8 +10,17 @@ import { SvelteMap } from 'svelte/reactivity';
 
 import { numberCitations, type CiteRef } from '$lib/utils/citations';
 
+// 開けない出典は href が空なので、key・節・開けるかも比べる
 const sameRefs = (a: CiteRef[] | undefined, b: CiteRef[]) =>
-	!!a && a.length === b.length && a.every((ref, i) => ref.href === b[i].href);
+	!!a &&
+	a.length === b.length &&
+	a.every(
+		(ref, i) =>
+			ref.key === b[i].key &&
+			ref.href === b[i].href &&
+			ref.section === b[i].section &&
+			ref.openable === b[i].openable
+	);
 
 export class CitationScope {
 	#slots = new SvelteMap<number, CiteRef[]>();

@@ -44,9 +44,10 @@
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -- #17 XSS sink 監査済み(サニタイズは各経路) -->
 			{@html html}
 		{/if}
-	{:else if token.type === 'link' && token.cite && citations?.numberOf(token.cite.key)}
-		<!-- 本文の [/ext/…] / [file_id] → 上付きの番号チップ。同じページは同じ番号。押すと吹き出し
-		     (ページ名・本文で使った節・リンク)を出す — ページは開かない(CitationChip) -->
+	{:else if token.cite && citations?.numberOf(token.cite.key)}
+		<!-- 本文の [/ext/…] / [file_id] / [/workspace/…] → 上付きの番号チップ。同じページは同じ番号。
+		     開ける出典は押すと吹き出し(ページ名・本文で使った節・リンク)を出す — ページは開かない。
+		     開けない出典(link ではなく text トークン)は押せない「開けない出典」のチップ(CitationChip) -->
 		<CitationChip n={citations.numberOf(token.cite.key) ?? 0} cite={token.cite} {citations} />
 	{:else if token.type === 'link'}
 		<!-- #87: {target=_self} / {download=...} の出し分け。target は _self のみ opt-in

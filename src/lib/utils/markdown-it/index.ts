@@ -46,12 +46,14 @@ md.use(markdownItAttrs, { allowedAttributes: ['target', 'download'] });
 md.disable(['lheading', 'reference']);
 
 // リンクによる簡易引用(#146 の簡易版、2026-10-05): 本文中の角括弧 1 つだけの参照を
-// 引用リンクにする。対象の判定と URL の正規化は `$lib/utils/citations` の resolveBracketRef
-// (`/ext/` で始まるパスか、env.fileNames に在る file_id)。それ以外の `[1]` `[580]` `[site-a]` は
+// 引用にする。対象の判定・開けるか・URL の正規化は `$lib/utils/citations` の resolveBracketRef
+// (`/ext/` で始まるパス、file_id、sandbox のパス `/workspace/…`)。それ以外の `[1]` `[580]` `[site-a]` は
 // 文字のまま。直後が `(` `[` `:` のもの(`[ラベル](url)` / `[a][b]` / 参照リンク定義 `[x]: url`)は
 // 巻き込まない。コード内は backticks / fence が先に取るので対象外。
-// リンクトークンは markup = 'bracket_ref'、meta.cite に CiteRef を持つ(描画側が番号チップにする。
-// 番号を振らない場所では表示名 `末尾の要素 › 見出し` のリンク)。
+// 開ける出典はリンクトークン(markup = 'bracket_ref'、meta.cite に CiteRef)— 描画側が番号チップにする。
+// 番号を振らない場所では表示名 `末尾の要素 › 見出し` のリンク。
+// 開けない出典は `cite_unopenable` トークン(content は元の `[…]`、meta.cite に CiteRef)— 描画側が
+// 「開けない出典」の番号チップにする。番号を振らない場所・md.render では元の `[…]` の文字のまま。
 export type LexEnv = CiteEnv;
 
 /** `/ext/a/b.md#節` → `b.md › 節`(末尾 "/" のディレクトリは最後の要素) */
@@ -73,9 +75,10 @@ md.inline.ruler.before('link', 'bracket_ref', (state, silent) => {
 	const cite = resolveBracketRef(inner, (state.env ?? {}) as LexEnv, (url) =>
 		state.md.normalizeLink(url)
 	);
-	if (!cite || !state.md.validateLink(cite.href)) return false;
+	if (!cite) return false;
+	if (cite.openable && !state.md.validateLink(cite.href)) return false;
 
-	if (!silent) {
+	if (!silent && cite.openable) {
 		const open = state.push('link_open', 'a', 1);
 		open.attrs = [['href', cite.href]];
 		open.markup = 'bracket_ref';
@@ -83,6 +86,10 @@ md.inline.ruler.before('link', 'bracket_ref', (state, silent) => {
 		const text = state.push('text', '', 0);
 		text.content = citeLabel(cite);
 		state.push('link_close', 'a', -1);
+	} else if (!silent) {
+		const token = state.push('cite_unopenable', '', 0);
+		token.content = src.slice(start, end + 1);
+		token.meta = { cite };
 	}
 	state.pos = end + 1;
 	return true;
@@ -156,7 +163,7 @@ function convertInline(children: MDToken[] | null): AnyToken[] {
 						// markdown-it-attrs 経由(#87)。無指定は null(描画側の既定 = _blank)
 						target: attr(tok, 'target'),
 						download: attr(tok, 'download'),
-						// 本文の [/ext/…] / [file_id](bracket_ref)なら引用(番号チップの元)
+						// 本文の [/ext/…] / [file_id](bracket_ref)なら開ける引用(番号チップの元)
 						cite: tok.markup === 'bracket_ref' ? (tok.meta?.cite ?? null) : null,
 						tokens: []
 					}
@@ -174,6 +181,10 @@ function convertInline(children: MDToken[] | null): AnyToken[] {
 					text: tok.content ?? '',
 					tokens: convertInline(tok.children)
 				});
+				break;
+			case 'cite_unopenable':
+				// 開けない出典: 文字は元の `[…]` のまま、cite を持たせる(番号チップの元)
+				push({ type: 'text', raw: tok.content, text: tok.content, cite: tok.meta?.cite ?? null });
 				break;
 			case 'html_inline':
 				push({ type: 'html', text: tok.content, raw: tok.content });
@@ -416,6 +427,8 @@ katexPlugin(md);
 // KatexRenderer は Svelte 側専用なので、文字列レンダリング経路では数式本文をそのまま出す。
 md.renderer.rules.katex_inline = (tokens, idx) => tokens[idx].content;
 md.renderer.rules.katex_block = (tokens, idx) => tokens[idx].content + '\n';
+// 開けない出典(bracket_ref)は元の `[…]` の文字のまま
+md.renderer.rules.cite_unopenable = (tokens, idx) => md.utils.escapeHtml(tokens[idx].content);
 
 /**
  * marked.lexer(src) 互換の入口。marked 形のトークン配列を返す。

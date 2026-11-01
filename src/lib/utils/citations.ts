@@ -1,19 +1,24 @@
 // 本文の `[/ext/…]` / `[file_id]` による番号付き引用(#146 の簡易版、2026-10-05)。
 //
-// - resolveBracketRef: 角括弧の中身 → 引用(CiteRef)。**「本文の ref → 正規化した URL」を決めるのは
-//   ここ 1 か所だけ**(markdown-it の inline rule `bracket_ref` がここを呼ぶ)。モデルの写し間違いの
-//   自動修正(同じメッセージの tool の結果に近い URL があれば差し替える)を足すならここ。
+// - resolveBracketRef: 角括弧の中身 → 引用(CiteRef)。**「本文の ref → 正規化した URL」と
+//   「開ける出典か」を決めるのはここ 1 か所だけ**(markdown-it の inline rule `bracket_ref` がここを呼ぶ)。
+//   モデルの写し間違いの自動修正(同じメッセージの tool の結果に近い URL があれば差し替える)を足すならここ。
 // - collectCiteRefs: lex 済みトークン(marked 互換形)から、出てきた順に CiteRef を拾う。
 // - numberCitations: テキストブロックごとの CiteRef 列(メッセージ内の順)を通しで番号付けする。
 //   番号は「ページ」(URL の `#` より前)の初出順。同じページの別の節も同じ番号。
 //   出てきた順に振るので、ストリーミングで本文が伸びても既存の番号は変わらない。
+//   開けない出典も同じ番号列に入る(チップと一覧で「開けない出典」として見せる)。
 import { WEBUI_BASE_URL } from '$lib/constants';
 
-// 対象は中身が次の 2 形のときだけ(`[1]` `[580]` `[site-a]` は対象外):
+// 対象は中身が次の 3 形のときだけ(`[1]` `[580]` `[site-a]` `[https://…]` は対象外 — 文字のまま):
 //   1. `/ext/` で始まるパス(`#見出し` / `#:~:text=引用文` の fragment 可)。doc の住所は半角・全角の
-//      空白や括弧を含む(`01_7-1 消毒・滅菌` 等)ので、`]` と改行以外は中身に許す
-//   2. file_id(UUID 形)— env.fileNames(そのチャットの添付 id → ファイル名)に在るときだけ
+//      空白や括弧を含む(`01_7-1 消毒・滅菌` 等)ので、`]` と改行以外は中身に許す → 開ける
+//   2. file_id(UUID 形)— env.fileNames(そのチャットの添付 id → ファイル名)に在れば開ける。
+//      無ければ開けない(このチャットに無いファイルは開く先が無い)
+//   3. sandbox のパス `/workspace` / `/workspace/…`(fragment 可)→ 開けない(jail の中のパスで、
+//      ブラウザから開く URL が無い)
 const EXT_REF_RE = /^\/ext\/[^\r\n[\]]+$/;
+const SANDBOX_REF_RE = /^\/workspace(?:[/#][^\r\n[\]]*)?$/;
 const FILE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface CiteEnv {
@@ -23,10 +28,16 @@ export interface CiteEnv {
 
 /** 本文の 1 箇所の引用 */
 export interface CiteRef {
-	kind: 'ext' | 'file';
-	/** その箇所のリンク先(fragment 付き、normalize 済み) */
+	/** 出典の種類: `/ext/…` / 添付の file_id / sandbox のパス */
+	kind: 'ext' | 'file' | 'sandbox';
+	/**
+	 * 開ける出典か。false(sandbox のパス・このチャットに無い file_id)は href / pageHref が空で、
+	 * 描画側はリンクにせず「開けない出典」として見せる
+	 */
+	openable: boolean;
+	/** その箇所のリンク先(fragment 付き、normalize 済み)。開けない出典は空 */
 	href: string;
-	/** ページのリンク先(`#` より前、normalize 済み) */
+	/** ページのリンク先(`#` より前、normalize 済み)。開けない出典は空 */
 	pageHref: string;
 	/** 同じ出典の判定キー(ページ単位。decode 済み) */
 	key: string;
@@ -90,7 +101,7 @@ function sectionLabel(fragment: string): string | null {
 }
 
 /**
- * 角括弧の中身 → 引用。対象外なら null。
+ * 角括弧の中身 → 引用。対象外なら null(文字のまま)。開けない出典は openable: false。
  * normalizeLink は markdown-it の `md.normalizeLink`(percent-encode)を渡す。
  */
 export function resolveBracketRef(
@@ -114,6 +125,7 @@ export function resolveBracketRef(
 					: normalizeLink(inner);
 		return {
 			kind: 'ext',
+			openable: true,
 			href,
 			pageHref: normalizeLink(pageUrl),
 			key: safeDecode(pageUrl),
@@ -122,16 +134,42 @@ export function resolveBracketRef(
 		};
 	}
 	if (FILE_ID_RE.test(inner)) {
+		const key = `file:${inner.toLowerCase()}`;
 		const name = env.fileNames?.get(inner);
-		if (name === undefined) return null;
+		if (name === undefined) {
+			return {
+				kind: 'file',
+				openable: false,
+				href: '',
+				pageHref: '',
+				key,
+				title: inner,
+				section: null
+			};
+		}
 		const url = `${WEBUI_BASE_URL}/api/v1/files/${inner}/content`;
 		return {
 			kind: 'file',
+			openable: true,
 			href: url,
 			pageHref: url,
-			key: `file:${inner.toLowerCase()}`,
+			key,
 			title: name || inner,
 			section: null
+		};
+	}
+	if (SANDBOX_REF_RE.test(inner)) {
+		// 表示名はパス全体(どこを指していたか読めるように)。節は `/ext/…` と同じ見せ方
+		const hash = inner.indexOf('#');
+		const path = safeDecode(hash >= 0 ? inner.slice(0, hash) : inner);
+		return {
+			kind: 'sandbox',
+			openable: false,
+			href: '',
+			pageHref: '',
+			key: path,
+			title: path,
+			section: sectionLabel(hash >= 0 ? safeDecode(inner.slice(hash + 1)) : '')
 		};
 	}
 	return null;
@@ -157,11 +195,14 @@ export function citeLabel(ref: Pick<CiteRef, 'title' | 'section'>): string {
 
 type AnyToken = { type: string; [key: string]: any };
 
-/** lex 済みトークン(marked 互換形)から、文書順に引用を拾う */
+/**
+ * lex 済みトークン(marked 互換形)から、文書順に引用を拾う。開ける出典は link トークン、
+ * 開けない出典は text トークン(中身は元の `[…]`)が cite を持つ
+ */
 export function collectCiteRefs(tokens: AnyToken[] | null | undefined, out: CiteRef[] = []) {
 	for (const token of tokens ?? []) {
 		if (!token) continue;
-		if (token.type === 'link' && token.cite) out.push(token.cite as CiteRef);
+		if (token.cite) out.push(token.cite as CiteRef);
 		if (Array.isArray(token.tokens)) collectCiteRefs(token.tokens, out);
 		if (Array.isArray(token.items)) collectCiteRefs(token.items, out);
 		if (token.type === 'table') {
@@ -175,6 +216,7 @@ export function collectCiteRefs(tokens: AnyToken[] | null | undefined, out: Cite
 }
 
 export interface CitationSection {
+	/** 節のリンク先。開けない出典は空 */
 	href: string;
 	label: string;
 }
@@ -182,6 +224,7 @@ export interface CitationSection {
 export interface CitationEntry {
 	n: number;
 	kind: CiteRef['kind'];
+	openable: boolean;
 	key: string;
 	title: string;
 	pageHref: string;
@@ -208,6 +251,7 @@ export function numberCitations(groups: Iterable<CiteRef[]>): Citations {
 				entries.push({
 					n,
 					kind: ref.kind,
+					openable: ref.openable,
 					key: ref.key,
 					title: ref.title,
 					pageHref: ref.pageHref,
@@ -215,7 +259,10 @@ export function numberCitations(groups: Iterable<CiteRef[]>): Citations {
 				});
 			}
 			const entry = entries[n - 1];
-			if (ref.section && !entry.sections.some((s) => s.href === ref.href)) {
+			if (
+				ref.section &&
+				!entry.sections.some((s) => s.href === ref.href && s.label === ref.section)
+			) {
 				entry.sections.push({ href: ref.href, label: ref.section });
 			}
 		}

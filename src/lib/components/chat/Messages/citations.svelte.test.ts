@@ -27,4 +27,15 @@ describe('CitationScope(メッセージ単位の通し番号、#146 簡易版)',
 		scope.set(2, []);
 		expect(scope.current.entries).toEqual([]);
 	});
+
+	it('開けない出典(href が空)も中身が変われば書き換わる', () => {
+		const scope = new CitationScope();
+		scope.set(0, refs('[/workspace/a.md]'));
+		scope.set(0, refs('[/workspace/b.md]'));
+		expect(scope.current.entries.map((e) => [e.n, e.title, e.openable])).toEqual([
+			[1, '/workspace/b.md', false]
+		]);
+		scope.set(0, refs('[/workspace/b.md#:~:text=結論]'));
+		expect(scope.current.entries[0].sections.map((s) => s.label)).toEqual(['「結論」']);
+	});
 });

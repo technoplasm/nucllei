@@ -633,6 +633,23 @@ llens 側が cage の公開ルートを固定の `/ext/doc`(doc の HTML)・`/ex
 - 自動ロード (`apply_skill_auto_load`) の exchange は最後の user 発言 (今の発言) の直後 — 発火の記録が残る応答の
   先頭と同じ位置 (`_memos/skill-design.md`)
 
+## 改訂(2026-11-02)— 開けない出典(本文の `[/workspace/…]` / このチャットに無い `[file_id]`)
+
+llens の依頼(ken 経由): モデルが sandbox のパス `[/workspace/…]` を出典に書くことがある。開けないので、
+開けない出典だと読み手に分かるように見せる。FE だけ(モデルに見せる文面・BE は変えない)。
+
+- **判定は `utils/citations.ts` の `resolveBracketRef` 1 か所**: CiteRef に `openable`(と `kind` に `sandbox`)。
+  開ける = `/ext/…`・このチャットに在る添付の file_id。開けない = `/workspace` / `/workspace/…`(fragment 可)・
+  UUID 形だがこのチャットの添付に無い file_id。開けない出典は href / pageHref が空、表示名は sandbox ならパス全体
+  (decode 済み)、file_id なら id。`[https://…]` `[1]` などはこれまでどおり対象外(文字のまま)
+- lex: 開けない出典は `cite_unopenable` トークン → marked 互換形では元の `[…]` の **text トークンに cite** を持たせる
+  (リンクにしない)。番号を振らない Markdown(tool の結果・ユーザー発言等)と `md.render` は元の `[…]` の文字のまま
+- 番号は開ける出典と同じ列で通し(同じパスは同じ番号、節は `/ext/…` と同じ見せ方)。
+  チップ(`CitationChip`)は押せない `span role=img`(破線の枠・打ち消し線の番号、吹き出し無し、title / aria-label に
+  「開けない出典: <表示名> — <理由>」)。一覧(`CitationList`)はリンク無しで打ち消し線の表示名 +「開けない出典」の札、
+  理由は title と sr-only の文。チップの hover で一覧の行を強調するのは開ける出典と同じ
+- `CitationScope.set` の同一判定は key・href・節・openable で比べる(開けない出典は href が空なので)
+
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`。
   ※ **sandbox は prism 側に無い**(#114 で移設): tool = `nucllei/builtin_tools/sandbox.py`、

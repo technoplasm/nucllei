@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lex } from './markdown-it';
+import { lex, render } from './markdown-it';
 import { collectCiteRefs, numberCitations, resolveBracketRef, type CiteEnv } from './citations';
 
 // 番号付き引用(#146 の簡易版)。メッセージ = テキストブロックの列
@@ -165,11 +165,77 @@ describe('番号付き引用(#146 の簡易版)', () => {
 		expect(cite([src], env).entries).toEqual([]);
 	});
 
-	it('実在しない file_id は文字のまま(番号を振らない)', () => {
+	it('実在しない file_id は開けない出典として番号を振る', () => {
 		const other = '11111111-2222-3333-4444-555555555555';
 		const [p] = lex(`[${other}] と [${A}]`, env);
-		expect(p.tokens[0].text).toBe(`[${other}] と `);
-		expect(chipNumbers([`[${other}] と [${A}]`], env)).toEqual([1]);
-		expect(resolveBracketRef(other, env)).toBeNull();
+		expect(p.tokens[0]).toMatchObject({ type: 'text', raw: `[${other}]` });
+		expect(p.tokens[0].cite).toMatchObject({ kind: 'file', openable: false, href: '' });
+		expect(chipNumbers([`[${other}] と [${A}]`], env)).toEqual([1, 2]);
+		expect(resolveBracketRef(other, env)).toMatchObject({
+			kind: 'file',
+			openable: false,
+			key: `file:${other}`,
+			title: other
+		});
+	});
+});
+
+describe('開けない出典(sandbox のパス・このチャットに無い file_id)', () => {
+	const W = '/workspace/notes/調査メモ.md';
+
+	it('開けるか・種類は resolveBracketRef が決める', () => {
+		expect(resolveBracketRef(`${A}#節`, env)).toMatchObject({ kind: 'ext', openable: true });
+		expect(resolveBracketRef(FID, env)).toMatchObject({ kind: 'file', openable: true });
+		expect(resolveBracketRef(FID, {})).toMatchObject({ kind: 'file', openable: false });
+		for (const ref of ['/workspace', '/workspace/', W, `${W}#Ⅱ．結果`, '/workspace#x']) {
+			expect(resolveBracketRef(ref, env)).toMatchObject({
+				kind: 'sandbox',
+				openable: false,
+				href: '',
+				pageHref: ''
+			});
+		}
+	});
+
+	it('sandbox のパスの表示名はパス全体(decode 済み)、節は `/ext/…` と同じ見せ方', () => {
+		const r = resolveBracketRef(`/workspace/notes/${encodeURIComponent('調査メモ')}.md#Ⅱ．結果`)!;
+		expect(r.title).toBe(W);
+		expect(r.key).toBe(W);
+		expect(r.section).toBe('結果');
+		expect(resolveBracketRef(`${W}#:~:text=引用`)!.section).toBe('「引用」');
+	});
+
+	it('`/workspace` で始まるだけの別名・裸の URL は対象外(文字のまま)', () => {
+		for (const ref of ['/workspaces/a', '/workspace-a', 'workspace/a', 'https://e.x/a', '/tmp/a']) {
+			expect(resolveBracketRef(ref, env)).toBeNull();
+		}
+	});
+
+	it('開ける出典と同じ番号列に入る。同じパスは同じ番号、節は初出順', () => {
+		const other = '11111111-2222-3333-4444-555555555555';
+		const src = `a [${A}] b [${W}] c [${FID}] d [${W}#:~:text=結論] e [${other}] f [${W}]`;
+		expect(chipNumbers([src], env)).toEqual([1, 2, 3, 2, 4, 2]);
+		const { entries } = cite([src], env);
+		expect(entries.map((e) => [e.n, e.kind, e.openable, e.title])).toEqual([
+			[1, 'ext', true, '02_14-2_針刺し'],
+			[2, 'sandbox', false, W],
+			[3, 'file', true, '手順書.pdf'],
+			[4, 'file', false, other]
+		]);
+		expect(entries[1].pageHref).toBe('');
+		expect(entries[1].sections).toEqual([{ href: '', label: '「結論」' }]);
+	});
+
+	it('lex では元の `[…]` の text トークン(cite 付き)。md.render は文字のまま', () => {
+		const [p] = lex(`根拠 [${W}#節] と [${A}]`, env);
+		const unopenable = p.tokens.find(
+			(t: { cite?: unknown; type: string }) => t.type === 'text' && t.cite
+		);
+		expect(unopenable.raw).toBe(`[${W}#節]`);
+		expect(unopenable.cite).toMatchObject({ kind: 'sandbox', openable: false, section: '節' });
+		expect(p.tokens.filter((t: { type: string }) => t.type === 'link')).toHaveLength(1);
+		const html = render(`根拠 [${W}] と [/workspace/<b>x]`);
+		expect(html).toContain(`根拠 [${W}] と [/workspace/&lt;b&gt;x]`);
+		expect(html).not.toContain('<a');
 	});
 });
