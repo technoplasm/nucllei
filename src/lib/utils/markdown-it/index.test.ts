@@ -73,6 +73,39 @@ describe('markdown-it lexer (#22 L2)', () => {
 		expect(k.text).toBe('E=mc^2');
 	});
 
+	it('インライン katex: \\(...\\) と \\[...\\] も数式になる', () => {
+		const [p] = lex('三平方 \\(a^2+b^2=c^2\\) と \\[x\\] と $y$');
+		const ks = p.tokens.filter((t: any) => t.type === 'inlineKatex').map((t: any) => t.text);
+		expect(ks).toEqual(['a^2+b^2=c^2', 'x', 'y']);
+		expect(p.tokens.map((t: any) => t.raw ?? '').join('')).not.toContain('(a^2');
+	});
+
+	it('インライン katex: 行頭の \\(...\\) / 一行の $$...$$', () => {
+		const [p] = lex('\\(a\\) と $$b$$');
+		const ks = p.tokens.filter((t: any) => t.type === 'inlineKatex').map((t: any) => t.text);
+		expect(ks).toEqual(['a', 'b']);
+	});
+
+	it('数式でないエスケープはそのまま文字になる', () => {
+		const [p] = lex('価格は \\$5 と \\*強調しない\\* と \\\\(x)');
+		expect(p.tokens.some((t: any) => t.type === 'inlineKatex')).toBe(false);
+		const text = p.tokens.map((t: any) => t.text ?? '').join('');
+		expect(text).toBe('価格は $5 と *強調しない* と \\(x)');
+	});
+
+	it('コードスパンの中の \\(...\\) / $...$ は数式にしない', () => {
+		const [p] = lex('`\\(a\\)` と `$b$`');
+		expect(p.tokens.some((t: any) => t.type === 'inlineKatex')).toBe(false);
+		const codes = p.tokens.filter((t: any) => t.type === 'codespan').map((t: any) => t.text);
+		expect(codes).toEqual(['\\(a\\)', '$b$']);
+	});
+
+	it('ブロック katex: \\[ ... \\]', () => {
+		const tokens = lex('\\[\nx^2\n\\]');
+		const k = tokens.find((t: any) => t.type === 'blockKatex');
+		expect(k?.text).toBe('x^2');
+	});
+
 	it('ブロック katex', () => {
 		const tokens = lex('$$\n\\int x dx\n$$');
 		expect(tokens.some((t) => t.type === 'blockKatex')).toBe(true);

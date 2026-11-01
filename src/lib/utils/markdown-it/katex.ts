@@ -46,8 +46,11 @@ function extractText(match: RegExpMatchArray): string {
 }
 
 export default function katexPlugin(md: MarkdownIt) {
-	// インライン: $...$, $$...$$(改行なし), \(...\), \pu{}, \ce{} など
-	md.inline.ruler.after('escape', 'katex_inline', (state, silent) => {
+	// インライン: $...$, $$...$$(改行なし), \(...\), \pu{}, \ce{} など。
+	// escape より前に置く — escape は `\(` `\[` を「エスケープされた括弧」として先に食べるので、
+	// 後ろに置くと \(...\) / \[...\] の区切りを見られない。`\$` などの数式でない
+	// エスケープは inlineRule に一致しないので escape に回る。
+	md.inline.ruler.before('escape', 'katex_inline', (state, silent) => {
 		const start = state.pos;
 		// marked 版と同じ「直前が特殊文字 or 行頭」の制約
 		if (start > 0) {
