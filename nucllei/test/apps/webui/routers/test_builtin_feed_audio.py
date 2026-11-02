@@ -329,5 +329,7 @@ def test_description_says_when_to_call_it():
     desc = tool_description_from_docstring(_mod().Tools.feed_audio.__doc__)
     calls, rest = desc.split("呼ぶ場面:\n", 1)[1].split("呼ばない場面:\n", 1)
     assert "上限を超えて入らなかった添付" in calls and "start / end" in calls
-    assert "既に音声が入っている添付" in rest and "区間なしで丸ごと入れ直す" in rest
+    assert calls.startswith("- 会話に入っていない音声を聞く")
+    assert "会話に既に音声が入っている添付 (前の発言の添付" in rest
+    assert "毎ターン送り直されている" in rest and "区間なしで丸ごと入れ直す" in rest
     assert "{{" not in desc

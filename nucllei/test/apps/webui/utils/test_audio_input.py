@@ -507,7 +507,8 @@ class TestAudioInput(AbstractPostgresTest):
         assert second[1]["input_audio"]["format"] == "mp3"
         text = second[0]["text"]
         assert 'file_id="f-l"' in text and 'audio="too_long"' in text
-        assert "上限" in text and "聞こえていない" in text
+        assert "上限" in text and "この発言には入れていない)</source>" in text
+        assert "次の手" not in text
         assert (
             '<source file_id="f-d" name="f-d.bin" audio="inline" duration="0:02"'
             ' dictation="true" extraction="none">(この発言の文はこの録音の文字起こし。'
@@ -521,6 +522,7 @@ class TestAudioInput(AbstractPostgresTest):
             ' dictation="true" part="2" parts="2" extraction="none">'
             "(この発言の文はこの録音の文字起こし。録音は 0:03 あり、"
         ) in third
+        assert "音声はこの発言には入れていない)</source>" in third
 
     def test_non_audio_model_says_the_audio_is_not_passed(self):
         """聞けないモデル: 音声は入れず、<source> が「音声ファイルで、聞けないので渡していない」と言う

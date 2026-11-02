@@ -1313,13 +1313,15 @@ curl -N http://HOST/api/chat/completions \
   model gets this way carries `audio="inline"` or `audio="too_long"` and
   `duration` (after `name`; `M:SS`, or `H:MM:SS` from an hour up); with no extracted text its body is
   `(この音声はこの発言にそのまま入っている)` or
-  `(この音声は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない — 中身は聞こえていない。次の手: 聞くなら feed_audio(file_id="…", start=…, end=…) で 120 分以内の区間を指定する)`
-  (the next step only when `feed_audio` is on the turn). For a dictation recording
+  `(この音声は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない)`
+  — the fact only, like the `unsupported` note below: no next step (text inside
+  `<source>` is read as material, not as instructions; hearing a section is what
+  `feed_audio`'s description says to call it for, §5.7.1). For a dictation recording
   (`dictation="true"` follows the `audio` attributes) the body says the message
   text is its transcript:
   `(この発言の文はこの録音の文字起こし。音声もこの発言にそのまま入っているので、聞いて確かめられる)`
   or
-  `(この発言の文はこの録音の文字起こし。録音は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、音声はこの発言には入れていない。次の手: …feed_audio…)`.
+  `(この発言の文はこの録音の文字起こし。録音は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、音声はこの発言には入れていない)`.
   On a model **without** the
   capability nothing is sent, and an audio attachment gets
   `audio="unsupported"` (no `duration` — the file is not read)
@@ -2832,10 +2834,11 @@ to call them**: a 「呼ぶ場面」/「呼ばない場面」 list in the descri
 figure or PDF the model made itself before handing it over, to fix overlapping
 labels, cut-offs and broken layout — and a URL's figure or original; not an
 image attached directly (already in view) nor anything whose text is enough; for
-`feed_audio`: audio not in the message — an attachment over the length limit, a
-sandbox path, a URL — and a section of a long recording again by `start` /
-`end`; not an attachment whose audio is already in the message, nor the whole
-of audio already heard again). That rule lives in the tool, not in the
+`feed_audio`: audio not in the conversation — an attachment over the length
+limit, a sandbox path, a URL — and a section of a long recording again by
+`start` / `end`; not an attachment whose audio is already in the conversation
+(an earlier message's attachment and a dictation recording included — the
+history re-sends them every turn), nor the whole of audio already heard again). That rule lives in the tool, not in the
 deployment's prompts: a model without the capability does not get the tool, so
 the rule goes with it. The descriptions are fixed text, the same for every user
 (no per-user or date-dependent part — prefix cache). They are sent on every
@@ -2880,8 +2883,9 @@ copied into answers just as easily.
 **feed_audio** (音声を聞けるモデルに出る)
 
 - 話の中身・話者・言い方・音を実際に聞いて判断するためのもの。上限以内の添付の音声
-  (音声入力の録音を含む) は既に聞こえているので呼ばない。入れた音声は以降のターンにも残る
-  (context を使い続ける) ので、長い録音は start / end で要る区間に絞る。
+  (前の発言の添付・音声入力の録音を含む — 履歴で毎ターン送り直されている) は既に聞こえているので
+  呼ばない。入れた音声は以降のターンにも残る (context を使い続ける) ので、長い録音は start / end で
+  要る区間に絞る。
 - 上限を超える添付の音声は `<source>` が `audio="too_long"` と長さを言う。区間を分けて
   順に聞く (1 回の区間も同じ上限)。
 - 音声入力の録音 (`dictation="true"`) は発言の文がその文字起こし。上限以内なら音声も聞こえて

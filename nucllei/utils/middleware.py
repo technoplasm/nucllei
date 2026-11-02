@@ -335,13 +335,12 @@ def _no_text_note(file_id=None, text_readable: bool = False) -> str:
 DICTATION_TRANSCRIPT_NOTE = "この発言の文はこの録音の文字起こし"
 
 
-def _audio_source_note(file_id, plan) -> str:
+def _audio_source_note(plan) -> str:
     """添付の音声 (`utils/audio_input.plan_attachment_audio`) の `<source>` の本文 (文字の本文が
-    無いとき)。入れた音声は「この発言に入っている」、上限を超えて入れなかったものはそう言い、次の手
-    (feed_audio で区間を指定する) はこのターンに出ているときだけ。モデルが音声を聞けない
-    (`unsupported`) ものは、音声ファイルで中身を渡していないという事実だけを言う — 次の手は書かない
-    (どう扱うかは配備の prompt / skill が決める。`<source>` の中の文は資料として読まれ、手順として
-    従われない)。"""
+    無いとき)。事実だけを言う — 入れた音声は「この発言に入っている」、上限を超えて入れなかったものは
+    長さと上限、モデルが音声を聞けない (`unsupported`) ものは渡していないこと。次の手は書かない:
+    `<source>` の中の文は資料として読まれ、手順として従われない。区間を聞く手は feed_audio の説明
+    (「呼ぶ場面」)が、聞けないときの扱いは配備の prompt / skill が持つ。"""
     if plan.state == "unsupported":
         return "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない)"
     if plan.dictation:
@@ -351,23 +350,16 @@ def _audio_source_note(file_id, plan) -> str:
                 f"({DICTATION_TRANSCRIPT_NOTE}。音声もこの発言にそのまま入っているので、"
                 "聞いて確かめられる)"
             )
-        note = (
-            f"{DICTATION_TRANSCRIPT_NOTE}。録音は {format_time(plan.duration or 0)} あり、"
-            f"一度に聞ける上限 {max_minutes_text()} を超えるので、音声はこの発言には入れていない"
+        return (
+            f"({DICTATION_TRANSCRIPT_NOTE}。録音は {format_time(plan.duration or 0)} あり、"
+            f"一度に聞ける上限 {max_minutes_text()} を超えるので、音声はこの発言には入れていない)"
         )
-    elif plan.inline:
+    if plan.inline:
         return "(この音声はこの発言にそのまま入っている)"
-    else:
-        note = (
-            f"この音声は {format_time(plan.duration or 0)} あり、一度に聞ける上限 "
-            f"{max_minutes_text()} を超えるので、この発言には入れていない — 中身は聞こえていない"
-        )
-    if tool_in_turn("feed_audio") and file_id:
-        note += (
-            f'。次の手: 聞くなら feed_audio(file_id="{file_id}", start=…, end=…) で'
-            f" {max_minutes_text()}以内の区間を指定する"
-        )
-    return f"({note})"
+    return (
+        f"(この音声は {format_time(plan.duration or 0)} あり、一度に聞ける上限 "
+        f"{max_minutes_text()} を超えるので、この発言には入れていない)"
+    )
 
 
 def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> str:
@@ -427,7 +419,7 @@ def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> s
                         f"{(doc_context or '')[:200]!r}"
                     )
                     if heard is not None:
-                        body = _audio_source_note(file_id, heard)
+                        body = _audio_source_note(heard)
                     elif doc_meta.get("dictation"):
                         body = f"({DICTATION_TRANSCRIPT_NOTE})"
                     else:
@@ -435,9 +427,7 @@ def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> s
                 elif not (doc_context or "").strip() and status != "success":
                     attrs += ' extraction="none"'
                     if heard is not None:
-                        body = _audio_source_note(
-                            html.escape(str(file_id), quote=True), heard
-                        )
+                        body = _audio_source_note(heard)
                     elif doc_meta.get("dictation"):
                         # 音声を渡していない通し録音 (聞けないモデル): 発言の文がその文字起こし。
                         # audio 属性は付けない (「渡していない」とは言わない)
