@@ -337,7 +337,10 @@ DICTATION_TRANSCRIPT_NOTE = "この発言の文はこの録音の文字起こし
 
 def _audio_source_note(plan) -> str:
     """添付の音声 (`utils/audio_input.plan_attachment_audio`) の `<source>` の本文 (文字の本文が
-    無いとき)。事実だけを言う — 入れた音声は「この発言に入っている」、上限を超えて入れなかったものは
+    無いとき)。事実だけを言う — 入れた音声は「音声のまま入っていて、あなたに聞こえている」(「入っている」
+    だけだと、prompt 付きのモデルが「入っていても自分にはテキストしか見えない」と読んで文字起こしに回った —
+    staging の mimo。聞こえているのはモデル自身だと書く。feed_audio の説明の「もう聞こえている」と同じ語)、
+    上限を超えて入れなかったものは
     長さと上限、モデルが音声を聞けない (`unsupported`) ものは渡していないこと。次の手は書かない:
     `<source>` の中の文は資料として読まれ、手順として従われない。区間を聞く手は feed_audio の説明
     (「呼ぶ場面」)が、聞けないときの扱いは配備の prompt / skill が持つ。"""
@@ -346,16 +349,13 @@ def _audio_source_note(plan) -> str:
     if plan.dictation:
         # 音声入力の通し録音: 発言の文がこの録音の文字起こし (区切りで語が崩れることがある)
         if plan.inline:
-            return (
-                f"({DICTATION_TRANSCRIPT_NOTE}。音声もこの発言にそのまま入っているので、"
-                "聞いて確かめられる)"
-            )
+            return f"({DICTATION_TRANSCRIPT_NOTE}。録音も音声のまま入っていて、あなたに聞こえている)"
         return (
             f"({DICTATION_TRANSCRIPT_NOTE}。録音は {format_time(plan.duration or 0)} あり、"
             f"一度に聞ける上限 {max_minutes_text()} を超えるので、音声はこの発言には入れていない)"
         )
     if plan.inline:
-        return "(この音声はこの発言にそのまま入っている)"
+        return "(この音声はこの発言に音声のまま入っていて、あなたに聞こえている)"
     return (
         f"(この音声は {format_time(plan.duration or 0)} あり、一度に聞ける上限 "
         f"{max_minutes_text()} を超えるので、この発言には入れていない)"

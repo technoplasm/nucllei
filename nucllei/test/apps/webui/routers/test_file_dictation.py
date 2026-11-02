@@ -461,7 +461,7 @@ def test_source_context_for_audio_heard_by_the_model():
     }
     expected = [
         '<source file_id="in" audio="inline" duration="12:34" extraction="none">'
-        "(この音声はこの発言にそのまま入っている)</source>",
+        "(この音声はこの発言に音声のまま入っていて、あなたに聞こえている)</source>",
         '<source file_id="long" audio="too_long" duration="3:00:05" extraction="none">'
         "(この音声は 3:00:05 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない)"
         "</source>",

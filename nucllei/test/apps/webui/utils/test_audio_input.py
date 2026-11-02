@@ -498,7 +498,10 @@ class TestAudioInput(AbstractPostgresTest):
         }
         assert 'file_id="f-a"' in first[0]["text"]
         assert 'audio="inline" duration="0:02"' in first[0]["text"]
-        assert "(この音声はこの発言にそのまま入っている)" in first[0]["text"]
+        assert (
+            "(この音声はこの発言に音声のまま入っていて、あなたに聞こえている)"
+            in first[0]["text"]
+        )
         # 2 つ目の発言: 通し録音は音声のまま入り (発言の文はその文字起こし)、上限を超える長さは
         # 入れず、<source> がそう言う
         second = out[2]["content"]
@@ -512,7 +515,7 @@ class TestAudioInput(AbstractPostgresTest):
         assert (
             '<source file_id="f-d" name="f-d.bin" audio="inline" duration="0:02"'
             ' dictation="true" extraction="none">(この発言の文はこの録音の文字起こし。'
-            "音声もこの発言にそのまま入っているので、聞いて確かめられる)</source>"
+            "録音も音声のまま入っていて、あなたに聞こえている)</source>"
         ) in text
         # 分かれた録音も各々。上限を超えるものは音声を入れず、文字起こしであることと長さを言う
         third = out[4]["content"]

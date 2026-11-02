@@ -1312,14 +1312,17 @@ curl -N http://HOST/api/chat/completions \
   `AUDIO_INPUT_MAX_MINUTES` (§3.9). The `<source>` of an audio attachment the
   model gets this way carries `audio="inline"` or `audio="too_long"` and
   `duration` (after `name`; `M:SS`, or `H:MM:SS` from an hour up); with no extracted text its body is
-  `(この音声はこの発言にそのまま入っている)` or
+  `(この音声はこの発言に音声のまま入っていて、あなたに聞こえている)` or
   `(この音声は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない)`
-  — the fact only, like the `unsupported` note below: no next step (text inside
+  — facts only, like the `unsupported` note below. The inline note says the model
+  itself hears it (with only "it is in the message", a model under a system prompt
+  read it as "in the message, but I only see text" and went to transcribe it —
+  staging, mimo). No next step (text inside
   `<source>` is read as material, not as instructions; hearing a section is what
   `feed_audio`'s description says to call it for, §5.7.1). For a dictation recording
   (`dictation="true"` follows the `audio` attributes) the body says the message
   text is its transcript:
-  `(この発言の文はこの録音の文字起こし。音声もこの発言にそのまま入っているので、聞いて確かめられる)`
+  `(この発言の文はこの録音の文字起こし。録音も音声のまま入っていて、あなたに聞こえている)`
   or
   `(この発言の文はこの録音の文字起こし。録音は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、音声はこの発言には入れていない)`.
   On a model **without** the
