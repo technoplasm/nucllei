@@ -656,6 +656,8 @@ llens の依頼(ken 経由): モデルが sandbox のパス `[/workspace/…]` �
 `input_audio` で入れる(画像の添付と同じく、発言には参照を置き、送信直前に `utils/audio_input.inline_audio_refs` が
 mp3 の base64 にする。DB・戻り境界に base64 は載らない)。音声入力の通し録音と上限
 (`AUDIO_INPUT_MAX_MINUTES`、既定 120 分)を超える長さは入れず、`<source>` の `audio="too_long"` が言う。
+能力の無いモデルでは音声を送らず、音声の添付の `<source>` は `audio="unsupported"` と「音声ファイルで、聞けないので
+渡していない」の本文になる(文書の「文字が抜き出されていない」にしない)。
 tool から聞かせる口は builtin `feed_audio`(`results[].context_audio`)。詳細は `audio.md`「音声のまま聞かせる」、
 契約は README_API §4.3「Audio attachments」。File は作らない。
 

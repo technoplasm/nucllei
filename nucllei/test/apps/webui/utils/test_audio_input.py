@@ -401,13 +401,27 @@ class TestAudioInput(AbstractPostgresTest):
         )
         t = self._file("f-t", b"text", "text/plain")
         long = self._file("f-l", _wav(3.0), "audio/wav", name="long.wav")
-        assert self._plan([a, d, t, long], self._model(audio=False)) == {}
+        # 聞けないモデル: 音声の添付 (通し録音を除く) は全部 unsupported、中身は読まない
+        reads = []
+        real_read = audio_input._read_file
+        self.monkeypatch.setattr(
+            audio_input,
+            "_read_file",
+            lambda fid, user: reads.append(fid) or real_read(fid, user),
+        )
+        plan = self._plan([a, d, t, long], self._model(audio=False))
+        assert {k: v.state for k, v in plan.items()} == {
+            "f-a": "unsupported",
+            "f-l": "unsupported",
+        }
+        assert plan["f-a"].duration is None and not plan["f-a"].inline
+        assert reads == []
 
         self.monkeypatch.setattr(audio_input, "AUDIO_INPUT_MAX_MINUTES", 2.5 / 60)
         plan = self._plan([a, d, t, long], self._model())
         assert set(plan) == {"f-a", "f-l"}  # 通し録音・音声でないものは入れない
-        assert plan["f-a"].inline and abs(plan["f-a"].duration - 2.0) < 0.05
-        assert not plan["f-l"].inline and plan["f-l"].name == "long.wav"
+        assert plan["f-a"].state == "inline" and abs(plan["f-a"].duration - 2.0) < 0.05
+        assert plan["f-l"].state == "too_long" and plan["f-l"].name == "long.wav"
 
     def _run(self, messages, files, model):
         from starlette.requests import Request
@@ -481,10 +495,28 @@ class TestAudioInput(AbstractPostgresTest):
         assert "上限" in second and "聞こえていない" in second
         assert 'file_id="f-d" name="f-d.bin" dictation="true"' in second
 
-    def test_non_audio_model_is_unchanged(self):
+    def test_non_audio_model_says_the_audio_is_not_passed(self):
+        """聞けないモデル: 音声は入れず、<source> が「音声ファイルで、聞けないので渡していない」と言う
+        (文書と同じ「文字が抜き出されていない」にしない — 外部の文字起こしを勧めさせない)。
+        通し録音は今までどおり (本文に文字起こし済み)。"""
         a = self._file("f-a", _wav(2.0), "audio/wav", name="a.wav")
-        wire = [{"role": "user", "id": "m1", "content": "これを聞いて", "files": [a]}]
-        out = self._run(wire, [a], self._model(audio=False))
-        assert isinstance(out[0]["content"], str)
-        assert "audio=" not in out[0]["content"]
-        assert 'file_id="f-a"' in out[0]["content"]
+        d = self._file(
+            "f-d", _wav(2.0), "audio/webm", meta={"dictation": {"version": 1}}
+        )
+        wire = [
+            {"role": "user", "id": "m1", "content": "これを聞いて", "files": [a, d]}
+        ]
+        out = self._run(wire, [a, d], self._model(audio=False))
+        content = out[0]["content"]
+        assert isinstance(content, str) and "input_audio" not in str(out)
+        assert (
+            '<source file_id="f-a" name="a.wav" audio="unsupported" extraction="none">'
+            "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。"
+        ) in content
+        assert (
+            "文字が抜き出されていない" in content
+        )  # 通し録音の <source> は今までどおり
+        assert (
+            'file_id="f-d" name="f-d.bin" dictation="true" extraction="none">'
+            in content
+        )

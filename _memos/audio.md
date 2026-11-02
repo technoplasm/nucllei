@@ -482,7 +482,13 @@ faster-whisper 1.1.1(ctranslate2 4.8.4 — 4.5.0 はこのマシンの kernel �
 
 - **モデルの能力 `info.meta.capabilities.audio`、既定 OFF**(vision と違い、キーが無いときも OFF)。
   音声を受けない上流に音声を送るとリクエストごと落ちる(staging: openrouter/kimi-k2.6 が 404
-  "No endpoints found that support input audio")。OFF のモデルは今までと何も変わらない。
+  "No endpoints found that support input audio")。OFF のモデルには音声を送らない。
+- **聞けないモデルの `<source>`**: 音声の添付(通し録音を除く)は `audio="unsupported"`、文字の本文が無ければ
+  本文は「(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、
+  ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で貼ってもらえれば
+  読める」と伝える)」。文書と同じ「文字が抜き出されていない」だと、音声と分からないモデル(staging の glm)が
+  外部の文字起こしサービスを勧める。このモデルで中身に届く tool は無いので、次の手に tool を挙げず、外部の
+  サービスも挙げない。中身は読まない(長さも測らない)。
 - **上流に出る形**: user メッセージの content に
   `{"type": "input_audio", "input_audio": {"data": "<base64>", "format": "mp3"}}`。staging の gateway で
   openrouter/mimo-v2.6-pro・gemini-3.8-flash に確かめた: mp3 / flac / m4a / wav は通る、**webm は 400**、

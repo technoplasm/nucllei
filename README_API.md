@@ -1174,8 +1174,8 @@ audio goes into the user message as audio (§4.3 "Audio attachments") and the
 builtin `feed_audio` is offered (§5.7). Turn it on only for a model whose API
 accepts `input_audio`: an API that does not rejects the whole request (seen on
 staging: `openrouter/kimi-k2.6` → 404 "No endpoints found that support input
-audio"). With it off nothing changes — audio attachments are announced by their
-`<source>` only.
+audio"). With it off no audio is sent; the `<source>` of an audio attachment says
+the model cannot hear it (`audio="unsupported"`, §4.3 "Audio attachments").
 
 `meta.capabilities.preserve_reasoning` (default on; the model editor's
 Capabilities, "Preserve reasoning") controls whether the tool loop's follow-up
@@ -1265,7 +1265,8 @@ curl -N http://HOST/api/chat/completions \
   "Conversation side" below; without the per-message `files` marker, at the head
   of the last user message. Attributes, in this order:
   `file_id`, `name` (the file name, HTML-escaped as an attribute value; omitted
-  when the file has none), then for a voice-dictation
+  when the file has none), then for an audio attachment `audio=".."` /
+  `duration=".."` (below, "Audio attachments"), then for a voice-dictation
   recording (§4.4) `dictation="true"` — plus `part=".." parts=".."` only when the
   recording was split into two or more files — then `extraction="failed"` /
   `extraction="none"` when the file has no extracted text.
@@ -1278,8 +1279,8 @@ curl -N http://HOST/api/chat/completions \
   `read_attachment` decodes raw — `attachment_text._is_text_ct`) the next
   steps are `中身は read_attachment(file_id="…") で読める。加工・変換は send_to_workspace で取り込む`
   instead (no `feed_image`, no 「読めない」).
-- **Audio attachments** (models with `meta.capabilities.audio` only — §4.2). An
-  attached file whose `meta.content_type` is `audio/*` is also put into the same
+- **Audio attachments** (`meta.content_type` `audio/*`). On a model with
+  `meta.capabilities.audio` (§4.2), an attached audio file is also put into the same
   user message as audio, after its other parts:
   `{"type": "input_audio", "input_audio": {"data": "<base64>", "format": "mp3"}}`
   (mono, 16 kHz, 32 kbps — converted with ffmpeg right before the call; the
@@ -1291,7 +1292,14 @@ curl -N http://HOST/api/chat/completions \
   `duration="H:MM:SS"` (after `name`); with no extracted text its body is
   `(この音声はこの発言にそのまま入っている)` or
   `(この音声は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない — 中身は聞こえていない。次の手: 聞くなら feed_audio(file_id="…", start=…, end=…) で 120 分以内の区間を指定する)`
-  (the next step only when `feed_audio` is on the turn). Like an attached image,
+  (the next step only when `feed_audio` is on the turn). On a model **without** the
+  capability nothing is sent, and an audio attachment (again not a dictation
+  recording) gets `audio="unsupported"` (no `duration` — the file is not read)
+  and, with no extracted text, the body
+  `(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で貼ってもらえれば読める」と伝える)`
+  instead of the document note. No tool on that model reaches the content, so
+  the next step names none and points at no outside service. Extracted text (an Attachment function that
+  transcribed it) is kept as the body. Like an attached image,
   the audio stays in the history and is sent again on every later turn. The
   length is measured when the request is built (ffmpeg reads the file — a
   recording without a duration header is read to the end with stream copy) and

@@ -198,7 +198,10 @@ class TestFileDictation(AbstractPostgresTest):
         from nucllei.main import app
         from nucllei.utils import middleware
 
-        plain = self._upload(name="memo.webm").json()["id"]
+        plain = self._upload(
+            name="scan.bin", content_type="application/octet-stream"
+        ).json()["id"]
+        audio = self._upload(name="memo.webm").json()["id"]
 
         async def feed_image(ref: str = ""):
             return ""
@@ -241,7 +244,7 @@ class TestFileDictation(AbstractPostgresTest):
                 "model": "tp",
                 "stream": True,
                 "messages": [{"role": "user", "content": "読んで"}],
-                "files": [{"type": "file", "id": plain}],
+                "files": [{"type": "file", "id": plain}, {"type": "file", "id": audio}],
             }
             form_data, metadata, _ = asyncio.run(
                 middleware.process_chat_payload(
@@ -259,10 +262,16 @@ class TestFileDictation(AbstractPostgresTest):
         # <source> は system でなく user 発言の先頭 (目印の無い添付は最後の user)
         assert [m["role"] for m in form_data["messages"]] == ["user"]
         first = form_data["messages"][0]
+        # 音声を聞けないモデルの音声の添付は、文書の「文字が抜き出されていない」ではなく
+        # 「音声ファイルで、聞けないので渡していない」(外部の文字起こしを勧めさせない)
         assert first["content"] == (
-            f'<source file_id="{plain}" name="memo.webm" extraction="none">'
+            f'<source file_id="{plain}" name="scan.bin" extraction="none">'
             "(文字が抜き出されていない — 本文はこの会話に入っていない。次の手: 中身が要るなら、"
-            "PDF のページは feed_image で見る)</source>\n\n読んで"
+            "PDF のページは feed_image で見る)</source>\n"
+            f'<source file_id="{audio}" name="memo.webm" audio="unsupported" extraction="none">'
+            "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、"
+            "ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で"
+            "貼ってもらえれば読める」と伝える)</source>\n\n読んで"
         )
 
     def test_source_tag_of_a_split_recording_carries_part(self):
@@ -447,9 +456,9 @@ def test_source_context_for_audio_heard_by_the_model():
         }
     ]
     audio = {
-        "in": AttachedAudio("in", "a.mp3", 754.2, True),
-        "long": AttachedAudio("long", "b.webm", 3 * 3600 + 5, False),
-        "text": AttachedAudio("text", "c.wav", 61, True),
+        "in": AttachedAudio("in", "a.mp3", 754.2, "inline"),
+        "long": AttachedAudio("long", "b.webm", 3 * 3600 + 5, "too_long"),
+        "text": AttachedAudio("text", "c.wav", 61, "inline"),
     }
     with turn_tools(["feed_audio"]):
         lines = build_source_context(sources, audio=audio).split("\n")
@@ -464,6 +473,40 @@ def test_source_context_for_audio_heard_by_the_model():
     ]
     with turn_tools([]):
         assert "feed_audio" not in build_source_context(sources, audio=audio)
+
+
+def test_source_context_for_audio_the_model_cannot_hear():
+    """音声を聞けないモデルに来た添付の音声: audio="unsupported"。文字の本文が無ければ、文書と同じ
+    「文字が抜き出されていない」ではなく「音声ファイルで、聞けないので渡していない」と言い、次の手は
+    利用者に伝えられる事実だけ (このモデルで中身に届く tool は無い — ターンの tool でも変わらない)。
+    文字起こし済み (Attachment が抜き出した) なら本文はそのまま。"""
+    from nucllei.utils.audio_input import AttachedAudio
+    from nucllei.utils.middleware import build_source_context
+    from nucllei.utils.tool_errors import turn_tools
+
+    sources = [
+        {
+            "document": ["", "書き起こし"],
+            "metadata": [
+                {"file_id": "a", "name": "会議.webm", "extraction_status": None},
+                {"file_id": "b", "extraction_status": "success"},
+            ],
+        }
+    ]
+    audio = {
+        "a": AttachedAudio("a", "会議.webm", None, "unsupported"),
+        "b": AttachedAudio("b", "b.mp3", None, "unsupported"),
+    }
+    expected = [
+        '<source file_id="a" name="会議.webm" audio="unsupported" extraction="none">'
+        "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、"
+        "ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で"
+        "貼ってもらえれば読める」と伝える)</source>",
+        '<source file_id="b" audio="unsupported">書き起こし</source>',
+    ]
+    for tools in ([], ["feed_image", "send_to_workspace", "read_attachment"]):
+        with turn_tools(tools):
+            assert build_source_context(sources, audio=audio).split("\n") == expected
 
 
 def test_no_text_note_text_type_points_to_read_attachment():

@@ -343,13 +343,23 @@ async def transcode_to_mp3(
 
 @dataclass(frozen=True)
 class AttachedAudio:
-    """添付の音声 1 本の扱い。`inline` なら発言に入れる(長さが測れなかったものも入れる —
-    送信直前に読めなければ注記になる)。`duration` は秒(測れなければ None)。"""
+    """添付の音声 1 本の扱い(`<source>` の `audio` 属性の値)。
+
+    - `inline` — 発言に音声のまま入れる(長さが測れなかったものも入れる — 送信直前に読めなければ
+      注記になる)
+    - `too_long` — 上限(`AUDIO_INPUT_MAX_MINUTES`)を超えるので入れない
+    - `unsupported` — モデルが音声を聞けない(`capabilities.audio` が無い)ので入れない
+
+    `duration` は秒(測れなければ None。`unsupported` は測らない)。"""
 
     file_id: str
     name: str
     duration: float | None
-    inline: bool
+    state: str
+
+    @property
+    def inline(self) -> bool:
+        return self.state == "inline"
 
 
 def _read_file(file_id: str, user) -> tuple[LoadedRef | None, dict]:
@@ -394,13 +404,13 @@ def _file_entry_id(entry) -> str | None:
 
 
 async def plan_attachment_audio(files, user, model) -> dict[str, AttachedAudio]:
-    """添付(`metadata["files"]` — 読取権限で絞った後)のうち、発言に音声のまま入れるもの。
+    """添付(`metadata["files"]` — 読取権限で絞った後)の音声の扱い(file id → AttachedAudio)。
 
-    モデルが音声を聞けなければ空。対象は Files.meta の content_type が `audio/*` のもの
-    だけで、音声入力の通し録音(`meta.dictation` — 本文に文字起こし済み)は除く。長さが
-    上限(`AUDIO_INPUT_MAX_MINUTES`)を超えるものは `inline=False`(入れない)。"""
-    if not is_audio_model(model):
-        return {}
+    対象は Files.meta の content_type が `audio/*` のものだけで、音声入力の通し録音
+    (`meta.dictation` — 本文に文字起こし済み)は除く。モデルが音声を聞けなければ全部
+    `unsupported`(中身は読まない — `<source>` が音声で、渡していないと言うため)。聞けるモデルでは
+    長さを測り、上限(`AUDIO_INPUT_MAX_MINUTES`)以下は `inline`、超えるものは `too_long`。"""
+    audio_capable = is_audio_model(model)
     plans: dict[str, AttachedAudio] = {}
     for entry in files or []:
         file_id = _file_entry_id(entry)
@@ -415,6 +425,9 @@ async def plan_attachment_audio(files, user, model) -> dict[str, AttachedAudio]:
         if meta.get("dictation"):
             continue
         name = record.filename or meta.get("name") or file_id
+        if not audio_capable:
+            plans[file_id] = AttachedAudio(file_id, name, None, "unsupported")
+            continue
         duration = _FILE_DURATIONS.get(file_id)
         if duration is None:
             loaded, _meta = await asyncio.to_thread(_read_file, file_id, user)
@@ -429,7 +442,11 @@ async def plan_attachment_audio(files, user, model) -> dict[str, AttachedAudio]:
             file_id=file_id,
             name=name,
             duration=duration,
-            inline=duration is None or duration <= max_seconds(),
+            state=(
+                "inline"
+                if duration is None or duration <= max_seconds()
+                else "too_long"
+            ),
         )
     return plans
 

@@ -328,9 +328,17 @@ def _no_text_note(file_id=None, text_readable: bool = False) -> str:
 
 
 def _audio_source_note(file_id, plan) -> str:
-    """音声を聞けるモデルに来た添付の音声 (`utils/audio_input.plan_attachment_audio`) の
-    `<source>` の本文 (文字の本文が無いとき)。入れた音声は「この発言に入っている」、上限を超えて
-    入れなかったものはそう言い、次の手 (feed_audio で区間を指定する) はこのターンに出ているときだけ。"""
+    """添付の音声 (`utils/audio_input.plan_attachment_audio`) の `<source>` の本文 (文字の本文が
+    無いとき)。入れた音声は「この発言に入っている」、上限を超えて入れなかったものはそう言い、次の手
+    (feed_audio で区間を指定する) はこのターンに出ているときだけ。モデルが音声を聞けない
+    (`unsupported`) ものは、音声ファイルで中身を渡していないことと、利用者に伝えられる手 (音声を
+    聞けるモデルに切り替える・文字にした内容を貼る) だけを言う — このモデルで中身に届く tool は無い。"""
+    if plan.state == "unsupported":
+        return (
+            "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る"
+            "話なら、ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、"
+            "話の内容を文字で貼ってもらえれば読める」と伝える)"
+        )
     if plan.inline:
         return "(この音声はこの発言にそのまま入っている)"
     note = (
@@ -355,10 +363,11 @@ def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> s
     長い録音が複数のファイルに分かれたときだけ、どれを読み直すか決められるように
     `part="2" parts="3"`(何本中の何本目か)も全ファイルに付ける。
 
-    audio(file id → `audio_input.AttachedAudio`)は、音声を聞けるモデルに来た添付の音声の扱い。
-    該当する `<source>` に `audio="inline"`(この発言に音声のまま入れた)か `audio="too_long"`
-    (上限を超えるので入れていない)と `duration="H:MM:SS"` を付け、文字の本文が無ければ本文を
-    その旨の注記にする(`_audio_source_note`)。
+    audio(file id → `audio_input.AttachedAudio`)は添付の音声(通し録音を除く)の扱い。
+    該当する `<source>` に `audio="inline"`(この発言に音声のまま入れた)/ `audio="too_long"`
+    (上限を超えるので入れていない)/ `audio="unsupported"`(モデルが音声を聞けないので入れていない)
+    と、測った長さ `duration="H:MM:SS"` を付け、文字の本文が無ければ本文をその旨の注記にする
+    (`_audio_source_note`)。
 
     2026-10-19(llens 監査 (3)): 連番の `id="N"`(引用チップの名残 — 読む箇所は無い)を
     やめて `name="ファイル名"`(属性値としてエスケープ)を載せる。本文の無いファイル
@@ -382,7 +391,7 @@ def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> s
                 attrs = " ".join(attrs)
                 heard = (audio or {}).get(file_id) if file_id else None
                 if heard is not None:
-                    attrs += f' audio="{"inline" if heard.inline else "too_long"}"'
+                    attrs += f' audio="{heard.state}"'
                     if heard.duration is not None:
                         attrs += f' duration="{format_time(heard.duration)}"'
                 if doc_meta.get("dictation"):
@@ -1025,7 +1034,8 @@ async def process_chat_payload(
     # (本文の無い添付の次の手は、このターンに出している tool だけを名指しする)
     # 音声を聞けるモデル (capabilities.audio) には、添付の音声を音声のまま同じ発言に入れる
     # (utils/audio_input — 音声入力の通し録音と、上限 AUDIO_INPUT_MAX_MINUTES を超える長さは
-    # 入れない)。入れたか・入れなかったかは <source> の audio 属性が言う
+    # 入れない)。入れたか・入れなかったか (聞けないモデルでは「聞けないので渡していない」) は
+    # <source> の audio 属性と本文が言う
     audio_plan = await plan_attachment_audio(metadata.get("files"), user, model)
     source_tags = []
     with turn_tools(tools_dict.keys()):
