@@ -379,7 +379,7 @@ def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> s
     通し録音は入らない — 発言の文がその文字起こし)。
     該当する `<source>` に `audio="inline"`(この発言に音声のまま入れた)/ `audio="too_long"`
     (上限を超えるので入れていない)/ `audio="unsupported"`(モデルが音声を聞けないので入れていない)
-    と、測った長さ `duration="H:MM:SS"` を付け、文字の本文が無ければ本文をその旨の注記にする
+    と、測った長さ `duration`(`M:SS`、1 時間以上は `H:MM:SS`) を付け、文字の本文が無ければ本文をその旨の注記にする
     (`_audio_source_note`)。
 
     2026-10-19(llens 監査 (3)): 連番の `id="N"`(引用チップの名残 — 読む箇所は無い)を

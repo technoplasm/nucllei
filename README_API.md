@@ -1290,7 +1290,7 @@ curl -N http://HOST/api/chat/completions \
   transcript, which is the message text. Not put in: audio longer than
   `AUDIO_INPUT_MAX_MINUTES` (§3.9). The `<source>` of an audio attachment the
   model gets this way carries `audio="inline"` or `audio="too_long"` and
-  `duration="H:MM:SS"` (after `name`); with no extracted text its body is
+  `duration` (after `name`; `M:SS`, or `H:MM:SS` from an hour up); with no extracted text its body is
   `(この音声はこの発言にそのまま入っている)` or
   `(この音声は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない — 中身は聞こえていない。次の手: 聞くなら feed_audio(file_id="…", start=…, end=…) で 120 分以内の区間を指定する)`
   (the next step only when `feed_audio` is on the turn). For a dictation recording
