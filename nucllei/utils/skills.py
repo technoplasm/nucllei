@@ -22,6 +22,7 @@ from nucllei.utils.task import (
     user_prompt_params,
 )
 from nucllei.utils.tool_errors import ToolCallError, ToolFailure
+from nucllei.utils.tool_render import resolve_result_render
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -724,6 +725,12 @@ def skills_block(model, user) -> str:
     return f"{SKILLS_HEADING}\n{skills_listing(manifest)}" if manifest else ""
 
 
+# load_skill の結果の表示 (#20 / #35): フロントは {result, tools} をパースし、result を markdown・
+# tools を一覧で描画する。モデルの呼び出し (tool エントリの宣言 → execute_tool_calls) と
+# `/command`・自動ロードの発火 (skill_activation_seed_block) の両方がこれを使う
+LOAD_SKILL_RESULT_RENDER = {"kind": "skill"}
+
+
 def build_load_skill_tool(
     model,
     user,
@@ -829,12 +836,10 @@ def build_load_skill_tool(
             ensure_ascii=False,
         )
 
-    # render.result = skill(#20 のディスクリプタ駆動): フロントは {result, tools} を
-    # パースし、result を markdown ハイライト + tools を一覧で描画する。
     entry = {
         "spec": spec,
         "callable": load_skill,
-        "render": {"result": {"kind": "skill"}},
+        "render": {"result": LOAD_SKILL_RESULT_RENDER},
     }
     if not listing_in_prompt:
         # 利用者ごとに変わる部分 (説明の一覧と skill_id の enum) — system prompt のプレビューが印を付ける
@@ -865,8 +870,6 @@ def skill_activation_seed_block(skill_activations) -> dict:
                         ensure_ascii=False,
                     ),
                 },
-                # {result, tools} を skill 表示で描画(#20/#35)
-                "render": {"result": {"kind": "skill"}},
             }
             for a in skill_activations
         ],
@@ -874,6 +877,8 @@ def skill_activation_seed_block(skill_activations) -> dict:
             {
                 "tool_call_id": a["call_id"],
                 "content": a["result"],
+                # 表示はモデルの load_skill と同じ所で確定する (FE は results[].render だけを見る)
+                "render": resolve_result_render(a["result"], LOAD_SKILL_RESULT_RENDER),
                 # before / after の木(カードの表示 — モデルには渡らない)
                 **(
                     {"chain": skill_chain(a.get("content") or "", a["hooks"])}

@@ -1207,3 +1207,86 @@ class TestSkills(AbstractPostgresTest):
             "audio-tools",
             "doc-tools",
         ]
+
+    def test_fired_load_skill_result_renders_like_model_call(self):
+        """`/command`・自動ロードの発火の結果は、モデルの load_skill と同じ表示 (results[].render) で残る。
+
+        FE は結果の表示を results[].render だけで決める (無ければ text)。発火の結果に render が
+        無いと、カードの Result に {"result": "…\\n…", "tools": []} の JSON がそのまま出る。
+        """
+        import asyncio
+        import json
+
+        from nucllei.models.files import FileForm, Files
+        from nucllei.models.skills import SkillForm, Skills
+        from nucllei.utils.content_blocks import snapshot_content_blocks
+        from nucllei.utils.middleware import activation_seed_blocks, execute_tool_calls
+        from nucllei.utils.skills import (
+            apply_skill_auto_load,
+            apply_skill_command,
+            build_load_skill_tool,
+            current_skill_activation_seeds,
+        )
+
+        skill = Skills.insert_new_skill(
+            "1",
+            SkillForm(
+                id="audio",
+                name="音声",
+                description="音声の扱い",
+                content="# 音声\n\n- 読み上げは synthesize_speech",
+                auto_load_content_types=["audio/"],
+                access_control=None,
+            ),
+        )
+        Files.insert_new_file(
+            "1",
+            FileForm(
+                id="voice",
+                filename="voice.webm",
+                path="/nonexistent/voice.webm",
+                meta={"name": "voice.webm", "content_type": "audio/webm"},
+                data={},
+            ),
+        )
+        user = types.SimpleNamespace(id="1", name="Taro", role="user")
+        model = _model_with_skills(skill.id)
+
+        # モデルが呼んだ load_skill (tool の宣言 → execute_tool_calls)
+        tools = {"load_skill": build_load_skill_tool(model, user)}
+        call = {
+            "id": "functions.load_skill:0",
+            "type": "function",
+            "function": {
+                "name": "load_skill",
+                "arguments": json.dumps({"skill_id": "audio"}),
+            },
+        }
+        (model_result,) = asyncio.run(execute_tool_calls([call], tools))
+        assert model_result["render"] == {"kind": "skill"}
+
+        def saved_seed(activations):
+            metadata = {
+                "skill_activations": current_skill_activation_seeds(activations)
+            }
+            (block,) = snapshot_content_blocks(activation_seed_blocks(metadata))
+            return block
+
+        _, command = apply_skill_command(
+            {"messages": [{"role": "user", "content": "/audio 読んで"}]}, user, model
+        )
+        _, auto = apply_skill_auto_load(
+            {
+                "messages": [{"role": "user", "content": "これ"}],
+                "files": [{"type": "file", "id": "voice"}],
+            },
+            user,
+            model,
+        )
+        for activations in (command, auto):
+            block = saved_seed(activations)
+            (result,) = block["results"]
+            assert result["render"] == model_result["render"]
+            assert json.loads(result["content"]) == json.loads(model_result["content"])
+            # 呼び出しの render は引数の宣言だけ (結果の表示は results[].render)
+            assert all("render" not in c for c in block["calls"])
