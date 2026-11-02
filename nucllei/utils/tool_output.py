@@ -4,6 +4,8 @@ tool は戻り値(モデル向け作業データ)とは別に、実行中に「�
 push できる。誰の目に届くかでチャネルを分ける:
 
 - `__feed_image__(file_id)` → results[i].context_images(モデル/VLM の目。画素を再注入)
+- `__feed_audio__(ref)` → results[i].context_audio(モデルの耳。音声を再注入 — 音声を聞ける
+  モデルだけ。`utils/audio_input`)
 - `__display__(content, kind)` → results[i].display(人間の目。collapse 外。モデル非注入。#88)
 - `__progress__(description, ...)` → `tool:progress` イベント(人間の目。**揮発**。#100)
 
@@ -91,6 +93,7 @@ class ToolOutputSink:
     ) -> None:
         self._lock = threading.Lock()
         self._context_images: list[str] = []
+        self._context_audio: list[str] = []
         self._displays: list[dict] = []
         self._result_render: Optional[dict] = None
         # 中で順に読み込んだ・実行したものの木(load_recipe の requires・skill の before / after —
@@ -120,6 +123,16 @@ class ToolOutputSink:
     def context_images(self) -> list[str]:
         with self._lock:
             return list(self._context_images)
+
+    def add_context_audio(self, ref: str) -> None:
+        if not ref or not isinstance(ref, str):
+            return
+        with self._lock:
+            self._context_audio.append(ref)
+
+    def context_audio(self) -> list[str]:
+        with self._lock:
+            return list(self._context_audio)
 
     def add_display(self, content: str, kind: str = "markdown") -> None:
         # 空/非文字列の content は捨てる(見せる中身が無い push は no-op)。
@@ -361,6 +374,23 @@ def feed_image(file_id: str) -> None:
     sink.add_context_image(file_id)
 
 
+def feed_audio(ref: str) -> None:
+    """`__feed_audio__` 実体。実行中 tool-call の sink に音声の参照を積む(`feed_image` の音声版)。
+
+    積めるのは保存済みの参照文字列(file id・`/api/v1/files/{id}/content`・URL・sandbox の
+    パス。`utils/image_refs.stored_ref_kind` の表)に、任意で区間 `#t=<開始秒>,<終了秒>` を
+    付けたもの。middleware が results[i].context_audio に載せ、送信直前の
+    `utils/audio_input.inline_audio_refs` が mp3 の base64 にする(読めない参照は注記に落ちる)。
+    検証(音声か・長さ・区間)は呼び出し側 tool の責務。background 実行(exec 行)では
+    harvest しない — 積む tool は feed_audio だけで、background にしない。
+    tool 実行文脈外(sink 未設定)では no-op。
+    """
+    sink = current_sink.get()
+    if sink is None:
+        return
+    sink.add_context_audio(ref)
+
+
 def display(content: str, kind: str = "markdown") -> None:
     """`__display__` 実体。実行中 tool-call の sink に人間向け表示を積む。
 
@@ -473,6 +503,7 @@ __all__ = [
     "ToolOutputSink",
     "current_sink",
     "display",
+    "feed_audio",
     "feed_image",
     "mark_error_kind",
     "progress",

@@ -1,5 +1,5 @@
 {
-	"_comment": "tool 結果の画像(results[].context_images)を次ターンの履歴へ再送する wire 形(#142)。BE convert_content_blocks_to_messages(test_tool_output.py)と FE expandAssistantToolHistory(chat-messages.test.ts)が同じ blocks → 同じ expected になることを両側のテストで固定する。blocks は永続化形(snapshot_content_blocks — calls / results)。",
+	"_comment": "tool 結果の画像(results[].context_images)と音声(results[].context_audio)を次ターンの履歴へ再送する wire 形(#142)。BE convert_content_blocks_to_messages(test_tool_output.py)と FE expandAssistantToolHistory(chat-messages.test.ts)が同じ blocks → 同じ expected になることを両側のテストで固定する。blocks は永続化形(snapshot_content_blocks — calls / results)。",
 	"cases": [
 		{
 			"name": "file_id / 絶対 URL / 同一サーバの相対 URL (/ext/) / fs 参照の混在 + 並列 call + 結果未着 call",
@@ -108,6 +108,25 @@
 				},
 				{ "role": "tool", "tool_call_id": "c4", "content": "ok" },
 				{ "role": "assistant", "content": "以上です。" }
+			]
+		},
+		{
+			"name": "音声 (context_audio): 画像と同じ user メッセージで画像の後ろ / 音声だけ / file id・区間・URL・fs 参照",
+			"blocks": [
+				{"type": "text", "content": "聞きます。"},
+				{"type": "tool_calls", "calls": [{"id": "a1", "type": "function", "function": {"name": "feed_image", "arguments": "{}"}}, {"id": "a2", "type": "function", "function": {"name": "feed_audio", "arguments": "{}"}}], "results": [{"tool_call_id": "a1", "content": "見た。", "context_images": ["img1"]}, {"tool_call_id": "a2", "content": "聞いた。", "context_audio": ["/api/v1/files/aud1/content#t=600,1200", "aud2", "aud3#t=,90"]}]},
+				{"type": "tool_calls", "calls": [{"id": "a3", "type": "function", "function": {"name": "feed_audio", "arguments": "{\"path\": \"/workspace/rec.mp3\"}"}}], "results": [{"tool_call_id": "a3", "content": "聞いた。", "context_audio": ["/workspace/rec.mp3", "https://h.test/a.m4a#t=5"]}]},
+				{"type": "text", "content": "以上です。"}
+			],
+			"expected": [
+				{"role": "assistant", "content": "聞きます。", "tool_calls": [{"id": "a1", "type": "function", "function": {"name": "feed_image", "arguments": "{}"}}, {"id": "a2", "type": "function", "function": {"name": "feed_audio", "arguments": "{}"}}]},
+				{"role": "tool", "tool_call_id": "a1", "content": "見た。"},
+				{"role": "tool", "tool_call_id": "a2", "content": "聞いた。"},
+				{"role": "user", "content": [{"type": "text", "text": "(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)"}, {"type": "image_url", "image_url": {"url": "/api/v1/files/img1/content"}}, {"type": "text", "text": "(以下の音声はユーザーの添付ではない — 直前の tool の結果として読み込んだ音声)"}, {"type": "input_audio", "input_audio": {"url": "/api/v1/files/aud1/content#t=600,1200"}}, {"type": "input_audio", "input_audio": {"url": "/api/v1/files/aud2/content"}}, {"type": "input_audio", "input_audio": {"url": "/api/v1/files/aud3/content#t=,90"}}]},
+				{"role": "assistant", "content": "", "tool_calls": [{"id": "a3", "type": "function", "function": {"name": "feed_audio", "arguments": "{\"path\": \"/workspace/rec.mp3\"}"}}]},
+				{"role": "tool", "tool_call_id": "a3", "content": "聞いた。"},
+				{"role": "user", "content": [{"type": "text", "text": "(以下の音声はユーザーの添付ではない — 直前の tool の結果として読み込んだ音声)"}, {"type": "input_audio", "input_audio": {"url": "/workspace/rec.mp3"}}, {"type": "input_audio", "input_audio": {"url": "https://h.test/a.m4a#t=5"}}]},
+				{"role": "assistant", "content": "以上です。"}
 			]
 		}
 	]

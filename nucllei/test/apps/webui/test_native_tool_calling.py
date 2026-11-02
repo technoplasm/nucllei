@@ -1777,6 +1777,82 @@ def test_followup_reinjects_pushed_images_as_user_message(monkeypatch):
     assert injected == ["INLINED:/api/v1/files/img-file-1/content"]
 
 
+def test_followup_reinjects_pushed_audio_for_audio_models(monkeypatch):
+    """tool が __feed_audio__ で push した音声の参照は results[].context_audio に載り、追撃では
+    tool メッセージの直後の user メッセージに input_audio の参照として入る。送信直前の
+    inline_audio_refs には preset の capabilities.audio が渡る(ここでは fake で印を付ける)。"""
+    from nucllei.utils import middleware
+    from nucllei.utils.tool_output import feed_audio
+
+    seen_capable = []
+
+    async def fake_inline(messages, user, *, audio_capable, cache=None):
+        seen_capable.append(audio_capable)
+        for m in messages:
+            if isinstance(m.get("content"), list):
+                for p in m["content"]:
+                    if p.get("type") == "input_audio" and "url" in p["input_audio"]:
+                        p["input_audio"] = {
+                            "data": "B64:" + p["input_audio"]["url"],
+                            "format": "mp3",
+                        }
+        return messages
+
+    monkeypatch.setattr(middleware, "inline_audio_refs", fake_inline)
+
+    async def get_weather(**kwargs):
+        feed_audio("/api/v1/files/aud-1/content#t=0,60")
+        return "聞いた。"
+
+    spec = {
+        "name": "get_weather",
+        "description": "天気を返す",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    }
+    events, completion_calls, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=["text_basic"],
+            extra_tools={"get_weather": {"spec": spec, "callable": get_weather}},
+            model_meta={"capabilities": {"audio": True}},
+        )
+    )
+    assert len(completion_calls) == 1
+    msgs = completion_calls[0]["messages"]
+    tool_msgs = _tool_messages(completion_calls[0])
+    user_msg = msgs[msgs.index(tool_msgs[0]) + 1]
+    assert user_msg["content"] == [
+        {
+            "type": "text",
+            "text": "(以下の音声はユーザーの添付ではない — 直前の tool の結果として読み込んだ音声)",
+        },
+        {
+            "type": "input_audio",
+            "input_audio": {
+                "data": "B64:/api/v1/files/aud-1/content#t=0,60",
+                "format": "mp3",
+            },
+        },
+    ]
+    assert seen_capable and all(seen_capable)
+    results = [
+        r
+        for d in _snapshot_datas(events)
+        for b in d["content_blocks"]
+        if b.get("type") == "tool_calls"
+        for r in b.get("results") or []
+    ]
+    assert any(
+        r.get("context_audio") == ["/api/v1/files/aud-1/content#t=0,60"]
+        for r in results
+    )
+
+
 def _reasoning_text(data):
     """final data の content_blocks で、最初の tool_calls より前の reasoning 本文
     (複数なら空行区切り)— 追撃の assistant(tool_calls)に載るべき区間。"""

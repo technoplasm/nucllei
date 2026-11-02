@@ -650,6 +650,15 @@ llens の依頼(ken 経由): モデルが sandbox のパス `[/workspace/…]` �
   理由は title と sr-only の文。チップの hover で一覧の行を強調するのは開ける出典と同じ
 - `CitationScope.set` の同一判定は key・href・節・openable で比べる(開けない出典は href が空なので)
 
+## 改訂(2026-11-02)— 音声を聞けるモデルに添付の音声を音声のまま渡す
+
+モデルの能力 `capabilities.audio`(既定 OFF)が ON のとき、`audio/*` の添付を `<source>` と同じ発言に
+`input_audio` で入れる(画像の添付と同じく、発言には参照を置き、送信直前に `utils/audio_input.inline_audio_refs` が
+mp3 の base64 にする。DB・戻り境界に base64 は載らない)。音声入力の通し録音と上限
+(`AUDIO_INPUT_MAX_MINUTES`、既定 120 分)を超える長さは入れず、`<source>` の `audio="too_long"` が言う。
+tool から聞かせる口は builtin `feed_audio`(`results[].context_audio`)。詳細は `audio.md`「音声のまま聞かせる」、
+契約は README_API §4.3「Audio attachments」。File は作らない。
+
 ## 参照
 - prism 実装: `_links/llens` の `owui/filters/large_file_gate.py`・`pdf_vision_router.py`。
   ※ **sandbox は prism 側に無い**(#114 で移設): tool = `nucllei/builtin_tools/sandbox.py`、

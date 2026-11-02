@@ -420,6 +420,50 @@ def test_no_text_note_names_only_tools_in_turn():
             f'<source file_id="n" extraction="none">({fact}。次の手: '
             "read_attachment では読めない)</source>"
         )
+    # feed_audio は音声を聞けるモデルにだけ出る。出ているターンは音声の聞き方も言う
+    with turn_tools(["feed_image", "feed_audio", "send_to_workspace"]):
+        assert build_source_context(only_none) == (
+            f'<source file_id="n" extraction="none">({fact}。次の手: 中身が要るなら、'
+            "PDF のページは feed_image で見て、音声は feed_audio で聞いて、"
+            "加工・変換は send_to_workspace で取り込む)</source>"
+        )
+
+
+def test_source_context_for_audio_heard_by_the_model():
+    """音声を聞けるモデルに来た添付の音声: 入れたものは audio="inline"、上限を超えて入れなかったものは
+    audio="too_long" と長さ。文字の本文が無ければ本文はその旨 (次の手の feed_audio は出ているときだけ)。"""
+    from nucllei.utils.audio_input import AttachedAudio
+    from nucllei.utils.middleware import build_source_context
+    from nucllei.utils.tool_errors import turn_tools
+
+    sources = [
+        {
+            "document": ["", "", "書き起こし"],
+            "metadata": [
+                {"file_id": "in", "extraction_status": None},
+                {"file_id": "long", "extraction_status": None},
+                {"file_id": "text", "extraction_status": "success"},
+            ],
+        }
+    ]
+    audio = {
+        "in": AttachedAudio("in", "a.mp3", 754.2, True),
+        "long": AttachedAudio("long", "b.webm", 3 * 3600 + 5, False),
+        "text": AttachedAudio("text", "c.wav", 61, True),
+    }
+    with turn_tools(["feed_audio"]):
+        lines = build_source_context(sources, audio=audio).split("\n")
+    assert lines == [
+        '<source file_id="in" audio="inline" duration="12:34" extraction="none">'
+        "(この音声はこの発言にそのまま入っている)</source>",
+        '<source file_id="long" audio="too_long" duration="3:00:05" extraction="none">'
+        "(この音声は 3:00:05 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない"
+        ' — 中身は聞こえていない。次の手: 聞くなら feed_audio(file_id="long", start=…, end=…) で'
+        " 120 分以内の区間を指定する)</source>",
+        '<source file_id="text" audio="inline" duration="1:01">書き起こし</source>',
+    ]
+    with turn_tools([]):
+        assert "feed_audio" not in build_source_context(sources, audio=audio)
 
 
 def test_no_text_note_text_type_points_to_read_attachment():

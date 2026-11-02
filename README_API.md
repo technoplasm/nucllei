@@ -1029,6 +1029,14 @@ Measurements are in `_memos/audio.md` ("幻聴対策").
 | `AUDIO_STT_REPEAT_MIN_COUNT`              | env  | `5`     | 0 – 100     | the same unit repeated this many times in a row is collapsed to one. Units of digits only (`1000000`) are never collapsed. `0` = off                                                              |
 | `AUDIO_STT_REPEAT_MAX_UNIT_CHARS`         | env  | `50`    | 1 – 200     | longest unit (in characters) the repeat collapse looks for                                                                                                                                        |
 
+Audio input to the model — env only. Applies to models with
+`meta.capabilities.audio` (§4.2), which hear attached audio and `feed_audio`
+(§4.3 "Audio attachments", §5.7):
+
+| Var                       | Kind | Default | Range      | Effect                                                                                                                                                                                                                                                |
+| ------------------------- | ---- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUDIO_INPUT_MAX_MINUTES` | env  | `120`   | > 0 – 1440 | longest audio sent to the model as audio: an attachment longer than this is not put into the message (its `<source>` says so), and one `feed_audio` call may not cover a longer section. Audio is re-sent on every turn (MiMo: 60 min ≈ 22.6k tokens) |
+
 TTS: `AUDIO_TTS_ENGINE` (RC, `""` = browser speech API; or `openai`, `azure`,
 `elevenlabs`). `AUDIO_TTS_OPENAI_API_BASE_URL` accepts any
 OpenAI-compatible `/v1` speech endpoint (the reference deployment points it at a
@@ -1160,6 +1168,15 @@ a sync that writes `params.context` overwrites edits made in the editor. Where i
 goes and how it is frozen: §4.3 "Conversation side". A subagent's child turn
 ignores the child preset's preamble.
 
+`meta.capabilities.audio` (**default off**; the model editor's Capabilities,
+"Audio" — 「音声の聞き取り」) says the model hears audio. When it is `true`, attached
+audio goes into the user message as audio (§4.3 "Audio attachments") and the
+builtin `feed_audio` is offered (§5.7). Turn it on only for a model whose API
+accepts `input_audio`: an API that does not rejects the whole request (seen on
+staging: `openrouter/kimi-k2.6` → 404 "No endpoints found that support input
+audio"). With it off nothing changes — audio attachments are announced by their
+`<source>` only.
+
 `meta.capabilities.preserve_reasoning` (default on; the model editor's
 Capabilities, "Preserve reasoning") controls whether the tool loop's follow-up
 calls carry the turn's reasoning back to the model — see "Reasoning in the
@@ -1261,6 +1278,40 @@ curl -N http://HOST/api/chat/completions \
   `read_attachment` decodes raw — `attachment_text._is_text_ct`) the next
   steps are `中身は read_attachment(file_id="…") で読める。加工・変換は send_to_workspace で取り込む`
   instead (no `feed_image`, no 「読めない」).
+- **Audio attachments** (models with `meta.capabilities.audio` only — §4.2). An
+  attached file whose `meta.content_type` is `audio/*` is also put into the same
+  user message as audio, after its other parts:
+  `{"type": "input_audio", "input_audio": {"data": "<base64>", "format": "mp3"}}`
+  (mono, 16 kHz, 32 kbps — converted with ffmpeg right before the call; the
+  engines accept mp3 / wav / flac / m4a and reject WebM, the browsers' recording
+  format, with a 400). Not put in: voice-dictation recordings (`meta.dictation`,
+  §4.4 — their text is already in the message) and audio longer than
+  `AUDIO_INPUT_MAX_MINUTES` (§3.9). The `<source>` of an audio attachment the
+  model gets this way carries `audio="inline"` or `audio="too_long"` and
+  `duration="H:MM:SS"` (after `name`); with no extracted text its body is
+  `(この音声はこの発言にそのまま入っている)` or
+  `(この音声は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない — 中身は聞こえていない。次の手: 聞くなら feed_audio(file_id="…", start=…, end=…) で 120 分以内の区間を指定する)`
+  (the next step only when `feed_audio` is on the turn). Like an attached image,
+  the audio stays in the history and is sent again on every later turn. The
+  length is measured when the request is built (ffmpeg reads the file — a
+  recording without a duration header is read to the end with stream copy) and
+  remembered per process; the converted mp3 is cached under
+  `CACHE_DIR/audio/input/` (keyed by content and section, oldest dropped past
+  1 GB). Nothing is written to the stored messages.
+  Before conversion, the parts are nucllei-internal references
+  `{"type": "input_audio", "input_audio": {"url": "<ref>"}}` — `<ref>` is a
+  stored reference (§3.8: `/api/v1/files/{id}/content`, a URL, a sandbox path)
+  with an optional section `#t=<start s>,<end s>`. An API client may send that
+  form too (a file is read only with the caller's read access). A reference that
+  cannot be read or converted becomes a text part
+  (`(ここにあった音声は読み込めなかった — 中身は聞こえていない)`, or a named note
+  for a known file that is not audio / cannot be converted / is longer than the
+  limit) so the request never fails for it; on a model without the capability
+  every reference becomes
+  `(ここにあった音声は、このモデルが音声を聞けないので渡していない — 中身は聞こえていない)`
+  (a chat that switched models). `input_audio` parts that already carry `data`
+  are left alone, except that on an audio model a `format` other than
+  mp3 / wav / flac / m4a is converted to mp3.
 
 **Chat-wire mode** (`chat_id` + the **assistant** message `id` present) — the UI's
 own wire, usable by API clients that want the conversation to exist in the UI.
@@ -1343,6 +1394,7 @@ prefix cache covers the whole conversation:
   stored — the extracted text does not change, so the bytes are the same each turn.
 - **Parts** — when a user message's `content` is a parts array (images), the block
   goes before the first text part; with no text part, a text part is inserted first.
+  Attached audio for an audio model (above) is appended after the other parts.
 - **Frame tags cannot be forged**: in the values of the preamble variables (the
   memory index, the recipe list), in `<source>` bodies and in the user's own text,
   the `<` that starts something looking like one of the tags
@@ -1497,7 +1549,9 @@ Firefox, `audio/mp4` from a browser whose MediaRecorder cannot produce WebM (Saf
 `;codecs=` suffix) and passes the optional multipart field `dictation` (a JSON
 string). It is the only client-writable `meta` key: the shape below is validated
 (unknown keys rejected, ≤ 512 KB, audio files only) and stored as `meta.dictation`.
-The model only sees the `<source … dictation="true">` mark (§4.3); a deployment
+The model only sees the `<source … dictation="true">` mark (§4.3) — a model that
+hears audio does not get the recording as audio either (its text is already in the
+message; `feed_audio` can still play it to the model); a deployment
 tool reads the segment list from `GET /api/v1/files/{id}` to re-transcribe a span
 from the original.
 
@@ -1966,6 +2020,7 @@ from the model-facing spec, and the model cannot spoof them.
 | `__event_call__`                | `async fn(event)` — round-trip to the user (`confirmation` / `input`), awaits their reply; `None` headless                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `__progress__`                  | `fn(description="", *, current=None, total=None, done=False)` — report progress while the tool runs; shown in this tool's own block (§5.5). Volatile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `__feed_image__`                | `fn(ref)` — feed an image into the model's context (the "model's eyes") — injected after the tool results as a user-role `image_url` message (its text part, `(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)` — `content_blocks.TOOL_RESULT_IMAGES_TEXT`, same in the frontend; 「(直前の tool 結果の画像)」 until 2026-10-19 — says it is not a user attachment) for the follow-up call, kept as a reference in `results[].context_images`, and re-sent in the same position on every later turn (re-resolved each time; a reference that no longer resolves becomes the note `(ここにあった画像は読み込めなかった — 中身は見えていない)`); `ref` is a file_id, a URL (same-server `/ext/{rest}`, absolute `https://…/ext/{rest}`, or any http(s) URL — the same-server `/ext/{rest}` is also the sandbox's path), or a sandbox path (`/workspace/…`); optional `#page=N` for PDFs — resolved by `utils/image_refs.py`, §3.8; chat path only. The model-facing entry point built on it is the builtin `feed_image` tool (§5.7), which validates the reference (kind / size / page count) before pushing it; a tool of your own calls the emitter directly |
+| `__feed_audio__`                | `fn(ref)` — the audio counterpart of `__feed_image__` (the "model's ears"): kept in `results[].context_audio` and re-sent in the same user message as the tool's images, after them, as `input_audio` parts preceded by the text part `(以下の音声はユーザーの添付ではない — 直前の tool の結果として読み込んだ音声)` (`content_blocks.TOOL_RESULT_AUDIO_TEXT`, same in the frontend); `ref` is a stored reference with an optional section `#t=<start s>,<end s>` (§4.3 "Audio attachments"). Converted at send time; on a model without `capabilities.audio` it becomes a note. Not harvested from background runs. The model-facing entry point is the builtin `feed_audio` (§5.7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `__display__`                   | `fn(content, kind="markdown")` — render content to the user outside the collapsed tool block (not fed to the model); chat path only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `__chat_id__`, `__message_id__` | current chat / message ids                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `__id__`                        | this tool's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -2228,6 +2283,23 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     なら sandbox を使わずに進め、ユーザーには sandbox が使えないと伝える。」 (no
     「時間を置いて」).
     Always registered. Usage guidance beyond the docstring: §5.7.1.
+  - `builtin_feed_audio` — `feed_audio(url?, path?, file_id?, start?, end?)`:
+    lets the model hear audio (a recording, an audio file, the sound of a video)
+    in the same turn, through `__feed_audio__` (§5.3). **Offered only on turns
+    whose model has `meta.capabilities.audio`** (the toolkit's `available` hook,
+    §5.1) — the row is always registered and goes into a model's tools like any
+    builtin, but a model without the capability never sees it. Exactly one
+    reference argument, interpreted by name like `feed_image` (owner check for
+    `file_id` and `/api/v1/files/{id}/content`; `path` up to the sandbox limit).
+    `start` / `end` are `"23:10"` (m:ss), `"1:02:03"` (h:mm:ss) or seconds; the
+    section (or the whole file) may not be longer than `AUDIO_INPUT_MAX_MINUTES`
+    — the ERROR says so and gives a first section to ask for. The tool checks
+    that the target is audio (magic bytes / content type) and measures it, then
+    pushes the reference (with `#t=<start>,<end>` for a section); **no File is
+    created**, and the conversion to mp3 happens at send time. The result line
+    is `- <name> の 1:30〜10:00 (全 10:00) を自分の耳に入れた (ユーザーには再生されない)。`.
+    The audio stays in the context on later turns. Voice-dictation recordings
+    can be fed (they are only kept out of the automatic attachment audio).
   - `builtin_fetch_url` — `fetch_url(url, query?, offset?, limit?, max_mb?)`:
     fetches one page / document by URL and returns it as plain text plus a link
     list, for browsing web that no document corpus holds. `url` is
@@ -2697,7 +2769,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
   `requestBody` is omitted when the model passes no body arguments; a
   `required` one is sent as `{}`.
 
-#### 5.7.1 Builtin tool usage guide (`feed_image` / `fetch_url`)
+#### 5.7.1 Builtin tool usage guide (`feed_image` / `feed_audio` / `fetch_url`)
 
 The docstrings of `feed_image` and `fetch_url` carry only what the model needs
 to decide whether and how to call them — purpose, the accepted form of each
@@ -2743,6 +2815,17 @@ copied into answers just as easily.
   返した / 届かない / このサーバ自身 / sandbox に繋がらない。ERROR 文は何が起きたか (事実) を書き、`次の手:` の後に
   次にすることを書く。ユーザーに伝えるのは事実だけ。「読めなかった」を全部リンク切れと
   言い換えない。
+
+**feed_audio** (音声を聞けるモデルにだけ出る)
+
+- 話の中身・話者・言い方・音を実際に聞いて判断するためのもの。上限以内の添付の音声
+  (音声入力の録音を除く) は既に聞こえているので呼ばない。入れた音声は以降のターンにも残る
+  (context を使い続ける) ので、長い録音は start / end で要る区間に絞る。
+- 上限を超える添付の音声は `<source>` が `audio="too_long"` と長さを言う。区間を分けて
+  順に聞く (1 回の区間も同じ上限)。
+- 音声入力の録音 (`dictation="true"`) は本文に文字起こし済み。聞き違いを確かめたいときだけ
+  file_id で聞く。
+- ユーザーには再生されない。
 
 **fetch_url**
 

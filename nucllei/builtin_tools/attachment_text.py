@@ -101,6 +101,9 @@ def _no_text_next(file_id: str) -> str:
             f'画像・PDF なら feed_image(file_id="{file_id}") で見る'
             " (直接添付の画像は既に見えているので呼ばない)。"
         )
+    if tool_in_turn("feed_audio"):
+        # feed_audio は音声を聞けるモデルにだけ出る (builtin_tools/feed_audio.py)
+        steps.append(f'音声なら feed_audio(file_id="{file_id}") で聞く。')
     if tool_in_turn("send_to_workspace"):
         steps.append(
             f'それ以外で中身が要るなら send_to_workspace(file_id="{file_id}") で sandbox に'
@@ -159,8 +162,8 @@ class Tools:
                 _no_text_next(file_id),
             )
         if content is None:
-            # ファイルの種類を決めつけて別の tool へ誘導しない (音声など、feed_image が当たらない
-            # 物にも同じ文が出る — 「〜なら」で言う)。次の手はこのターンにある tool だけ
+            # ファイルの種類を決めつけて別の tool へ誘導しない (「〜なら」で言う)。次の手は
+            # このターンにある tool だけ
             # (2026-10-19 llens 監査: 次の手の無い ERROR に次の手を足す)
             raise ToolOutcome(
                 f"file_id {file_id} には抽出テキストが無い"

@@ -102,6 +102,15 @@ from nucllei.utils.filter import (
     process_filter_functions,
 )
 from nucllei.utils.file_images import inline_internal_image_urls
+from nucllei.utils.audio_input import (
+    audio_ref_part,
+    file_audio_ref,
+    format_time,
+    inline_audio_refs,
+    is_audio_model,
+    max_minutes_text,
+    plan_attachment_audio,
+)
 from nucllei.utils import tool_output
 from nucllei.utils.tool_output import ToolOutputSink
 from nucllei.utils.content_blocks import (
@@ -297,12 +306,18 @@ def _no_text_note(file_id=None, text_readable: bool = False) -> str:
         steps = []
         if tool_in_turn("feed_image"):
             steps.append("PDF のページは feed_image で見る")
+        if tool_in_turn("feed_audio"):
+            steps.append("音声は feed_audio で聞く")
         if tool_in_turn("send_to_workspace"):
             steps.append("加工・変換は send_to_workspace で取り込む")
         nexts = []
         if steps:
-            if len(steps) == 2:
-                steps[0] = steps[0].removesuffix("見る") + "見て"
+            # 最後以外は て形でつなぐ (「…で見て、…で聞いて、…で取り込む」)
+            te = {"見る": "見て", "聞く": "聞いて"}
+            for i, step in enumerate(steps[:-1]):
+                for plain, joined in te.items():
+                    if step.endswith(plain):
+                        steps[i] = step.removesuffix(plain) + joined
             nexts.append("中身が要るなら、" + "、".join(steps))
         if tool_in_turn("read_attachment"):
             nexts.append("read_attachment では読めない")
@@ -312,7 +327,25 @@ def _no_text_note(file_id=None, text_readable: bool = False) -> str:
     return f"({note})"
 
 
-def build_source_context(sources: list[dict]) -> str:
+def _audio_source_note(file_id, plan) -> str:
+    """音声を聞けるモデルに来た添付の音声 (`utils/audio_input.plan_attachment_audio`) の
+    `<source>` の本文 (文字の本文が無いとき)。入れた音声は「この発言に入っている」、上限を超えて
+    入れなかったものはそう言い、次の手 (feed_audio で区間を指定する) はこのターンに出ているときだけ。"""
+    if plan.inline:
+        return "(この音声はこの発言にそのまま入っている)"
+    note = (
+        f"この音声は {format_time(plan.duration or 0)} あり、一度に聞ける上限 "
+        f"{max_minutes_text()} を超えるので、この発言には入れていない — 中身は聞こえていない"
+    )
+    if tool_in_turn("feed_audio") and file_id:
+        note += (
+            f'。次の手: 聞くなら feed_audio(file_id="{file_id}", start=…, end=…) で'
+            f" {max_minutes_text()}以内の区間を指定する"
+        )
+    return f"({note})"
+
+
+def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> str:
     """添付の sources をモデルへ注入する `<source …>` タグ列に組む (置き場所は utils/conversation_context —
     そのファイルを付けた user 発言の先頭)。本文は utils/frames で無害化する。
 
@@ -321,6 +354,11 @@ def build_source_context(sources: list[dict]) -> str:
     `dictation="true"` の印を足す — 読み直すかどうかの判断と tool は配備側の仕事。
     長い録音が複数のファイルに分かれたときだけ、どれを読み直すか決められるように
     `part="2" parts="3"`(何本中の何本目か)も全ファイルに付ける。
+
+    audio(file id → `audio_input.AttachedAudio`)は、音声を聞けるモデルに来た添付の音声の扱い。
+    該当する `<source>` に `audio="inline"`(この発言に音声のまま入れた)か `audio="too_long"`
+    (上限を超えるので入れていない)と `duration="H:MM:SS"` を付け、文字の本文が無ければ本文を
+    その旨の注記にする(`_audio_source_note`)。
 
     2026-10-19(llens 監査 (3)): 連番の `id="N"`(引用チップの名残 — 読む箇所は無い)を
     やめて `name="ファイル名"`(属性値としてエスケープ)を載せる。本文の無いファイル
@@ -342,6 +380,11 @@ def build_source_context(sources: list[dict]) -> str:
                 if isinstance(name, str) and name.strip():
                     attrs.append(f'name="{html.escape(name.strip(), quote=True)}"')
                 attrs = " ".join(attrs)
+                heard = (audio or {}).get(file_id) if file_id else None
+                if heard is not None:
+                    attrs += f' audio="{"inline" if heard.inline else "too_long"}"'
+                    if heard.duration is not None:
+                        attrs += f' duration="{format_time(heard.duration)}"'
                 if doc_meta.get("dictation"):
                     attrs += ' dictation="true"'
                     parts = doc_meta.get("dictation_parts")
@@ -355,12 +398,20 @@ def build_source_context(sources: list[dict]) -> str:
                         f"source extraction failed (file_id={file_id}): "
                         f"{(doc_context or '')[:200]!r}"
                     )
-                    body = _no_text_note()
+                    body = (
+                        _audio_source_note(file_id, heard)
+                        if heard is not None
+                        else _no_text_note()
+                    )
                 elif not (doc_context or "").strip() and status != "success":
                     attrs += ' extraction="none"'
-                    body = _no_text_note(
-                        html.escape(str(file_id), quote=True) if file_id else None,
-                        text_readable=_source_is_text(doc_meta, file_id),
+                    body = (
+                        _audio_source_note(html.escape(str(file_id), quote=True), heard)
+                        if heard is not None
+                        else _no_text_note(
+                            html.escape(str(file_id), quote=True) if file_id else None,
+                            text_readable=_source_is_text(doc_meta, file_id),
+                        )
                     )
                 else:
                     # 本文から `</source>`・前置きや記憶の目次の枠を作れないように (utils/frames)
@@ -680,6 +731,9 @@ async def process_chat_payload(
         # だけに注入され(tools.py:49 の sig 一致)、実行中 tool-call の sink へ
         # file_id を積む。実体化は送信直前 inline に一任。view_image に閉じない。
         "__feed_image__": tool_output.feed_image,
+        # __feed_image__ の音声版(モデルの耳)。積んだ参照は results[i].context_audio に載り、
+        # 送信直前に mp3 の base64 になる(utils/audio_input)。宣言する tool は feed_audio だけ
+        "__feed_audio__": tool_output.feed_audio,
         # llens(#88): __feed_image__ と対称の、人間の目へ向けた汎用 tool-push。
         # __display__(content, kind) を実行中 tool-call の sink へ積み、下で harvest
         # して results[i].display へ載せる(collapse 外に描画・モデル非注入)。
@@ -969,15 +1023,28 @@ async def process_chat_payload(
     # 会話の側 (前置き・更新の枠・添付の <source>) を user 発言の先頭に置き、wire の目印を取り除く
     # (utils/conversation_context)。system には入れない — 全モデル同じ。<source> は 1 ファイル 1 つ
     # (本文の無い添付の次の手は、このターンに出している tool だけを名指しする)
+    # 音声を聞けるモデル (capabilities.audio) には、添付の音声を音声のまま同じ発言に入れる
+    # (utils/audio_input — 音声入力の通し録音と、上限 AUDIO_INPUT_MAX_MINUTES を超える長さは
+    # 入れない)。入れたか・入れなかったかは <source> の audio 属性が言う
+    audio_plan = await plan_attachment_audio(metadata.get("files"), user, model)
     source_tags = []
     with turn_tools(tools_dict.keys()):
         for source in sources:
-            tag = build_source_context([source])
+            tag = build_source_context([source], audio=audio_plan)
             if tag:
                 file_id = (source.get("source") or {}).get("id")
                 source_tags.append((file_id if isinstance(file_id, str) else None, tag))
     await apply_conversation_side(
-        form_data, user=user, model=model, metadata=metadata, sources=source_tags
+        form_data,
+        user=user,
+        model=model,
+        metadata=metadata,
+        sources=source_tags,
+        audio_parts=[
+            (file_id, audio_ref_part(file_audio_ref(file_id)))
+            for file_id, plan in audio_plan.items()
+            if plan.inline
+        ],
     )
 
     # llens(#69): 画像添付は files 経由に統一。内部 file URL("/api/v1/files/{id}/content")
@@ -990,6 +1057,11 @@ async def process_chat_payload(
     # 追撃側 inline を消すと、file_id 参照が未実体化のままモデルに渡り画素が届かない。
     form_data["messages"] = await inline_internal_image_urls(
         form_data["messages"], user
+    )
+    # 音声の参照 (添付の音声・履歴の feed_audio) も同じ所で mp3 の base64 にする。音声を
+    # 聞けないモデルでは注記に置き換える (受けない上流はリクエストごと落とす)
+    form_data["messages"] = await inline_audio_refs(
+        form_data["messages"], user, audio_capable=is_audio_model(model)
     )
 
     # llens(#57): streaming でも実測 usage を受け取る。OpenAI 互換サーバーは
@@ -1354,6 +1426,8 @@ async def measure_carried_tokens(
     form_data: dict,
     content_blocks: list,
     image_cache: Optional[dict] = None,
+    audio_cache: Optional[dict] = None,
+    audio_capable: bool = False,
 ) -> Optional[int]:
     """次ターンへ持ち越すコンテキスト量を**実測**する(ken 指示 2026-10-05)。
 
@@ -1376,6 +1450,9 @@ async def measure_carried_tokens(
     """
     messages = build_carried_measure_messages(form_data["messages"], content_blocks)
     messages = await inline_internal_image_urls(messages, user, cache=image_cache)
+    messages = await inline_audio_refs(
+        messages, user, audio_capable=audio_capable, cache=audio_cache
+    )
     body = {
         # 初回と同じ生成パラメータも載せる — temperature / stop / seed は prompt の
         # token 数に効かないが、reasoning_effort や custom の chat_template_kwargs 等は
@@ -1421,6 +1498,7 @@ async def _record_measured_carried(
     content_blocks,
     event_emitter,
     image_cache=None,
+    audio_cache=None,
 ):
     """ターン末: carried_tokens を実測で差し替え、マージ後の usage を emit する。
 
@@ -1434,7 +1512,14 @@ async def _record_measured_carried(
         return
     started = time.monotonic()
     carried = await measure_carried_tokens(
-        request, user, model_id, form_data, content_blocks, image_cache=image_cache
+        request,
+        user,
+        model_id,
+        form_data,
+        content_blocks,
+        image_cache=image_cache,
+        audio_cache=audio_cache,
+        audio_capable=is_audio_model(model),
     )
     if carried is None:
         return
@@ -2188,6 +2273,7 @@ async def _execute_one_tool_call(
     # raise の error_kind と違い本文・render・副産物はそのまま
     flagged_error_kind = None
     context_image_file_ids = []
+    context_audio_refs = []
     display_items = []
     chain = None
     result_render_override = None
@@ -2314,6 +2400,7 @@ async def _execute_one_tool_call(
             # 避ける)。成功時のみ harvest(lock 下 snapshot で timeout orphan
             # スレッドの遅延 append を除外)。
             context_image_file_ids = sink.context_images() if tool_succeeded else []
+            context_audio_refs = sink.context_audio() if tool_succeeded else []
             # display(人間の目、#88)も同じ規律で成功時のみ harvest。
             display_items = sink.displays() if tool_succeeded else []
             # 中で読み込んだ・実行したものの木(load_recipe / load_skill — set_chain)も同じ
@@ -2377,6 +2464,7 @@ async def _execute_one_tool_call(
         **(
             {"context_images": context_image_file_ids} if context_image_file_ids else {}
         ),
+        **({"context_audio": context_audio_refs} if context_audio_refs else {}),
         **({"display": display_items} if display_items else {}),
         **({"chain": chain} if chain else {}),
     }
@@ -2612,8 +2700,9 @@ async def process_chat_response(
             if response_tool_calls:
                 tool_calls.append(response_tool_calls)
 
-            # inline_internal_image_urls のターン内キャッシュ(追撃・計測で共有)
+            # inline_internal_image_urls / inline_audio_refs のターン内キャッシュ(追撃・計測で共有)
             image_cache = {}
+            audio_cache = {}
 
             # llens: 反復上限は環境変数で設定(issue #18)。-1 で無制限。
             max_tool_call_iterations = TOOL_CALL_MAX_ITERATIONS
@@ -2679,6 +2768,13 @@ async def process_chat_response(
                     # 使い回す — image_cache はこのターンだけ生きる)。
                     followup_msgs = await inline_internal_image_urls(
                         followup_msgs, user, cache=image_cache
+                    )
+                    # feed_audio の音声 (results[].context_audio) も同じ所で実体にする
+                    followup_msgs = await inline_audio_refs(
+                        followup_msgs,
+                        user,
+                        audio_capable=is_audio_model(model),
+                        cache=audio_cache,
                     )
                     res = await generate_chat_completion(
                         request,
@@ -2793,6 +2889,7 @@ async def process_chat_response(
                 assembler.content_blocks,
                 event_emitter,
                 image_cache=image_cache,
+                audio_cache=audio_cache,
             )
 
             title = await asyncio.to_thread(

@@ -10,7 +10,7 @@
 - 同名関数の衝突は先勝ち discard(#18-3 の教訓)— builtin の関数名は他とぶつけない
 
 登録は 2 種類: **常に登録**(history / chat_files / attachment_text / context_budget /
-feed_image / fetch_url / subagent — nucllei 自身の DB・Storage・共有 resolver・推論経路
+feed_image / feed_audio / fetch_url / subagent — nucllei 自身の DB・Storage・共有 resolver・推論経路
 だけで動く)と、
 **env ゲート付き**(sandbox は SANDBOX_URL)。ゲートの理屈は 1 つ: 外部サービスが無いと**どの呼び出しも必ず失敗する** builtin を
 一覧に生やさない(builtin の性質 = 常に動く、に反する)。feed_image / fetch_url は配備層
@@ -28,6 +28,7 @@ from nucllei.builtin_tools import (
     attachment_text,
     chat_files,
     context_budget,
+    feed_audio,
     feed_image,
     fetch_url,
     history,
@@ -91,6 +92,18 @@ BUILTIN_TOOLS = {
             "by file_id, URL or sandbox path (feed_image). Issues no File; owner-only"
         ),
     },
+    # feed_audio も常に登録(行は常にある)。ただしモデルに出るのは、そのモデルが音声を聞ける
+    # (capabilities.audio — 既定 OFF)ターンだけ(Tools.available)。音声を受けない上流に音声を
+    # 送るとリクエストごと落ちるので、toolIds に入っていても能力の無いモデルには見せない。
+    "builtin_feed_audio": {
+        "module": feed_audio,
+        "name": "Feed Audio",
+        "description": (
+            "Let the model hear audio (an attachment, a URL or a sandbox path, optionally a "
+            "start/end section) in the same turn (feed_audio). Offered only to models with the "
+            "audio capability. Issues no File; owner-only"
+        ),
+    },
     # fetch_url も常に登録(2026-10-03、ken 決定): url= はスキーム付きの http(s) URL なら
     # どこでも取りに行く(届くかは配備のネットワーク次第。取りに行かないのはこのサーバ自身
     # だけ)ので、EXT_MOUNTS が空でも「必ず失敗する」builtin ではない。同日の朝まで当時の
@@ -126,7 +139,7 @@ BUILTIN_TOOLS = {
     },
 }
 
-# sandbox だけ env ゲート付き。他の 7 本は nucllei 自身の DB / Storage / 共有 resolver で動き
+# sandbox だけ env ゲート付き。他の 8 本は nucllei 自身の DB / Storage / 共有 resolver で動き
 # 外部依存ゼロ = どの配備でも必ず動くのに対し、sandbox は外部サービス
 # (sandbox コンテナ) が要る。居ない配備で一覧に生やすと「見えているのに呼ぶと
 # 必ずエラー」になり、builtin の性質(常に動く)に反する。

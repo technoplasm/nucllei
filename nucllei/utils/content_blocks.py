@@ -8,6 +8,7 @@ message 永続化で共用する最小形へ落とす。消費者のいないフ
 import copy
 import json
 
+from nucllei.utils.audio_refs import audio_ref_part, context_audio_url
 from nucllei.utils.image_refs import stored_ref_kind
 
 # llens(#110): result 未着の call に対にする合成 result(FE
@@ -19,6 +20,11 @@ INTERRUPTED_TOOL_RESULT = "[interrupted: this tool call produced no result]"
 # role は user なので、ユーザーの添付と取り違えないことを本文で言う(2026-10-19 llens 監査)
 TOOL_RESULT_IMAGES_TEXT = (
     "(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)"
+)
+# 同じ user メッセージで tool 結果の音声(results[].context_audio)の前に置く text パート
+# (FE chat-messages.ts の TOOL_RESULT_AUDIO_TEXT と同文 — 同じ fixture で固定)
+TOOL_RESULT_AUDIO_TEXT = (
+    "(以下の音声はユーザーの添付ではない — 直前の tool の結果として読み込んだ音声)"
 )
 
 
@@ -146,6 +152,10 @@ def convert_content_blocks_to_messages(
       次ターン以降の履歴では FE expandAssistantToolHistory(chat-messages.ts)が同じ形・
       同じ位置で再送する(#142)— 形は共有 fixture
       test/fixtures/history_wire/context_images.json で両側のテストが固定している。
+    - tool 結果の音声(results[].context_audio — feed_audio が __feed_audio__ で push)も
+      同じ user メッセージに、画像の後ろから TOOL_RESULT_AUDIO_TEXT + input_audio の参照
+      (`{"url": 参照}`。エントリの振り分けは画像と同じ)で入れる。実体化(mp3 の base64)は
+      送信直前の `utils/audio_input.inline_audio_refs`。形は同じ共有 fixture で固定。
     - results[].display(人間の目、#88)は **モデルへ再注入しない**(ここで読まない)。
       context_images と対称だが向きが逆 — display はフロントが collapse 外へ描くだけの
       ユーザー面で、モデルには戻り値 content で「表示済み」と伝わる。2 チャネル分離の本体。
@@ -245,19 +255,27 @@ def convert_content_blocks_to_messages(
                 for result in sendable_results
                 for entry in (result.get("context_images") or [])
             ]
+            result_audio_urls = [
+                context_audio_url(entry)
+                for result in sendable_results
+                for entry in (result.get("context_audio") or [])
+            ]
+            media_parts = []
             if result_image_urls:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": TOOL_RESULT_IMAGES_TEXT},
-                            *(
-                                {"type": "image_url", "image_url": {"url": url}}
-                                for url in result_image_urls
-                            ),
-                        ],
-                    }
-                )
+                media_parts += [
+                    {"type": "text", "text": TOOL_RESULT_IMAGES_TEXT},
+                    *(
+                        {"type": "image_url", "image_url": {"url": url}}
+                        for url in result_image_urls
+                    ),
+                ]
+            if result_audio_urls:
+                media_parts += [
+                    {"type": "text", "text": TOOL_RESULT_AUDIO_TEXT},
+                    *(audio_ref_part(url) for url in result_audio_urls),
+                ]
+            if media_parts:
+                messages.append({"role": "user", "content": media_parts})
             temp_blocks = []
         else:
             temp_blocks.append(block)

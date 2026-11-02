@@ -11,6 +11,9 @@
 //   画像を忘れない)。エントリは参照文字列(file id / スキーム付き URL / "/" 始まり)で、
 //   実体化(base64)は送信直前の backend inline_internal_image_urls。形はバックエンドと
 //   共有 fixture(nucllei/test/fixtures/history_wire/context_images.json)で固定している
+// - tool 結果の音声(results[].context_audio、feed_audio の `__feed_audio__`)も同じ user メッセージに、
+//   画像の後ろから input_audio の参照(`{url}`)で再送する。実体化(mp3 の base64)と、音声を聞けない
+//   モデルでの注記への置き換えは送信直前の backend(utils/audio_input.py)。形は同じ fixture
 // - reasoning はモデルへ再送しない(ターンをまたぐ履歴 — バックエンドの続きターン・carried 計測と同じ。
 //   reasoning_content を載せ直すのは同じターンの tool ループ追撃だけで、それは BE が組む — README_API 4.3)
 // - `/command`・自動ロードの発火(#35)も応答に残った通常の load_skill 往復として送る
@@ -24,11 +27,18 @@ type ContentBlock = {
 		type?: string;
 		function?: { name?: string; arguments?: string };
 	}[];
-	results?: { tool_call_id: string; content?: string; context_images?: string[] }[];
+	results?: {
+		tool_call_id: string;
+		content?: string;
+		context_images?: string[];
+		context_audio?: string[];
+	}[];
 };
 
 type WireContentPart =
-	{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+	| { type: 'text'; text: string }
+	| { type: 'image_url'; image_url: { url: string } }
+	| { type: 'input_audio'; input_audio: { url: string } };
 
 export type WireMessage = {
 	role: string;
@@ -45,11 +55,27 @@ export type WireMessage = {
 const TOOL_RESULT_IMAGES_TEXT =
 	'(以下の画像はユーザーの添付ではない — 直前の tool の結果として読み込んだ画像)';
 
+// tool 結果の音声を運ぶ text パート(content_blocks.py の TOOL_RESULT_AUDIO_TEXT と同文)
+const TOOL_RESULT_AUDIO_TEXT =
+	'(以下の音声はユーザーの添付ではない — 直前の tool の結果として読み込んだ音声)';
+
 // context_images のエントリ → image_url の url(content_blocks.py と同分岐):
 // スキーム付き URL と "/" 始まり(fs 参照・"/api/v1/files/{id}/content#page=N")は
 // そのまま、それ以外は file id。
 const contextImageUrl = (entry: string): string =>
 	entry.startsWith('/') || /^https?:\/\//i.test(entry) ? entry : `/api/v1/files/${entry}/content`;
+
+// context_audio のエントリ → input_audio の url(audio_refs.py context_audio_url と同分岐):
+// 区間 `#t=…` は file id の後ろにも付きうるので、file id のときは配信 URL の後ろへ付け直す。
+const contextAudioUrl = (entry: string): string => {
+	if (entry.startsWith('/') || /^https?:\/\//i.test(entry)) {
+		return entry;
+	}
+	const hash = entry.indexOf('#t=');
+	return hash < 0
+		? `/api/v1/files/${entry}/content`
+		: `/api/v1/files/${entry.slice(0, hash)}/content${entry.slice(hash)}`;
+};
 
 export const expandAssistantToolHistory = (
 	content: string,
@@ -107,6 +133,7 @@ export const expandAssistantToolHistory = (
 			});
 			textBuffer = [];
 			const imageUrls: string[] = [];
+			const audioUrls: string[] = [];
 			for (const call of sendableCalls) {
 				const result = results.find((r) => r.tool_call_id === call.id);
 				messages.push({
@@ -117,16 +144,24 @@ export const expandAssistantToolHistory = (
 						: '[interrupted: this tool call produced no result]'
 				});
 				imageUrls.push(...(result?.context_images ?? []).map(contextImageUrl));
+				audioUrls.push(...(result?.context_audio ?? []).map(contextAudioUrl));
 			}
+			// role:tool の content は文字列契約で画素・音声を運べないため user ロールで挟む
+			const mediaParts: WireContentPart[] = [];
 			if (imageUrls.length > 0) {
-				// role:tool の content は文字列契約で画素を運べないため user ロールで挟む
-				messages.push({
-					role: 'user',
-					content: [
-						{ type: 'text', text: TOOL_RESULT_IMAGES_TEXT },
-						...imageUrls.map((url) => ({ type: 'image_url' as const, image_url: { url } }))
-					]
-				});
+				mediaParts.push(
+					{ type: 'text', text: TOOL_RESULT_IMAGES_TEXT },
+					...imageUrls.map((url) => ({ type: 'image_url' as const, image_url: { url } }))
+				);
+			}
+			if (audioUrls.length > 0) {
+				mediaParts.push(
+					{ type: 'text', text: TOOL_RESULT_AUDIO_TEXT },
+					...audioUrls.map((url) => ({ type: 'input_audio' as const, input_audio: { url } }))
+				);
+			}
+			if (mediaParts.length > 0) {
+				messages.push({ role: 'user', content: mediaParts });
 			}
 		}
 		// reasoning は再送しない

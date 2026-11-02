@@ -26,6 +26,9 @@ system には入れない: system は「preset の system + チャットの syst
 `metadata["files"]` (読取権限・Filter を通った一覧) から組んだ sources だけ。同じファイルは会話の順で最初の発言だけ。
 目印の無いファイルは最後の user 発言に。保存しない (ファイルの中身は抽出後に変わらないので毎回同じバイト)。
 
+**添付の音声** (音声を聞けるモデルだけ — utils/audio_input): `<source>` と同じ発言の content の末尾に input_audio の
+参照パートを足す (同じ置き場所の規則)。実体 (mp3 の base64) にするのは送信直前の inline_audio_refs。
+
 **利用者の本文**も無害化する (枠を書けるのはサーバだけ)。目印 (`id` / `files`) は組み終えたら全メッセージから
 取り除く (未知のキーで 400 にする OpenAI 互換実装がある)。
 """
@@ -284,10 +287,12 @@ async def apply_conversation_side(
     model: dict,
     metadata: dict,
     sources: list[tuple[Optional[str], str]],
+    audio_parts: Optional[list[tuple[str, dict]]] = None,
 ) -> None:
     """form_data["messages"] の user 発言の先頭に前置き・更新の枠・`<source>` を置き、目印を取り除く (in place で
     form_data["messages"] を新しい list に差し替える)。`sources` は (file id or None, `<source …>…</source>`) の列
-    (inlet 後の metadata["files"] から組んだもの・その順)。"""
+    (inlet 後の metadata["files"] から組んだもの・その順)。`audio_parts` は (file id, input_audio の参照パート) の列で、
+    そのファイルの `<source>` と同じ発言の content の末尾に足す。"""
     messages, markers = strip_wire_markers(form_data.get("messages") or [])
     user_idxs = [
         i
@@ -295,7 +300,7 @@ async def apply_conversation_side(
         if isinstance(m, dict) and m.get("role") == "user"
     ]
     if not user_idxs:
-        if sources:
+        if sources or audio_parts:
             raise Exception("No user message found")
         form_data["messages"] = messages
         return
@@ -330,17 +335,30 @@ async def apply_conversation_side(
     for fid, tag in sources:
         idx = first_marked.get(fid) if fid else None
         tags.setdefault(user_idxs[-1] if idx is None else idx, []).append(tag)
+    appended: dict[int, list[dict]] = {}
+    for fid, part in audio_parts or []:
+        idx = first_marked.get(fid)
+        appended.setdefault(user_idxs[-1] if idx is None else idx, []).append(part)
 
     out = list(messages)
     for idx in user_idxs:
         prefix = "\n\n".join(
             p for p in (frames.get(idx, ""), "\n".join(tags.get(idx, []))) if p
         )
-        out[idx] = {
-            **messages[idx],
-            "content": _prepend(messages[idx].get("content"), prefix),
-        }
+        content = _prepend(messages[idx].get("content"), prefix)
+        if appended.get(idx):
+            content = _append_parts(content, appended[idx])
+        out[idx] = {**messages[idx], "content": content}
     form_data["messages"] = out
+
+
+def _append_parts(content, parts: list[dict]) -> list:
+    """content の末尾にパートを足す。文字列なら text パートにしてから (空なら text パートは付けない —
+    空 text を弾く推論エンジンがある)。"""
+    if isinstance(content, list):
+        return [*content, *parts]
+    text = content if isinstance(content, str) else ""
+    return [*([{"type": "text", "text": text}] if text.strip() else []), *parts]
 
 
 def _place_chain_frames(

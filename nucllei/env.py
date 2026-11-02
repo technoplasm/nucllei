@@ -675,3 +675,31 @@ try:
     FETCH_MAX_BYTES = int(FETCH_MAX_BYTES)
 except Exception:
     FETCH_MAX_BYTES = 25 * 1024 * 1024
+
+
+def parse_audio_input_max_minutes(raw: str | None, default: float = 120.0) -> float:
+    """`AUDIO_INPUT_MAX_MINUTES` を読む。未設定は既定、正の数でなければ warning を出して既定。"""
+    raw = (raw or "").strip()
+    if raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = None
+    # NaN は比較が常に偽になるので、範囲の内側にあることを肯定形で確かめる
+    if value is None or not (0 < value <= 24 * 60):
+        log.warning(
+            f"AUDIO_INPUT_MAX_MINUTES={raw!r} is not a number in (0, 1440]; "
+            f"using the default {default}"
+        )
+        return default
+    return value
+
+
+# 音声を聞けるモデル(capabilities.audio)に音声のまま渡す長さの上限(分、既定 120)。
+# 添付の音声はこれ以下なら発言に入れ、超えたら入れない(`<source>` の告知だけ — 聞くなら
+# feed_audio で区間を指定する)。feed_audio の 1 回の区間も同じ上限。音声は履歴に残って毎ターン
+# 送り直される(MiMo で 60 分 ≈ 2.3 万 token)。_memos/audio.md「音声のまま聞かせる」
+AUDIO_INPUT_MAX_MINUTES = parse_audio_input_max_minutes(
+    os.environ.get("AUDIO_INPUT_MAX_MINUTES")
+)

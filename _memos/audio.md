@@ -473,6 +473,58 @@ faster-whisper 1.1.1(ctranslate2 4.8.4 — 4.5.0 はこのマシンの kernel �
 - VAD なしの無音・雑音で遅くなるのは hallucination_silence_threshold が怪しい区間の後ろを読み直すため。
   VAD ありならその区間はデコードに届かない。
 
+## 音声のまま聞かせる(`capabilities.audio`・feed_audio、2026-11-02)
+
+音声を聞けるモデル(Xiaomi MiMo 等)には、添付の音声を文字起こしせずに音声のまま渡す — 画像を VLM に
+見せるのと同じ形(ken 決定)。契約の正本は README_API §3.9(env)/ §4.2(`capabilities.audio`)/
+§4.3「Audio attachments」/ §5.3(`__feed_audio__`)/ §5.7(`builtin_feed_audio`)。コードは
+`utils/audio_input.py`(長さ・変換・送信直前の実体化)と `utils/audio_refs.py`(参照の形・純関数)。
+
+- **モデルの能力 `info.meta.capabilities.audio`、既定 OFF**(vision と違い、キーが無いときも OFF)。
+  音声を受けない上流に音声を送るとリクエストごと落ちる(staging: openrouter/kimi-k2.6 が 404
+  "No endpoints found that support input audio")。OFF のモデルは今までと何も変わらない。
+- **上流に出る形**: user メッセージの content に
+  `{"type": "input_audio", "input_audio": {"data": "<base64>", "format": "mp3"}}`。staging の gateway で
+  openrouter/mimo-v2.6-pro・gemini-3.8-flash に確かめた: mp3 / flac / m4a / wav は通る、**webm は 400**、
+  `audio_url` パートは黙って無視される(「何も聞こえない」と答える)。ブラウザの録音は webm なので、
+  **送信直前に mp3(mono・16 kHz・32 kbps)に変換する**。60 分で約 14 MB(base64 で約 19 MB)。
+- **変換は ffmpeg のコマンド**(Docker image に apt の ffmpeg が入っている — STT/TTS と同じ)。PyAV(`av`)は
+  `stt` extra の faster-whisper が引くだけで dev の環境には無いので使わない。依存は増やしていない。
+- **添付の音声**: Files.meta の content_type が `audio/*` の添付を、`<source>` と同じ発言の content の末尾に
+  入れる(置き場所の規則は `conversation_context` と同じ)。`<source>` には `audio="inline"` / `audio="too_long"` と
+  `duration`、本文が無ければ「この発言にそのまま入っている」/「上限を超えるので入れていない — 聞くなら
+  feed_audio で区間を指定」の注記。**入れないもの**: 音声入力の通し録音(`meta.dictation` — 本文に文字起こし済み)、
+  `AUDIO_INPUT_MAX_MINUTES`(既定 120 分)より長いもの。添付は履歴に残るので、**毎ターン送り直す**
+  (ken 了承: MiMo で 60 分 ≈ 2.26 万 token)。
+- **長さを測る場所は送信時**(upload では測らない)。理由: 音声の File は upload 以外(sandbox から
+  fetch_from_workspace・tool の生成物)でもでき、Files.meta に書く口を増やさずにどの経路にも同じ規則で効く。
+  ffprobe の format=duration は webm(MediaRecorder の録音 — Duration を持たない)で N/A なので、
+  `ffmpeg -c copy -f null -progress` で最後のパケットまで読んだ時刻を使う(デコードしない。60 分の webm で
+  約 0.4 秒、mp3 / wav は数十 ms)。結果は中身のハッシュ(と添付は file id)でプロセス内に覚える。
+- **変換結果の置き場**: `CACHE_DIR/audio/input/<中身のハッシュ + 区間>.mp3`。60 分の変換は約 5 秒なので、
+  毎ターン変換し直さない。1 GB を超えたら最後に使った時刻の古い順に消す。
+- **送れなかったもの**: 読めない参照(権限が無い・無い・解決できない)は
+  「(ここにあった音声は読み込めなかった — 中身は聞こえていない)」、読めたが音声でない・変換できない・
+  上限を超える区間は名前付きの注記の text に置き換える(リクエストを恒久的に落とさない — 画像と同じ規律)。
+  **能力の無いモデルに参照が来たら**(音声を聞けるモデルから切り替えたチャットの履歴)、全部
+  「(ここにあった音声は、このモデルが音声を聞けないので渡していない — 中身は聞こえていない)」にする。
+  headless の呼び手が `data` で入れた音声は、能力のあるモデルで形式が mp3 / wav / flac / m4a の外のときだけ変換する。
+- **feed_audio**(`builtin_tools/feed_audio.py`): feed_image の音声版。引数の意味(`url` / `path` / `file_id`、
+  名前で解釈)・resolver・所有者チェック・File を作らない・tool-push → harvest → 送信直前に実体化、は同じ。
+  `start` / `end`("23:10" / "1:02:03" / 秒数)で区間を指定でき、参照に `#t=<開始秒>,<終了秒>`
+  (W3C Media Fragments の形)を付けて積む。1 回の区間も `AUDIO_INPUT_MAX_MINUTES` まで。積んだ参照は
+  `results[i].context_audio` に永続し、履歴では context_images と同じ user メッセージの画像の後ろに入る
+  (BE `content_blocks` と FE `chat-messages.ts` の両方。共有 fixture `history_wire/context_images.json`)。
+  **能力のあるモデルにだけ出す**(toolkit の `available` フック)— 行は常に登録で、モデルの toolIds に入れて使うのは
+  他の builtin と同じ。通し録音も feed_audio では聞ける(聞き違いを原本で確かめる用途)。
+  background 実行(exec 行)の context_audio は拾わない(積む tool が feed_audio だけで、background にしない)。
+- **実機の確認(2026-11-02、staging gateway `10.105.2.2:4000`)**: AivisSpeech で作った 2 文 + 5 秒の無音の webm
+  (MediaRecorder と同じく Duration 無し)を `inline_audio_refs` に通した payload を投げた。mimo-v2.6-pro は全体を
+  一字一句書き起こし(prompt 114 token)、区間 `#t=7,12.4` は 2 文目だけを書き起こした(70 token)。音声の参照を
+  能力無しで注記にした payload は kimi-k2.6 が 200 で受けた(「聞こえない」と答える)。
+- **未確認**: 実チャット(dev の UI → BE → staging)を通した確認、120 分近い音声の送信(28 MB 級の mp3 を毎ターン
+  送る負荷・上流の上限)、gemini での区間の聞き取り、Safari の録音(`audio/mp4`)の変換。
+
 ## 並列モデル — どの層で直列化されるか(STT 内蔵経路)
 
 1. **サービング層**: route は sync def / to_thread → AnyIO threadpool(既定 40 本)。
