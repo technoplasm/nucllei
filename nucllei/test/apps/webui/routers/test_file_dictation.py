@@ -206,7 +206,8 @@ class TestFileDictation(AbstractPostgresTest):
         async def feed_image(ref: str = ""):
             return ""
 
-        def fake_get_tools(request, tool_ids, user, extra_params, **kwargs):
+        # feed_image は能力に付く builtin — toolIds ではなく能力 (vision はキーが無ければ ON) で載る
+        def fake_get_capability_tools(request, user, extra_params):
             return {
                 "feed_image": {
                     "callable": feed_image,
@@ -217,13 +218,10 @@ class TestFileDictation(AbstractPostgresTest):
                 }
             }
 
-        monkeypatch.setattr(middleware, "get_tools", fake_get_tools)
-        model = {
-            "id": "tp",
-            "name": "tp",
-            "owned_by": "openai",
-            "info": {"meta": {"toolIds": ["builtin_feed_image"]}},
-        }
+        monkeypatch.setattr(
+            middleware, "get_capability_tools", fake_get_capability_tools
+        )
+        model = {"id": "tp", "name": "tp", "owned_by": "openai", "info": {"meta": {}}}
         user = types.SimpleNamespace(
             id="1", name="Taro", email="t@example.invalid", role="admin", info=None
         )
@@ -269,9 +267,7 @@ class TestFileDictation(AbstractPostgresTest):
             "(文字が抜き出されていない — 本文はこの会話に入っていない。次の手: 中身が要るなら、"
             "PDF のページは feed_image で見る)</source>\n"
             f'<source file_id="{audio}" name="memo.webm" audio="unsupported" extraction="none">'
-            "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、"
-            "ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で"
-            "貼ってもらえれば読める」と伝える)</source>\n\n読んで"
+            "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない)</source>\n\n読んで"
         )
 
     def test_source_tag_of_a_split_recording_carries_part(self):
@@ -350,15 +346,17 @@ def test_build_source_context_attributes():
     ]
     # ターンの tool が立っていない(名指しできる tool が無い)ときは事実だけ。
     # failed の例外の文(「失敗の理由」)はモデルに出さない(log にだけ残す)
+    # 音声入力の通し録音 (音声を渡していない) は、発言の文がその文字起こしだと言う
     none_body = "(文字が抜き出されていない — 本文はこの会話に入っていない)"
+    rec_body = "(この発言の文はこの録音の文字起こし)"
     assert build_source_context(sources).split("\n") == [
         '<source file_id="a">本文</source>',
         f'<source file_id="b" extraction="failed">{none_body}</source>',
-        f'<source file_id="c" dictation="true" extraction="none">{none_body}</source>',
+        f'<source file_id="c" dictation="true" extraction="none">{rec_body}</source>',
         '<source file_id="d" dictation="true">書き起こし</source>',
         '<source file_id="e" dictation="true" part="2" parts="3" extraction="none">'
-        f"{none_body}</source>",
-        f'<source file_id="f" dictation="true" extraction="none">{none_body}</source>',
+        f"{rec_body}</source>",
+        f'<source file_id="f" dictation="true" extraction="none">{rec_body}</source>',
     ]
 
 
@@ -477,8 +475,8 @@ def test_source_context_for_audio_heard_by_the_model():
 
 def test_source_context_for_audio_the_model_cannot_hear():
     """音声を聞けないモデルに来た添付の音声: audio="unsupported"。文字の本文が無ければ、文書と同じ
-    「文字が抜き出されていない」ではなく「音声ファイルで、聞けないので渡していない」と言い、次の手は
-    利用者に伝えられる事実だけ (このモデルで中身に届く tool は無い — ターンの tool でも変わらない)。
+    「文字が抜き出されていない」ではなく「音声ファイルで、聞けないので渡していない」と言う。事実だけで
+    次の手は書かない (どう扱うかは配備の prompt / skill — ターンの tool でも変わらない)。
     文字起こし済み (Attachment が抜き出した) なら本文はそのまま。"""
     from nucllei.utils.audio_input import AttachedAudio
     from nucllei.utils.middleware import build_source_context
@@ -499,9 +497,7 @@ def test_source_context_for_audio_the_model_cannot_hear():
     }
     expected = [
         '<source file_id="a" name="会議.webm" audio="unsupported" extraction="none">'
-        "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、"
-        "ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で"
-        "貼ってもらえれば読める」と伝える)</source>",
+        "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない)</source>",
         '<source file_id="b" audio="unsupported">書き起こし</source>',
     ]
     for tools in ([], ["feed_image", "send_to_workspace", "read_attachment"]):

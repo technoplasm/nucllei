@@ -525,7 +525,7 @@ class TestAudioInput(AbstractPostgresTest):
     def test_non_audio_model_says_the_audio_is_not_passed(self):
         """聞けないモデル: 音声は入れず、<source> が「音声ファイルで、聞けないので渡していない」と言う
         (文書と同じ「文字が抜き出されていない」にしない — 外部の文字起こしを勧めさせない)。
-        通し録音は今までどおり (本文に文字起こし済み)。"""
+        通し録音は「渡していない」と言わず、発言の文がその文字起こしだと言う。"""
         a = self._file("f-a", _wav(2.0), "audio/wav", name="a.wav")
         d = self._file(
             "f-d", _wav(2.0), "audio/webm", meta={"dictation": {"version": 1}}
@@ -538,12 +538,11 @@ class TestAudioInput(AbstractPostgresTest):
         assert isinstance(content, str) and "input_audio" not in str(out)
         assert (
             '<source file_id="f-a" name="a.wav" audio="unsupported" extraction="none">'
-            "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。"
+            "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない)</source>"
         ) in content
+        # 通し録音は audio 属性を付けず、発言の文がその文字起こしだと言う
         assert (
-            "文字が抜き出されていない" in content
-        )  # 通し録音の <source> は今までどおり
-        assert (
-            'file_id="f-d" name="f-d.bin" dictation="true" extraction="none">'
-            in content
-        )
+            '<source file_id="f-d" name="f-d.bin" dictation="true" extraction="none">'
+            "(この発言の文はこの録音の文字起こし)</source>"
+        ) in content
+        assert "文字が抜き出されていない" not in content

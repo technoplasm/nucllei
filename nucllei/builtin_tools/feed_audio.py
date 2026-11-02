@@ -1,10 +1,11 @@
 """組み込みツール: file_id の音声、URL (url)、sandbox の絶対パス (path) を主モデル自身の耳に
 同一ターンで入れる (feed_image の音声版)。File は発行しない。
 
-出すのはツールに選ばれている (toolIds) AND モデルが音声を聞ける (`capabilities.audio`、既定 OFF) とき
-だけ (`Tools.available`)。能力はモデルが何を受けられるかの事実で、ツールを出す働きは持たない — 出すかは
-toolIds で決め、能力の無いモデルでは選ばれていても出さない (音声を受けない上流に音声を送るとリクエスト
-ごと落ちる。staging: openrouter/kimi-k2.6 が 404 "No endpoints found that support input audio")。
+能力に付く builtin: toolIds では選ばず、モデルが音声を聞ける (`capabilities.audio`、既定 OFF) ターンに
+出す (`utils/tools.get_capability_tools` が載せ、出すかは `Tools.available`)。添付の音声を聞けるモデルは
+この tool でも聞ける — 片方だけの組み合わせは無い。能力の無いモデルには出さない (音声を受けない上流に
+音声を送るとリクエストごと落ちる。staging: openrouter/kimi-k2.6 が 404 "No endpoints found that
+support input audio")。
 
 仕組み (feed_image と同じ汎用 tool-push 経路): tool は検証して `__feed_audio__(参照)` を呼ぶだけ。
 middleware が実行中 tool-call の sink から参照を harvest して results[i].context_audio
@@ -129,7 +130,7 @@ def _parse_bound(name: str, value) -> Optional[float]:
 
 class Tools:
     def available(self, request, user, model, metadata) -> bool:
-        # 音声を聞けるモデルにだけ出す (module docstring)
+        # 音声を聞けるモデルに出す — 能力に付く builtin (module docstring)
         return is_audio_model(model)
 
     async def feed_audio(
@@ -142,8 +143,16 @@ class Tools:
         __user__: Optional[dict] = None,
         __feed_audio__: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """音声 (録音・音声ファイル・動画の音声) を自分の耳に入れ、実際に聞いて判断する (話の中身・話者・言い方・音)。入れた音声は以降のターンにも残るので、長い録音は start / end で要る区間に絞る。1 回で聞ける長さには上限がある。ユーザーには再生されない。
-        対象は url / path / file_id のどれか 1 つ。上限以内の添付の音声 (音声入力の録音を含む) は既に聞こえている。
+        """音声 (録音・音声ファイル・動画の音声) を自分の耳に入れ、実際に聞いて判断する (話の中身・話者・言い方・音)。入れた音声は以降のターンにも残る。ユーザーには再生されない。
+
+        呼ぶ場面:
+        - この発言に入っていない音声を聞く — 長さの上限を超えて入らなかった添付 (file_id)、sandbox の音声 (path)、URL の音声 (url)
+        - 長い録音の特定の区間を start / end で聞き直す
+        呼ばない場面:
+        - この発言に既に音声が入っている添付 (音声入力の録音を含む) — もう聞こえている
+        - 聞こえている音声を区間なしで丸ごと入れ直す — 同じ音声がもう一度入るだけ
+
+        対象は url / path / file_id のどれか 1 つ。1 回で聞ける長さには上限がある (長い録音は区間に分けて聞く)。
 
         :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。受け取った形のまま
         :param path: sandbox のファイルの絶対パス (`/workspace/…` `/ext/…`)
@@ -151,6 +160,8 @@ class Tools:
         :param start: 聞き始めの位置 ("23:10" / "1:02:03" / 秒数)。省くと先頭から
         :param end: 聞き終わりの位置 (同じ形)。省くと最後まで
         """
+        # 説明は全利用者で同じ固定文 (利用者・日付で変わる要素を入れない — prefix cache)。いつ呼ぶか
+        # (呼ぶ場面・呼ばない場面) はここに集める — 能力の無いモデルには tool ごと出ないので説明も一緒に消える
         if not __user__ or not __user__.get("id"):
             raise ToolFailure("ユーザーを特定できない")
         if __feed_audio__ is None:

@@ -6,6 +6,11 @@
 (_memos/builtin-tools.md 1c: 境界基準は「出荷単位」)。
 
 - 一覧 UI は組み込み/カスタムをセクション分けして見せる(meta.builtin で判別)
+- **能力に付く builtin**(定義に `capability` を持つ feed_image / feed_audio)は toolIds で選ばない:
+  モデルの能力(capabilities.vision / audio)が ON なら全ターンに出す(middleware.build_capability_tools
+  → utils/tools.get_capability_tools)。toolIds・skill の tool_ids からは読まない(get_tools が
+  未知の id と同じく黙って飛ばす)。行は Valves の編集のために残し、meta.capability で
+  ツールの選択肢から外す
 - content 更新・削除は拒否(access_control の編集のみ可)。定義の真実源は常に repo
 - 同名関数の衝突は先勝ち discard(#18-3 の教訓)— builtin の関数名は他とぶつけない
 
@@ -83,25 +88,28 @@ BUILTIN_TOOLS = {
     },
     # feed_image は常に登録: file_id 経路は nucllei 自身の Files / Storage だけで動き、
     # url / path 経路は共有 resolver(utils/image_refs)が解決する(配信元の無い配備でも
-    # file_id の添付 PDF を見る用途は残る)。モデルに出るのは toolIds に選ばれていて、vision が
-    # 明示的に false でないターンだけ(Tools.available)。
+    # file_id の添付 PDF を見る用途は残る)。能力に付く builtin(`capability`): 画像を見られる
+    # モデル(vision が明示的に false でない — キーが無ければ ON)のターンに出す(Tools.available)。
     "builtin_feed_image": {
         "module": feed_image,
         "name": "Feed Image",
+        "capability": "vision",
         "description": (
             "Show an image or PDF pages to the model's own eyes (VLM) in the same turn, "
-            "by file_id, URL or sandbox path (feed_image). Issues no File; owner-only"
+            "by file_id, URL or sandbox path (feed_image). Offered to every model with the "
+            "vision capability. Issues no File; owner-only"
         ),
     },
-    # feed_audio も常に登録(行は常にある)。モデルに出るのは toolIds に選ばれていて、そのモデルが
-    # 音声を聞ける(capabilities.audio — 既定 OFF)ターンだけ(Tools.available)。音声を受けない
-    # 上流に音声を送るとリクエストごと落ちるので、能力の無いモデルには選ばれていても見せない。
+    # feed_audio も常に登録(行は常にある)。能力に付く builtin(`capability`): 音声を聞ける
+    # モデル(capabilities.audio — 既定 OFF)のターンに出す(Tools.available)。音声を受けない
+    # 上流に音声を送るとリクエストごと落ちるので、能力の無いモデルには出さない。
     "builtin_feed_audio": {
         "module": feed_audio,
         "name": "Feed Audio",
+        "capability": "audio",
         "description": (
             "Let the model hear audio (an attachment, a URL or a sandbox path, optionally a "
-            "start/end section) in the same turn (feed_audio). Offered only to models with the "
+            "start/end section) in the same turn (feed_audio). Offered to every model with the "
             "audio capability. Issues no File; owner-only"
         ),
     },
@@ -176,6 +184,18 @@ if SANDBOX_URL:
 _SANDBOX_TOKEN_MISSING = bool(SANDBOX_URL) and not SANDBOX_TOKEN
 
 
+# 能力に付く builtin の id(定義に `capability` を持つもの)。toolIds では読まず、
+# 能力のあるモデルのターンに get_capability_tools が載せる(出すかは各 Tools.available)。
+CAPABILITY_TOOL_IDS = tuple(
+    tool_id for tool_id, entry in BUILTIN_TOOLS.items() if entry.get("capability")
+)
+
+
+def is_capability_tool_id(tool_id: str) -> bool:
+    """能力に付く builtin か(toolIds・skill の tool_ids からは読まない id)。"""
+    return tool_id in CAPABILITY_TOOL_IDS
+
+
 def is_builtin_tool_id(tool_id: str) -> bool:
     """現に登録されている builtin か(update/delete 保護・ロード分岐用)。"""
     return tool_id in BUILTIN_TOOLS
@@ -234,7 +254,7 @@ def sync_builtin_tools() -> None:
                         name=entry["name"],
                         description=entry["description"],
                         content="",
-                        meta=ToolMeta(builtin=True),
+                        meta=ToolMeta(builtin=True, capability=entry.get("capability")),
                         access_control=None,  # 既定 public read(露出は紐づけで制御)
                     ),
                     specs,
@@ -248,7 +268,10 @@ def sync_builtin_tools() -> None:
                         "description": entry["description"],
                         "content": "",
                         "specs": specs,
-                        "meta": {"builtin": True},
+                        "meta": {
+                            "builtin": True,
+                            "capability": entry.get("capability"),
+                        },
                     },
                 )
         except Exception as e:

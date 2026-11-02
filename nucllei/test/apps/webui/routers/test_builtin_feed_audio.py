@@ -133,15 +133,25 @@ def test_registered_as_builtin_with_one_function():
     }
 
 
-def test_get_tools_hides_it_from_non_audio_models(monkeypatch):
-    """toolIds に入っていても、能力の無いモデルのターンには載らない (get_tools の available)。"""
+def test_registered_as_a_capability_tool():
+    import nucllei.builtin_tools as pkg
+
+    assert pkg.BUILTIN_TOOLS["builtin_feed_audio"]["capability"] == "audio"
+    assert pkg.is_capability_tool_id("builtin_feed_audio")
+
+
+def test_offered_by_the_audio_capability_not_by_tool_ids(monkeypatch):
+    """能力に付く builtin: toolIds に無くても音声を聞けるモデルのターンに載り (get_capability_tools)、
+    toolIds に残った builtin_feed_audio は読まない (行の無い id と同じく黙って飛ばす — 二重にならない)。"""
     from nucllei.utils import tools as tools_mod
 
     def row(tool_id):
+        if tool_id != "builtin_feed_audio":
+            return None
         return types.SimpleNamespace(
             id=tool_id,
             user_id="system",
-            access_control=None,
+            access_control={"read": {"user_ids": [], "group_ids": []}},
             name="Feed Audio",
             specs=tools_mod.get_tool_specs(_mod().Tools()),
         )
@@ -153,16 +163,21 @@ def test_get_tools_hides_it_from_non_audio_models(monkeypatch):
             state=types.SimpleNamespace(TOOLS={"builtin_feed_audio": _mod().Tools()})
         )
     )
-    user = types.SimpleNamespace(id="u1", role="admin")
-    for caps, expected in (({"audio": True}, ["feed_audio"]), ({}, [])):
-        model = {"id": "m", "info": {"meta": {"capabilities": caps}}}
-        got = tools_mod.get_tools(
-            request,
-            ["builtin_feed_audio"],
-            user,
-            {"__metadata__": {"model": model}, "__user__": {"id": "u1"}},
-        )
-        assert list(got) == expected, caps
+    # 行の read ACL は空 — 能力に付く builtin は ACL を見ない
+    user = types.SimpleNamespace(id="u1", role="user")
+    for caps, expected in (
+        ({"audio": True}, ["feed_audio"]),
+        ({}, []),
+        ({"audio": False}, []),
+    ):
+        extra = {
+            "__metadata__": {
+                "model": {"id": "m", "info": {"meta": {"capabilities": caps}}}
+            },
+            "__user__": {"id": "u1"},
+        }
+        assert list(tools_mod.get_capability_tools(request, user, extra)) == expected
+        assert tools_mod.get_tools(request, ["builtin_feed_audio"], user, extra) == {}
 
 
 # ---- 引数 ----
@@ -305,3 +320,14 @@ def test_without_sink_or_user(monkeypatch):
         call_error(mod.Tools().feed_audio(file_id="f1", __feed_audio__=print))
     )
     assert err.kind == "failure"
+
+
+def test_description_says_when_to_call_it():
+    """いつ呼ぶかは tool の説明に集める (feed_image と同じ形)。全利用者で同じ固定文。"""
+    from nucllei.utils.tools import tool_description_from_docstring
+
+    desc = tool_description_from_docstring(_mod().Tools.feed_audio.__doc__)
+    calls, rest = desc.split("呼ぶ場面:\n", 1)[1].split("呼ばない場面:\n", 1)
+    assert "上限を超えて入らなかった添付" in calls and "start / end" in calls
+    assert "既に音声が入っている添付" in rest and "区間なしで丸ごと入れ直す" in rest
+    assert "{{" not in desc

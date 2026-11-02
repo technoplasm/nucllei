@@ -54,6 +54,9 @@ class ToolMeta(BaseModel):
     # セクション分け表示用。ロード分岐と更新保護はレジストリ(builtin_tools)の
     # id が真実源で、このフラグは見た目にしか影響しない
     builtin: Optional[bool] = None
+    # 能力に付く builtin(feed_image = "vision" / feed_audio = "audio")。toolIds では選ばず
+    # 能力のあるモデルに出る — UI がツールの選択肢から外す印(読み分けはレジストリの capability)
+    capability: Optional[str] = None
 
 
 class ToolModel(BaseModel):

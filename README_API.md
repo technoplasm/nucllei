@@ -1031,7 +1031,7 @@ Measurements are in `_memos/audio.md` ("幻聴対策").
 
 Audio input to the model — env only. Applies to models with
 `meta.capabilities.audio` (§4.2): attached audio (§4.3 "Audio attachments") and
-`feed_audio` when the model has it among its tools (§5.7):
+`feed_audio`, which every such model gets (§5.7):
 
 | Var                       | Kind | Default | Range      | Effect                                                                                                                                                                                                                                                |
 | ------------------------- | ---- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1151,7 +1151,8 @@ upstream) or after the connection settings were updated. Preset fields
 so preset edits apply immediately.
 
 A model preset is where all capability wiring happens (`meta` fields):
-`toolIds` (tools available to the model), `filterIds` / `actionIds` (functions),
+`toolIds` (tools available to the model — `feed_image` / `feed_audio` instead come
+with `capabilities.vision` / `.audio`, "Capabilities and tools" below), `filterIds` / `actionIds` (functions),
 `skillIds` + `features.skills` (skills), `features.recipes` (the recipe tools,
 §6.5), plus params and system prompt.
 
@@ -1169,16 +1170,23 @@ goes and how it is frozen: §4.3 "Conversation side". A subagent's child turn
 ignores the child preset's preamble.
 
 **Capabilities and tools.** `meta.capabilities.vision` / `.audio` state what the
-model can take in — a fact about the model; they never add a tool. Which tools a
-model gets is the admin's choice in `meta.toolIds`. A tool that only makes sense
-with a capability (`feed_image` — vision, `feed_audio` — audio) is offered when it
-is selected **and** the model has the capability; selected on a model without it,
-it is not offered (a call could only fail) — the toolkit's `available` hook, §5.1.
+model can take in, and each brings its tool with it: a model that sees attached
+images can also look with `feed_image`, a model that hears attached audio can
+also listen with `feed_audio` — there is no case for one without the other. So
+`feed_image` is offered **iff** `vision` is not `false` (unset counts as on) and
+`feed_audio` **iff** `audio` is `true`, on every turn of that model — chat,
+headless (§4.3), a pipe's `__tools__` and a subagent's child turn (by the child
+preset's capabilities) alike. They are not chosen in `meta.toolIds`: the model
+editor's Tools and a skill's tools do not list them, and a `builtin_feed_image` /
+`builtin_feed_audio` id left in `meta.toolIds` or a skill's `tool_ids` is skipped
+like an id with no tool row (silently, no copy is added). The read ACL of their
+rows does not apply either; their Valves stay editable (§5.7). Every other tool
+is the admin's choice in `meta.toolIds`.
 
 `meta.capabilities.audio` (**default off**; the model editor's Capabilities,
 "Audio" — 「音声の聞き取り」) says the model hears audio. When it is `true`, attached
 audio goes into the user message as audio (§4.3 "Audio attachments"), and
-`feed_audio` can be offered if it is among the model's tools (§5.7). Turn it on only for a model whose API
+the model gets `feed_audio` (§5.7). Turn it on only for a model whose API
 accepts `input_audio`: an API that does not rejects the whole request (seen on
 staging: `openrouter/kimi-k2.6` → 404 "No endpoints found that support input
 audio"). With it off no audio is sent; the `<source>` of an audio attachment says
@@ -1211,7 +1219,7 @@ user message, frame tags included, from the same function as a real request;
 variable, message}]` — a variable written where it is not expanded, §6.1). Nothing
 is run. It goes through the same functions as
 a real request — `get_tools` (`meta.toolIds`) →
-`middleware.build_capability_tools` (`load_skill`, the recipe tools) →
+`middleware.build_capability_tools` (`feed_image` / `feed_audio`, `load_skill`, the recipe tools) →
 `mount_recall_tools_if_needed` → `model_tool_specs`,
 `payload.apply_model_system_prompt_to_body` for the system prompt, and
 `task.fetch_context_sections` → `task.expand_context_template` →
@@ -1313,13 +1321,16 @@ curl -N http://HOST/api/chat/completions \
   or
   `(この発言の文はこの録音の文字起こし。録音は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、音声はこの発言には入れていない。次の手: …feed_audio…)`.
   On a model **without** the
-  capability nothing is sent, and an audio attachment (not a dictation recording —
-  its `<source>` stays as it is, the transcript being the message text) gets
+  capability nothing is sent, and an audio attachment gets
   `audio="unsupported"` (no `duration` — the file is not read)
   and, with no extracted text, the body
-  `(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で貼ってもらえれば読める」と伝える)`
-  instead of the document note. No tool on that model reaches the content, so
-  the next step names none and points at no outside service. Extracted text (an Attachment function that
+  `(音声ファイル — このモデルは音声を聞けないので、中身は渡していない)`
+  instead of the document note — the fact only, no next step: what to do about it
+  is the deployment's prompt / skill's call (a deployment prompt may treat text
+  inside `<source>` as material, not as instructions). A dictation recording on
+  such a model gets no `audio` attribute (its transcript is the message text) and,
+  with no extracted text, the body `(この発言の文はこの録音の文字起こし)`.
+  Extracted text (an Attachment function that
   transcribed it) is kept as the body. Like an attached image,
   the audio stays in the history and is sent again on every later turn. The
   length is measured when the request is built (ffmpeg reads the file — a
@@ -2193,13 +2204,19 @@ async def read_doc(self, path: str) -> Markdown:
 null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
 - A tool is live on a model iff it is listed in the model preset's `meta.toolIds`
   (and the calling user passes the tool's read ACL). There is no per-chat toggle
-  and no global switch — "off everywhere" = assigned to no model.
+  and no global switch — "off everywhere" = assigned to no model. The exception
+  is `builtin_feed_image` / `builtin_feed_audio`, which come with the model's
+  capabilities instead (§4.2 "Capabilities and tools").
 
 ### 5.7 Builtin tools, code execution, tool servers
 
 - **Builtin tools** ship with the server (`builtin_` id prefix). Only their ACL
   and Valves are editable (Valves via `POST /api/v1/tools/id/builtin_<name>/valves/update`,
   admin; values survive restarts — the startup sync does not touch them).
+  `builtin_feed_image` / `builtin_feed_audio` carry `meta.capability` (`"vision"` /
+  `"audio"`): they are offered by the model's capability, not assigned, so their
+  ACL has no effect (the Tools page shows the capability in place of the ACL icon)
+  and only their Valves matter.
   `valves/update` (tools and functions) is a **partial update**: keys you omit keep their
   stored value, `null` resets a key to the code default. Currently:
   - `builtin_history` — `list_history` / `read_history` / `grep_history` over
@@ -2261,9 +2278,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     version was one turn stale and needed a hand-written context-size valve.
   - `builtin_feed_image` — `feed_image(url?, path?, file_id?, filename?, pages?)`:
     shows an image or PDF page(s) to the model itself (a VLM) in the same turn,
-    through `__feed_image__` (§5.3). **Offered only when it is among the model's
-    tools and `meta.capabilities.vision` is not `false`** (unset counts as on;
-    the toolkit's `available` hook, §4.2 "Capabilities and tools"). Exactly one reference argument, interpreted
+    through `__feed_image__` (§5.3). **Offered to every model whose
+    `meta.capabilities.vision` is not `false`** (unset counts as on; not chosen in
+    `meta.toolIds` — `utils/tools.get_capability_tools` loads it and the toolkit's
+    `available` hook decides, §4.2 "Capabilities and tools"). Exactly one reference argument, interpreted
     by name (§3.8): `url` = an absolute URL or a same-server `/ext/{rest}` /
     `/api/v1/files/{id}/content`, `path` = a sandbox absolute path (`/ext/…`,
     `/workspace/…`; `/ext/…` is the same file whichever argument it comes in),
@@ -2316,11 +2334,10 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     Always registered. Usage guidance beyond the docstring: §5.7.1.
   - `builtin_feed_audio` — `feed_audio(url?, path?, file_id?, start?, end?)`:
     lets the model hear audio (a recording, an audio file, the sound of a video)
-    in the same turn, through `__feed_audio__` (§5.3). **Offered only when it is
-    among the model's tools and the model has `meta.capabilities.audio`** (the
-    toolkit's `available` hook, §4.2 "Capabilities and tools") — the row is always
-    registered; a model without the capability does not get it even when it is
-    selected. Exactly one
+    in the same turn, through `__feed_audio__` (§5.3). **Offered to every model
+    with `meta.capabilities.audio`** (not chosen in `meta.toolIds` —
+    `utils/tools.get_capability_tools` loads it and the toolkit's `available` hook
+    decides, §4.2 "Capabilities and tools"); the row is always registered. Exactly one
     reference argument, interpreted by name like `feed_image` (owner check for
     `file_id` and `/api/v1/files/{id}/content`; `path` up to the sandbox limit).
     `start` / `end` are `"23:10"` (m:ss), `"1:02:03"` (h:mm:ss) or seconds; the
@@ -2809,7 +2826,19 @@ argument, the return shape and the one-line ERROR shape (`feed_image` omits
 the return and ERROR shapes — the deployment's system prompt states the
 `ERROR:` / `次の手:` convention once for every tool — and leaves how to show
 what it saw, the continuation of a cut PDF and `pages` on an image to the
-result or error of that case). They are sent on every
+result or error of that case). `feed_image` and `feed_audio` also carry **when
+to call them**: a 「呼ぶ場面」/「呼ばない場面」 list in the description (for
+`feed_image`: an attached PDF's pages, a sandbox image / PDF — always on a
+figure or PDF the model made itself before handing it over, to fix overlapping
+labels, cut-offs and broken layout — and a URL's figure or original; not an
+image attached directly (already in view) nor anything whose text is enough; for
+`feed_audio`: audio not in the message — an attachment over the length limit, a
+sandbox path, a URL — and a section of a long recording again by `start` /
+`end`; not an attachment whose audio is already in the message, nor the whole
+of audio already heard again). That rule lives in the tool, not in the
+deployment's prompts: a model without the capability does not get the tool, so
+the rule goes with it. The descriptions are fixed text, the same for every user
+(no per-user or date-dependent part — prefix cache). They are sent on every
 turn, so the finer guidance was moved here on 2026-10-04 (it cost ~900 tokens
 per turn). A deployment that wants the model to know it carries it in its
 prompts / skill bodies; the text below is a **template** (テンプレート — skill
@@ -2848,7 +2877,7 @@ copied into answers just as easily.
   次にすることを書く。ユーザーに伝えるのは事実だけ。「読めなかった」を全部リンク切れと
   言い換えない。
 
-**feed_audio** (ツールに選ばれていて、音声を聞けるモデルにだけ出る)
+**feed_audio** (音声を聞けるモデルに出る)
 
 - 話の中身・話者・言い方・音を実際に聞いて判断するためのもの。上限以内の添付の音声
   (音声入力の録音を含む) は既に聞こえているので呼ばない。入れた音声は以降のターンにも残る
@@ -3515,8 +3544,9 @@ the tool sink (`tool_output.set_chain`, harvested into `results[i].chain` like
 - **Tools first.** The skill's own `tool_ids` are loaded before `before` /
   `after` run, so they may use them.
 - The tool must be **available in that turn** — in the turn's tool list (the
-  preset's `meta.toolIds` after the per-user read ACL, plus the tools of the
-  loaded skills). Otherwise it is not run and its place holds one ERROR line
+  preset's `meta.toolIds` after the per-user read ACL, the tools the model's
+  capabilities bring (`feed_image` / `feed_audio`, `load_skill`, the recipe
+  tools), plus the tools of the loaded skills). Otherwise it is not run and its place holds one ERROR line
   (`ERROR: skill <id> の読み込み時に実行する <tool> は使えない (このターンの tool の一覧に無い)。次の手: その結果無しで手順書に従う。`).
 - An exception or timeout becomes that tool's ERROR text, as for any tool; the
   remaining entries still run and the skill still loads.

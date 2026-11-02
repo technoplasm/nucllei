@@ -31,14 +31,18 @@
 	);
 
 	onMount(() => {
-		_tools = tools.reduce((acc: Record<string, any>, tool) => {
-			acc[tool.id] = {
-				...tool,
-				selected: selectedToolIds.includes(tool.id)
-			};
+		// 能力に付く builtin (meta.capability — feed_image / feed_audio) は選択肢に出さない:
+		// toolIds では選ばず、能力 (vision / audio) のあるモデルに出る (backend の get_capability_tools)
+		_tools = tools
+			.filter((tool) => !tool?.meta?.capability)
+			.reduce((acc: Record<string, any>, tool) => {
+				acc[tool.id] = {
+					...tool,
+					selected: selectedToolIds.includes(tool.id)
+				};
 
-			return acc;
-		}, {});
+				return acc;
+			}, {});
 	});
 </script>
 

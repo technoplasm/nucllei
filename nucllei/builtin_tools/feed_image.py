@@ -14,7 +14,9 @@ LLENS 固有の知識はこのファイルに無い (許可先・配信元は全
 middleware が実行中 tool-call の sink から参照を harvest して results[i].context_images
 (list[str]、DB に永続) へ載せ、送信直前 inline (`utils/file_images.py`) で 1 回だけ
 base64 化してモデルへ再投入する。base64 は戻り境界にも DB スナップショットにも載らない。
-前提: モデルが画像入力対応 (VLM) であること (text-only では無意味)。
+能力に付く builtin: toolIds では選ばず、画像を見られるモデル (`capabilities.vision` が明示的に false で
+ない — キーが無ければ ON) のターンに出す (`utils/tools.get_capability_tools` が載せ、出すかは
+`Tools.available`)。添付の画像を見られるモデルはこの tool でも見られる — 片方だけの組み合わせは無い。
 
 参照の形 (#139 → 2026-09-07 に 3 形へ整理): sink に積めるのは file_id か参照文字列。
   - file_id: owner チェック (#40 と同クラスの IDOR 封鎖) を本 tool で行う。送信直前
@@ -487,9 +489,8 @@ def _iter_context_files(__files__, __metadata__):
 
 
 class Tools:
-    # ツール (toolIds) は管理者の選択、能力 (capabilities) はモデルが何を受けられるかの事実。
-    # 出すのは「選ばれている AND 画像を受けられる」ときだけ — vision が明示的に false のモデルに
-    # 入れても、目に入れた画像は届かない (feed_audio と同じ仕組み)。
+    # 画像を見られるモデルに出す — 能力に付く builtin (module docstring)。vision が明示的に false の
+    # モデルに入れても、目に入れた画像は届かない
     def available(self, request, user, model, metadata) -> bool:
         return not is_vision_disabled(model)
 
@@ -521,8 +522,17 @@ class Tools:
         __metadata__: Optional[dict] = None,
         __feed_image__: Optional[Callable[[str], None]] = None,
     ) -> str:
-        """画像 (PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF)・PDF を自分の目 (VLM) に入れ、実際に見て判断する (図・レイアウト・印影・手書き)。入れた画像は以降のターンにも残るので、PDF は pages で要るページに絞る。ユーザーには表示されない。
-        対象は url / path / file_id のどれか 1 つ。3 つとも省くと、この会話に添付された PDF を全部合わせて 10 ページまで見る (直接添付の画像は既に見えている)。PDF は 1 件 3 ページまで (pages が無ければ url の #page=N か先頭から) 見て、総ページ数を返す。
+        """画像 (PNG / JPEG / WebP / GIF / BMP / SVG / TIFF / AVIF)・PDF を自分の目 (VLM) に入れ、実際に見て判断する (図・レイアウト・印影・手書き・グラフの読み取り)。入れた画像は以降のターンにも残る。ユーザーの画面には何も出ない (見せるには別に渡す)。
+
+        呼ぶ場面:
+        - 添付の PDF のページを見る (file_id。pages で要るページに絞る)
+        - sandbox の画像・PDF を見る (path)。自分が作った図・PDF は、ユーザーに渡す前に必ずこれで見て、ラベルの重なり・欠け・崩れを直す (PDF は図・表のあるページだけ)
+        - URL の図・原本を見る (url)
+        呼ばない場面:
+        - 直接添付された画像 — 既に見えている。呼んでももう一度入るだけ
+        - 文字を読めば足りるもの — 抜き出した本文や、文字を読む tool で読む
+
+        対象は url / path / file_id のどれか 1 つ。3 つとも省くと、この会話に添付された PDF を全部合わせて 10 ページまで見る。PDF は 1 件 3 ページまで (pages が無ければ url の #page=N か先頭から) 見て、総ページ数を返す。
 
         :param url: スキーム付きの絶対 URL (`http(s)://…`) か、同一サーバの `/ext/…`・`/api/v1/files/{id}/content`。受け取った形のまま (組み立てない・書き換えない・ホストを補わない)
         :param path: sandbox のファイルの絶対パス (`/workspace/…` `/ext/…`)
@@ -530,6 +540,8 @@ class Tools:
         :param filename: 3 つとも省いたときに、添付 PDF をファイル名の部分一致で絞る
         :param pages: PDF のページ範囲 ("3" / "4-6" / "1-2,7")
         """
+        # 説明は全利用者で同じ固定文 (利用者・日付で変わる要素を入れない — prefix cache)。いつ呼ぶか
+        # (呼ぶ場面・呼ばない場面) はここに集める — 能力の無いモデルには tool ごと出ないので説明も一緒に消える。
         # 使い方の細目 (失敗の種類・#page=N・file_id の出どころ等) は README_API §5.7.1。
         # 型の判定・ERROR 文の次の一手は実行時の戻り値が持つ。説明に書かない細目もその場面の戻り値が
         # 言う: 見せ方 (url は ![…](…)、path は fetch_from_workspace) は成功の結果、続きのページ

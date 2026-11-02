@@ -19,6 +19,7 @@
 // - chat/ModelSelector/Selector.svelte: タブ(All / Local / External)
 // - workspace/models/FunctionsSelector.svelte: section.label(Filter / Action)
 // - workspace/models/Capabilities.svelte: t(capability)(vision / audio / usage / preserve_reasoning)
+// - workspace/tools/+page.svelte: t(tool.meta.capability)(能力に付く builtin の vision / audio — 上と同じキー)
 // - workspace/settings/Audio.svelte: TTS split(値の先頭を大文字化して t() に渡す)
 // - layout/Sidebar.svelte: t(chat.time_range)(getTimeRange の固定 4 値。月名・年は
 //   toLocaleString 由来のロケール依存ランタイム値なので登録しない)

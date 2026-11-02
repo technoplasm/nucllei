@@ -8,8 +8,8 @@
 // - usage: 既定 ON。stream_options を弾く互換 API 向けの opt-out (backend の is_usage_requested)
 // - preserve_reasoning: 既定 ON。tool ループの追撃に同じターンの reasoning_content を載せ直す
 //   (backend の is_reasoning_preserved)
-// 能力はツールを出さない — feed_audio / feed_image はツールで選んだうえで、能力のあるモデルにだけ出る
-// (backend の Tools.available)。
+// vision / audio は feed_image / feed_audio も連れてくる — ツール (toolIds) では選ばず、能力のある
+// モデルに出る (backend の get_capability_tools と Tools.available)。ToolsSelector の選択肢にも出さない。
 //
 // continuous_usage (backend の is_continuous_usage_requested、既定 ON) は行に出さない opt-out で、
 // API で false にしたモデルだけ要求しない。エディタで保存しても保存済みの値をそのまま残す。

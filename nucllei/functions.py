@@ -23,7 +23,7 @@ from nucllei.models.functions import Functions
 from nucllei.models.models import Models
 
 from nucllei.utils.plugin import load_function_module_by_id
-from nucllei.utils.tools import get_tools
+from nucllei.utils.tools import get_capability_tools, get_tools
 
 from nucllei.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL
 
@@ -264,24 +264,24 @@ async def generate_function_chat_completion(
         "__metadata__": metadata,
         "__request__": request,
     }
-    extra_params["__tools__"] = get_tools(
-        request,
-        tool_ids,
-        user,
-        {
-            **extra_params,
-            # llens(#100): tool の実行中通知は __progress__ 一本。tool-push ヘルパ
-            # (#88/#89)もここには渡っておらず、宣言した tool が pipe 経由だと
-            # TypeError で落ちていた(既存の非対称)。いずれも sink が無ければ no-op。
-            "__event_emitter__": __event_emitter__,
-            "__progress__": tool_output.progress,
-            "__display__": tool_output.display,
-            "__feed_image__": tool_output.feed_image,
-            "__model__": models.get(form_data["model"], None),
-            "__messages__": form_data["messages"],
-            "__files__": files,
-        },
-    )
+    tool_extra_params = {
+        **extra_params,
+        # llens(#100): tool の実行中通知は __progress__ 一本。tool-push ヘルパ
+        # (#88/#89)もここには渡っておらず、宣言した tool が pipe 経由だと
+        # TypeError で落ちていた(既存の非対称)。いずれも sink が無ければ no-op。
+        "__event_emitter__": __event_emitter__,
+        "__progress__": tool_output.progress,
+        "__display__": tool_output.display,
+        "__feed_image__": tool_output.feed_image,
+        "__model__": models.get(form_data["model"], None),
+        "__messages__": form_data["messages"],
+        "__files__": files,
+    }
+    # toolIds の tool と、能力に付く builtin (feed_image / feed_audio — チャットの経路と同じ規則)
+    pipe_tools = get_tools(request, tool_ids, user, tool_extra_params)
+    for name, entry in get_capability_tools(request, user, tool_extra_params).items():
+        pipe_tools.setdefault(name, entry)
+    extra_params["__tools__"] = pipe_tools
 
     if model_info:
         if model_info.base_model_id:

@@ -1598,14 +1598,12 @@ def test_spec_description_carries_the_new_sentences():
 
     spec = next(s for s in get_tool_specs(_mod().Tools()) if s["name"] == "feed_image")
     desc = spec["description"]
-    assert (
-        "入れた画像は以降のターンにも残るので、PDF は pages で要るページに絞る。"
-        in desc
-    )
+    assert "入れた画像は以降のターンにも残る。" in desc
+    assert "(file_id。pages で要るページに絞る)" in desc
     assert "このターン内で" not in desc
     assert "全部合わせて 10 ページまで" in desc
-    # 見せ方・作らないことは成功の結果が言う
-    assert "Files" not in desc and "ユーザーには表示されない" in desc
+    # 見せ方の細目・作らないことは成功の結果が言う
+    assert "Files" not in desc and "ユーザーの画面には何も出ない" in desc
     for gone in ("新しいファイル", "![", "(任意)", "続きは"):
         assert gone not in json_dumps(spec), gone
 
@@ -1616,7 +1614,7 @@ def json_dumps(obj):
     return json.dumps(obj, ensure_ascii=False)
 
 
-# --- 出す / 出さない: ツールに選ばれている AND 画像を受けられる (vision が明示的に false でない) ---
+# --- 出す / 出さない: 能力に付く builtin — 画像を見られる (vision が明示的に false でない) モデルに出す ---
 
 
 def _model(caps):
@@ -1636,36 +1634,85 @@ def test_offered_unless_vision_is_explicitly_off():
     assert not tools.available(None, None, _model({"vision": False}), {})
 
 
-def test_get_tools_hides_it_from_models_without_vision(monkeypatch):
-    """toolIds に入っていても、vision が false のモデルのターンには載らない (get_tools の available)。"""
+def test_registered_as_a_capability_tool():
+    import nucllei.builtin_tools as pkg
+
+    assert pkg.BUILTIN_TOOLS["builtin_feed_image"]["capability"] == "vision"
+    assert pkg.is_capability_tool_id("builtin_feed_image")
+
+
+def _loader(monkeypatch):
+    """Tools 行と request を偽物にして (get_tools, get_capability_tools, request, user) を返す。"""
     from nucllei.utils import tools as tools_mod
 
     def row(tool_id):
         return types.SimpleNamespace(
             id=tool_id,
             user_id="system",
-            access_control=None,
+            access_control={"read": {"user_ids": [], "group_ids": []}},
             name="Feed Image",
             specs=tools_mod.get_tool_specs(_mod().Tools()),
         )
 
-    monkeypatch.setattr(tools_mod.Tools, "get_tool_by_id", row)
+    monkeypatch.setattr(
+        tools_mod.Tools,
+        "get_tool_by_id",
+        lambda tool_id: row(tool_id) if tool_id == "builtin_feed_image" else None,
+    )
     monkeypatch.setattr(tools_mod.Tools, "get_tool_valves_by_id", lambda tool_id: {})
     request = types.SimpleNamespace(
         app=types.SimpleNamespace(
             state=types.SimpleNamespace(TOOLS={"builtin_feed_image": _mod().Tools()})
         )
     )
-    user = types.SimpleNamespace(id="u1", role="admin")
+    # 行の read ACL は空 (誰にも読ませない) — 能力に付く builtin は ACL を見ない
+    user = types.SimpleNamespace(id="u1", role="user")
+    return tools_mod, request, user
+
+
+def test_capability_tools_offer_it_by_vision(monkeypatch):
+    """toolIds に無くても、vision が明示的に false でないモデルのターンに載る。"""
+    tools_mod, request, user = _loader(monkeypatch)
     for caps, expected in (
         ({"vision": True}, ["feed_image"]),
         ({}, ["feed_image"]),
+        (None, ["feed_image"]),
         ({"vision": False}, []),
     ):
-        got = tools_mod.get_tools(
+        got = tools_mod.get_capability_tools(
             request,
-            ["builtin_feed_image"],
             user,
             {"__metadata__": {"model": _model(caps)}, "__user__": {"id": "u1"}},
         )
         assert list(got) == expected, caps
+        if expected:
+            assert got["feed_image"]["tool_id"] == "builtin_feed_image"
+
+
+def test_tool_ids_do_not_load_it(monkeypatch):
+    """toolIds・skill の tool_ids に残った builtin_feed_image は読まない (行の無い id と同じく黙って飛ばす)
+    — 能力の側と二重にならない。"""
+    tools_mod, request, user = _loader(monkeypatch)
+    user.role = "admin"
+    for enforce in (True, False):
+        got = tools_mod.get_tools(
+            request,
+            ["builtin_feed_image"],
+            user,
+            {"__metadata__": {"model": _model({"vision": True})}},
+            enforce_access_control=enforce,
+        )
+        assert got == {}
+
+
+def test_description_says_when_to_call_it():
+    """いつ呼ぶかは tool の説明に集める (能力の無いモデルには tool ごと出ないので一緒に消える)。
+    全利用者で同じ固定文 — 変数 ({{…}}) を入れない。"""
+    from nucllei.utils.tools import tool_description_from_docstring
+
+    desc = tool_description_from_docstring(_mod().Tools.feed_image.__doc__)
+    calls, rest = desc.split("呼ぶ場面:\n", 1)[1].split("呼ばない場面:\n", 1)
+    assert "添付の PDF" in calls and "(path)" in calls and "(url)" in calls
+    assert "ユーザーに渡す前に必ずこれで見て" in calls
+    assert "直接添付された画像" in rest and "文字を読めば足りる" in rest
+    assert "{{" not in desc and "ユーザーの画面には何も出ない" in desc

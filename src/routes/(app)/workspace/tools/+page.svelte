@@ -177,26 +177,48 @@
 						</div>
 					</div>
 
-					<Tooltip
-						content={(tool.access_control ?? null) === null
-							? $i18n.t('Public')
-							: $i18n.t('Private')}
-					>
-						<button
-							class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
-							type="button"
-							aria-label={(tool.access_control ?? null) === null
+					{#if tool.meta?.capability}
+						<!-- 能力に付く builtin (feed_image / feed_audio): その能力のあるモデルに誰にでも出る —
+						     割り当ても visibility も効かないので、ACL のアイコンの代わりに能力を示す -->
+						<Tooltip
+							content={$i18n.t(
+								'Comes with the {{capability}} capability: offered to every model that has it, not assigned under Tools',
+								{ capability: $i18n.t(tool.meta.capability) }
+							)}
+						>
+							<span
+								class="block px-2 py-2 text-content-muted"
+								aria-label={$i18n.t(tool.meta.capability)}
+							>
+								<span
+									class="{tool.meta.capability === 'audio'
+										? 'i-lucide-ear'
+										: 'i-lucide-eye'} size-4 block"
+								></span>
+							</span>
+						</Tooltip>
+					{:else}
+						<Tooltip
+							content={(tool.access_control ?? null) === null
 								? $i18n.t('Public')
 								: $i18n.t('Private')}
-							onclick={() => openAccessControl(tool)}
 						>
-							{#if (tool.access_control ?? null) === null}
-								<span class="i-lucide-globe size-4 block"></span>
-							{:else}
-								<span class="i-lucide-lock size-4 block"></span>
-							{/if}
-						</button>
-					</Tooltip>
+							<button
+								class="px-2 py-2 text-content bg-transparent hover:bg-surface-hover rounded-xl"
+								type="button"
+								aria-label={(tool.access_control ?? null) === null
+									? $i18n.t('Public')
+									: $i18n.t('Private')}
+								onclick={() => openAccessControl(tool)}
+							>
+								{#if (tool.access_control ?? null) === null}
+									<span class="i-lucide-globe size-4 block"></span>
+								{:else}
+									<span class="i-lucide-lock size-4 block"></span>
+								{/if}
+							</button>
+						</Tooltip>
+					{/if}
 
 					<Tooltip content={tool.has_valves ? $i18n.t('Values') : $i18n.t('No values')}>
 						<button

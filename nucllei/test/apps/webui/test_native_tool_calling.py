@@ -2205,14 +2205,15 @@ class TestToolsAlwaysNative(AbstractPostgresTest):
 
     def _bind_tools_to_model(self, tool_ids):
         """llens(#54): tool はモデル割り当て(meta.toolIds)からサーバー側解決。
-        mock-model に custom model 行を重ねて toolIds を持たせる。"""
+        mock-model に custom model 行を重ねて toolIds を持たせる。vision は切る — 画像を見られる
+        モデルには能力に付く feed_image が toolIds に依らず載るので、割り当てた tool だけを見るため。"""
         from nucllei.models.models import ModelForm, Models
 
         Models.insert_new_model(
             ModelForm(
                 id="mock-model",
                 name="mock-model",
-                meta={"toolIds": tool_ids},
+                meta={"toolIds": tool_ids, "capabilities": {"vision": False}},
                 params={},
                 access_control=None,
             ),

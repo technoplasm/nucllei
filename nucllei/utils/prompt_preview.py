@@ -5,7 +5,8 @@
   preset の system prompt を当てるのと同じ)
 - 会話の前置き: `task.fetch_context_sections` → `task.expand_context_template` → `conversation_context.frame_initial`
   (最初の発言の先頭に入るバイト列 = `framed`)
-- tool の宣言: `get_tools` (meta.toolIds) → `middleware.build_capability_tools` (load_skill・レシピ)
+- tool の宣言: `get_tools` (meta.toolIds) → `middleware.build_capability_tools` (feed_image / feed_audio・
+  load_skill・レシピ)
   → `mount_recall_tools_if_needed` → `model_tool_specs` (process_chat_payload と同じ並び)
 - skill の本文: `skills.expand_skill_content` (activate_skill と同じ)
 
@@ -172,7 +173,7 @@ async def preview_tools(
         )
     for name, entry in (
         await build_capability_tools(
-            model, user, tools_extra_params, preset_system, preset_context
+            request, model, user, tools_extra_params, preset_system, preset_context
         )
     ).items():
         tools_dict[name] = entry

@@ -207,7 +207,49 @@ def get_tools(
     enforce_access_control=False はサーバー由来の id 専用(#35 step2b: skill の
     tool_ids。skill の read 可視性 + 「tool 紐づき skill は admin のみ作成可」が
     認可の単位)。リクエスト由来の id では必ず True のまま使うこと(GHSA-4pcg)。
+
+    能力に付く builtin(builtin_feed_image / builtin_feed_audio)の id は読まない — 行の無い id と
+    同じく黙って飛ばす。これらは get_capability_tools がモデルの能力で載せる。
     """
+    from nucllei.builtin_tools import is_capability_tool_id
+
+    return _load_tools(
+        request,
+        [tool_id for tool_id in tool_ids if not is_capability_tool_id(tool_id)],
+        user,
+        extra_params,
+        enforce_access_control=enforce_access_control,
+    )
+
+
+def get_capability_tools(
+    request: Request, user: UserModel, extra_params: dict
+) -> dict[str, dict]:
+    """能力に付く builtin(feed_image / feed_audio)のうち、このターンのモデルに出すもの。
+
+    出すかは各 toolkit の available フック(feed_image は vision が明示的に false でない、
+    feed_audio は capabilities.audio が true — 見るモデルは get_tools と同じ _hook_model)。
+    toolIds の割り当て・行の read ACL は見ない(能力のあるモデルには利用者によらず出す)。
+    """
+    from nucllei.builtin_tools import CAPABILITY_TOOL_IDS
+
+    return _load_tools(
+        request,
+        list(CAPABILITY_TOOL_IDS),
+        user,
+        extra_params,
+        enforce_access_control=False,
+    )
+
+
+def _load_tools(
+    request: Request,
+    tool_ids: list[str],
+    user: UserModel,
+    extra_params: dict,
+    enforce_access_control: bool = True,
+) -> dict[str, dict]:
+    """get_tools / get_capability_tools の本体(id の振り分けは呼び手)。"""
     tools_dict = {}
 
     # 同じ id の重複指定は 1 回だけ読む(自分自身との名前衝突にしない)

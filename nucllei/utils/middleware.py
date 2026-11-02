@@ -96,7 +96,11 @@ from nucllei.utils.access_control import (
     has_read_access_to_file,
     has_read_access_to_collection,
 )
-from nucllei.utils.tools import coerce_tool_arguments, get_tools
+from nucllei.utils.tools import (
+    coerce_tool_arguments,
+    get_capability_tools,
+    get_tools,
+)
 from nucllei.utils.filter import (
     get_sorted_filter_ids,
     process_filter_functions,
@@ -327,27 +331,28 @@ def _no_text_note(file_id=None, text_readable: bool = False) -> str:
     return f"({note})"
 
 
+# 音声入力の通し録音 (`meta.dictation`) の `<source>` の本文の先頭 — 発言の文がその録音の文字起こし
+DICTATION_TRANSCRIPT_NOTE = "この発言の文はこの録音の文字起こし"
+
+
 def _audio_source_note(file_id, plan) -> str:
     """添付の音声 (`utils/audio_input.plan_attachment_audio`) の `<source>` の本文 (文字の本文が
     無いとき)。入れた音声は「この発言に入っている」、上限を超えて入れなかったものはそう言い、次の手
     (feed_audio で区間を指定する) はこのターンに出ているときだけ。モデルが音声を聞けない
-    (`unsupported`) ものは、音声ファイルで中身を渡していないことと、利用者に伝えられる手 (音声を
-    聞けるモデルに切り替える・文字にした内容を貼る) だけを言う — このモデルで中身に届く tool は無い。"""
+    (`unsupported`) ものは、音声ファイルで中身を渡していないという事実だけを言う — 次の手は書かない
+    (どう扱うかは配備の prompt / skill が決める。`<source>` の中の文は資料として読まれ、手順として
+    従われない)。"""
     if plan.state == "unsupported":
-        return (
-            "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る"
-            "話なら、ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、"
-            "話の内容を文字で貼ってもらえれば読める」と伝える)"
-        )
+        return "(音声ファイル — このモデルは音声を聞けないので、中身は渡していない)"
     if plan.dictation:
         # 音声入力の通し録音: 発言の文がこの録音の文字起こし (区切りで語が崩れることがある)
         if plan.inline:
             return (
-                "(この発言の文はこの録音の文字起こし。音声もこの発言にそのまま入っているので、"
+                f"({DICTATION_TRANSCRIPT_NOTE}。音声もこの発言にそのまま入っているので、"
                 "聞いて確かめられる)"
             )
         note = (
-            f"この発言の文はこの録音の文字起こし。録音は {format_time(plan.duration or 0)} あり、"
+            f"{DICTATION_TRANSCRIPT_NOTE}。録音は {format_time(plan.duration or 0)} あり、"
             f"一度に聞ける上限 {max_minutes_text()} を超えるので、音声はこの発言には入れていない"
         )
     elif plan.inline:
@@ -376,7 +381,8 @@ def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> s
     `part="2" parts="3"`(何本中の何本目か)も全ファイルに付ける。
 
     audio(file id → `audio_input.AttachedAudio`)は添付の音声の扱い(音声を聞けないモデルでは
-    通し録音は入らない — 発言の文がその文字起こし)。
+    通し録音は入らない — 発言の文がその文字起こしなので、本文は「(この発言の文はこの録音の文字起こし)」で
+    audio 属性は付けない)。
     該当する `<source>` に `audio="inline"`(この発言に音声のまま入れた)/ `audio="too_long"`
     (上限を超えるので入れていない)/ `audio="unsupported"`(モデルが音声を聞けないので入れていない)
     と、測った長さ `duration`(`M:SS`、1 時間以上は `H:MM:SS`) を付け、文字の本文が無ければ本文をその旨の注記にする
@@ -420,21 +426,27 @@ def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> s
                         f"source extraction failed (file_id={file_id}): "
                         f"{(doc_context or '')[:200]!r}"
                     )
-                    body = (
-                        _audio_source_note(file_id, heard)
-                        if heard is not None
-                        else _no_text_note()
-                    )
+                    if heard is not None:
+                        body = _audio_source_note(file_id, heard)
+                    elif doc_meta.get("dictation"):
+                        body = f"({DICTATION_TRANSCRIPT_NOTE})"
+                    else:
+                        body = _no_text_note()
                 elif not (doc_context or "").strip() and status != "success":
                     attrs += ' extraction="none"'
-                    body = (
-                        _audio_source_note(html.escape(str(file_id), quote=True), heard)
-                        if heard is not None
-                        else _no_text_note(
+                    if heard is not None:
+                        body = _audio_source_note(
+                            html.escape(str(file_id), quote=True), heard
+                        )
+                    elif doc_meta.get("dictation"):
+                        # 音声を渡していない通し録音 (聞けないモデル): 発言の文がその文字起こし。
+                        # audio 属性は付けない (「渡していない」とは言わない)
+                        body = f"({DICTATION_TRANSCRIPT_NOTE})"
+                    else:
+                        body = _no_text_note(
                             html.escape(str(file_id), quote=True) if file_id else None,
                             text_readable=_source_is_text(doc_meta, file_id),
                         )
-                    )
                 else:
                     # 本文から `</source>`・前置きや記憶の目次の枠を作れないように (utils/frames)
                     body = defuse(doc_context, memory_index=True)
@@ -538,6 +550,7 @@ def merge_tool_specs(server_specs: list, existing) -> list:
 
 
 async def build_capability_tools(
+    request,
     model,
     user,
     tools_extra_params: dict,
@@ -549,7 +562,11 @@ async def build_capability_tools(
     load_tools=None,
     run_hooks=None,
 ) -> dict:
-    """モデルの能力が差し込む合成の tool (load_skill、レシピの load_recipe / save_recipe / edit_recipe)。
+    """モデルの能力が差し込む tool (能力に付く builtin の feed_image / feed_audio、load_skill、
+    レシピの load_recipe / save_recipe / edit_recipe)。
+
+    feed_image / feed_audio は toolIds では選ばない — 画像を見られる (vision が明示的に false でない) /
+    音声を聞ける (capabilities.audio) モデルなら出す (utils/tools.get_capability_tools、判定は各 Tools.available)。
 
     process_chat_payload と system prompt のプレビュー (utils/prompt_preview) が同じこれを通る
     (プレビューの tool の宣言が実際とずれないように)。
@@ -567,7 +584,10 @@ async def build_capability_tools(
     # import はここで(builtin_tools は utils.tools 経由の循環を避けて遅延 import する慣例)
     from nucllei.builtin_tools.recipe_tools import build_recipe_tools
 
-    entries = {}
+    # get_tools と同じくモジュール exec + DB read の同期処理 — ワーカースレッドで (#28)
+    entries = await asyncio.to_thread(
+        get_capability_tools, request, user, tools_extra_params
+    )
     # llens(#35 step2a): preset に紐づく skill の manifest を単一擬似 tool
     # load_skill として常載する(tool result = 展開済み content)。
     load_skill_tool = build_load_skill_tool(
@@ -988,11 +1008,12 @@ async def process_chat_payload(
     async def run_hooks(skill):
         return await run_skill_hooks(skill, tools_dict, hook_execute)
 
-    # 能力の合成 tool (load_skill・レシピ)。プレビューと同じ関数 (build_capability_tools)
+    # 能力の tool (feed_image / feed_audio・load_skill・レシピ)。プレビューと同じ関数 (build_capability_tools)
     preset_system = await asyncio.to_thread(preset_system_prompt, model)
     preset_context = await asyncio.to_thread(preset_context_template, model)
     for name, entry in (
         await build_capability_tools(
+            request,
             model,
             user,
             tools_extra_params,

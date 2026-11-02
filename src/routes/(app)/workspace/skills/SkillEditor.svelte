@@ -174,7 +174,10 @@
 
 		// tool 選択肢は admin のときのみ取得・描画(非 admin には出さない)
 		if ($user?.role === 'admin') {
-			tools = (await getTools().catch(() => [])) ?? [];
+			// 能力に付く builtin (meta.capability — feed_image / feed_audio) は選ばない: 能力のあるモデルに出る
+			tools = ((await getTools().catch(() => [])) ?? []).filter(
+				(tool: any) => !tool?.meta?.capability
+			);
 			_tools = tools.reduce((acc: Record<string, any>, tool) => {
 				acc[tool.id] = {
 					...tool,

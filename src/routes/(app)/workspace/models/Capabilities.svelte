@@ -13,9 +13,11 @@
 	const i18n = getContext('i18n');
 
 	const helpText: Record<CapabilityKey, string> = {
-		vision: $i18n.t('Model accepts image inputs'),
+		vision: $i18n.t(
+			'Model sees images: attached images are sent as images, and it can also look at images and PDF pages with feed_image'
+		),
 		audio: $i18n.t(
-			'Model hears audio: attached audio, including microphone dictation recordings, is sent as audio. Turn this on only for models whose API accepts audio input — other APIs reject the whole request'
+			'Model hears audio: attached audio, including microphone dictation recordings, is sent as audio, and it can also listen to audio with feed_audio. Turn this on only for models whose API accepts audio input — other APIs reject the whole request'
 		),
 		usage: $i18n.t(
 			'Request measured usage (token consumption) via stream_options.include_usage. Turn this off only for OpenAI-compatible APIs that reject it as an unknown parameter'

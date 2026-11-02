@@ -1204,18 +1204,30 @@ prompt_tokens へのフォールバック・owner-only(他人の chat_id は無�
 - `timeouts` クラス属性の非正値(0 / -1)は「システム側上限なし」として per-entry に載るようになった
   (以前は無視して `TOOL_EXEC_TIMEOUT_S`)。
 
-## 改訂(2026-11-02)— `builtin_feed_audio` / 能力とツールの境界
+## 改訂(2026-11-02)— `builtin_feed_audio` / 能力に付く builtin
 
 - 常に登録の builtin は 8 本(history / chat_files / attachment_text / context_budget /
   feed_image / **feed_audio** / fetch_url / subagent)+ env ゲートの sandbox。
 - `feed_audio(url?, path?, file_id?, start?, end?)` は feed_image の音声版(引数の意味・resolver・所有者チェック・
   File を作らない・`__feed_audio__` の tool-push は同じ)。積んだ参照は `results[i].context_audio`。
-- **能力とツールの境界**(ken 決定): 能力(`capabilities.vision` / `audio`)はモデルが何を受けられるかの事実で、
-  ツールを出す・入れる働きは持たない。何を使わせるかは管理者がツール(toolIds)で選ぶ。能力が前提のツールは
-  「選ばれている AND 能力がある」ときだけ出す — 能力の無いモデルに選ばれていても、呼べば必ず失敗するので出さない。
-  仕組みは toolkit の `available` フック: feed_audio は `capabilities.audio`(既定 OFF)が true のとき、
-  feed_image は `capabilities.vision` が明示的に false でないとき(vision はキーが無いと ON —
-  `image_refs.is_vision_disabled`)。音声は受けない上流に送るとリクエストごと落ちる。行は常に登録。
+- **能力に付く builtin**(ken 決定): 添付の画像を見られるモデルは feed_image でも見られ、添付の音声を聞ける
+  モデルは feed_audio でも聞ける — 片方だけの組み合わせは無い。なので feed_image / feed_audio は toolIds で
+  選ばず、能力で出す: feed_image は `capabilities.vision` が明示的に false でないとき(キーが無いと ON —
+  `image_refs.is_vision_disabled`)、feed_audio は `capabilities.audio`(既定 OFF)が true のとき。
+  - 仕組み: `BUILTIN_TOOLS` の定義に `capability`("vision" / "audio")。`utils/tools.get_capability_tools` が
+    `CAPABILITY_TOOL_IDS` を行の read ACL を見ずに読み(能力のあるモデルには利用者によらず出す)、出すかは
+    toolkit の `available` フックが決める。差し込むのは `middleware.build_capability_tools`(load_skill・レシピと
+    同じ口 — チャット・headless・プレビュー・サブエージェントの子ターン(子 preset の能力)が同じ関数を通る)と、
+    pipe の `__tools__`(`functions.py`)。
+  - `get_tools` は能力に付く id を読まない(行の無い id と同じく黙って飛ばす)— toolIds・skill の `tool_ids` に
+    残った `builtin_feed_image` / `builtin_feed_audio` で二重にならず、能力の無いモデルに出ることも無い。
+    移行コードは書かない(配備側で toolIds から外すのは任意 — 残っていても何も起きない)。
+  - 行は常に登録(Valves — feed_image の `max_image_mb` / `max_pages` — を管理画面で編集するため)。sync が
+    `meta.capability` を書き、UI はこれでモデルエディタの「ツール」・skill の tools の選択肢から外し、
+    ツール一覧では ACL のアイコンの代わりに能力を示す(ACL は効かない)。
+- **いつ呼ぶかは tool の説明に集める**(ken 決定): feed_image / feed_audio の説明(docstring の先頭)に
+  「呼ぶ場面」「呼ばない場面」を書く — 配備の prompt にばらばらに書かない。能力の無いモデルには tool ごと
+  出ないので、説明も一緒に消える。説明は全利用者で同じ固定文(利用者・日付で変わる要素を入れない — prefix cache)。
 - 本文の無い添付の次の手(`<source>` の注記・read_attachment の ERROR)は、feed_audio がそのターンに出ていれば
   「音声は feed_audio で聞く」を足す。
 - 詳細は `audio.md`「音声のまま聞かせる」、契約は README_API §5.7。
