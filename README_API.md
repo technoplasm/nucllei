@@ -1285,16 +1285,24 @@ curl -N http://HOST/api/chat/completions \
   `{"type": "input_audio", "input_audio": {"data": "<base64>", "format": "mp3"}}`
   (mono, 16 kHz, 32 kbps — converted with ffmpeg right before the call; the
   engines accept mp3 / wav / flac / m4a and reject WebM, the browsers' recording
-  format, with a 400). Not put in: voice-dictation recordings (`meta.dictation`,
-  §4.4 — their text is already in the message) and audio longer than
+  format, with a 400). Voice-dictation recordings (`meta.dictation`, §4.4) go in
+  the same way — each file of a split recording on its own — next to their
+  transcript, which is the message text. Not put in: audio longer than
   `AUDIO_INPUT_MAX_MINUTES` (§3.9). The `<source>` of an audio attachment the
   model gets this way carries `audio="inline"` or `audio="too_long"` and
   `duration="H:MM:SS"` (after `name`); with no extracted text its body is
   `(この音声はこの発言にそのまま入っている)` or
   `(この音声は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない — 中身は聞こえていない。次の手: 聞くなら feed_audio(file_id="…", start=…, end=…) で 120 分以内の区間を指定する)`
-  (the next step only when `feed_audio` is on the turn). On a model **without** the
-  capability nothing is sent, and an audio attachment (again not a dictation
-  recording) gets `audio="unsupported"` (no `duration` — the file is not read)
+  (the next step only when `feed_audio` is on the turn). For a dictation recording
+  (`dictation="true"` follows the `audio` attributes) the body says the message
+  text is its transcript:
+  `(この発言の文はこの録音の文字起こし。音声もこの発言にそのまま入っているので、聞いて確かめられる)`
+  or
+  `(この発言の文はこの録音の文字起こし。録音は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、音声はこの発言には入れていない。次の手: …feed_audio…)`.
+  On a model **without** the
+  capability nothing is sent, and an audio attachment (not a dictation recording —
+  its `<source>` stays as it is, the transcript being the message text) gets
+  `audio="unsupported"` (no `duration` — the file is not read)
   and, with no extracted text, the body
   `(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で貼ってもらえれば読める」と伝える)`
   instead of the document note. No tool on that model reaches the content, so
@@ -1557,9 +1565,9 @@ Firefox, `audio/mp4` from a browser whose MediaRecorder cannot produce WebM (Saf
 `;codecs=` suffix) and passes the optional multipart field `dictation` (a JSON
 string). It is the only client-writable `meta` key: the shape below is validated
 (unknown keys rejected, ≤ 512 KB, audio files only) and stored as `meta.dictation`.
-The model only sees the `<source … dictation="true">` mark (§4.3) — a model that
-hears audio does not get the recording as audio either (its text is already in the
-message; `feed_audio` can still play it to the model); a deployment
+The model sees the `<source … dictation="true">` mark (§4.3); a model that hears
+audio (`meta.capabilities.audio`) also gets the recording itself as audio, up to
+`AUDIO_INPUT_MAX_MINUTES` per file (§4.3 "Audio attachments"); a deployment
 tool reads the segment list from `GET /api/v1/files/{id}` to re-transcribe a span
 from the original.
 
@@ -2307,7 +2315,7 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     created**, and the conversion to mp3 happens at send time. The result line
     is `- <name> の 1:30〜10:00 (全 10:00) を自分の耳に入れた (ユーザーには再生されない)。`.
     The audio stays in the context on later turns. Voice-dictation recordings
-    can be fed (they are only kept out of the automatic attachment audio).
+    can be fed like any audio (a recording over the limit is heard by section).
   - `builtin_fetch_url` — `fetch_url(url, query?, offset?, limit?, max_mb?)`:
     fetches one page / document by URL and returns it as plain text plus a link
     list, for browsing web that no document corpus holds. `url` is
@@ -2827,12 +2835,12 @@ copied into answers just as easily.
 **feed_audio** (音声を聞けるモデルにだけ出る)
 
 - 話の中身・話者・言い方・音を実際に聞いて判断するためのもの。上限以内の添付の音声
-  (音声入力の録音を除く) は既に聞こえているので呼ばない。入れた音声は以降のターンにも残る
+  (音声入力の録音を含む) は既に聞こえているので呼ばない。入れた音声は以降のターンにも残る
   (context を使い続ける) ので、長い録音は start / end で要る区間に絞る。
 - 上限を超える添付の音声は `<source>` が `audio="too_long"` と長さを言う。区間を分けて
   順に聞く (1 回の区間も同じ上限)。
-- 音声入力の録音 (`dictation="true"`) は本文に文字起こし済み。聞き違いを確かめたいときだけ
-  file_id で聞く。
+- 音声入力の録音 (`dictation="true"`) は発言の文がその文字起こし。上限以内なら音声も聞こえて
+  いるので、聞き違いはその音声で確かめる。上限を超えた録音は区間を指定して聞く。
 - ユーザーには再生されない。
 
 **fetch_url**

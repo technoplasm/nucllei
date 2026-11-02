@@ -6,7 +6,8 @@
 - 送信直前の実体化(inline_audio_refs): 持ち主の file は mp3 の base64、音声を聞けないモデルでは注記、
   他人の file・読めない参照は同じ注記、上限を超える区間は名前付きの注記、data の webm は mp3 に
 - 添付の音声(plan_attachment_audio と process_chat_payload): 能力が無ければ何もしない、通し録音
-  (meta.dictation)は入れない、上限を超える長さは入れない(`<source>` がそう言う)、入れた音声は
+  (meta.dictation)も聞けるモデルには入れる(聞けないモデルでは今までどおり)、上限を超える長さは
+  入れない(`<source>` がそう言う)、入れた音声は
   その発言の末尾に入り、履歴の発言の添付も毎ターン入る
 """
 
@@ -419,8 +420,11 @@ class TestAudioInput(AbstractPostgresTest):
 
         self.monkeypatch.setattr(audio_input, "AUDIO_INPUT_MAX_MINUTES", 2.5 / 60)
         plan = self._plan([a, d, t, long], self._model())
-        assert set(plan) == {"f-a", "f-l"}  # 通し録音・音声でないものは入れない
+        assert set(plan) == {"f-a", "f-d", "f-l"}  # 音声でないものは入れない
         assert plan["f-a"].state == "inline" and abs(plan["f-a"].duration - 2.0) < 0.05
+        # 聞けるモデルには通し録音も同じ規則で入れる
+        assert plan["f-d"].state == "inline" and plan["f-d"].dictation
+        assert not plan["f-a"].dictation
         assert plan["f-l"].state == "too_long" and plan["f-l"].name == "long.wav"
 
     def _run(self, messages, files, model):
@@ -470,13 +474,21 @@ class TestAudioInput(AbstractPostgresTest):
             "f-d", _wav(2.0), "audio/webm", meta={"dictation": {"version": 1}}
         )
         long = self._file("f-l", _wav(3.0), "audio/wav", name="long.wav")
+        d_long = self._file(
+            "f-dl",
+            _wav(3.0),
+            "audio/webm",
+            meta={"dictation": {"version": 1, "part": 2, "parts": 2}},
+        )
         self.monkeypatch.setattr(audio_input, "AUDIO_INPUT_MAX_MINUTES", 2.5 / 60)
         wire = [
             {"role": "user", "id": "m1", "content": "これを聞いて", "files": [a]},
             {"role": "assistant", "content": "聞きました。"},
             {"role": "user", "id": "m2", "content": "次はこれ", "files": [d, long]},
+            {"role": "assistant", "content": "はい。"},
+            {"role": "user", "id": "m3", "content": "口述の続き", "files": [d_long]},
         ]
-        out = self._run(wire, [a, d, long], self._model())
+        out = self._run(wire, [a, d, long, d_long], self._model())
         expected_data = base64.b64encode(b"MP3:" + _wav(2.0)[:4]).decode()
         first = out[0]["content"]
         assert isinstance(first, list)
@@ -487,13 +499,28 @@ class TestAudioInput(AbstractPostgresTest):
         assert 'file_id="f-a"' in first[0]["text"]
         assert 'audio="inline" duration="0:02"' in first[0]["text"]
         assert "(この音声はこの発言にそのまま入っている)" in first[0]["text"]
-        # 2 つ目の発言: 通し録音は入れない・上限を超える長さは入れず、<source> がそう言う
+        # 2 つ目の発言: 通し録音は音声のまま入り (発言の文はその文字起こし)、上限を超える長さは
+        # 入れず、<source> がそう言う
         second = out[2]["content"]
-        assert isinstance(second, str)
-        assert "input_audio" not in str(out[2])
-        assert 'file_id="f-l"' in second and 'audio="too_long"' in second
-        assert "上限" in second and "聞こえていない" in second
-        assert 'file_id="f-d" name="f-d.bin" dictation="true"' in second
+        assert isinstance(second, list)
+        assert [p["type"] for p in second] == ["text", "input_audio"]
+        assert second[1]["input_audio"]["format"] == "mp3"
+        text = second[0]["text"]
+        assert 'file_id="f-l"' in text and 'audio="too_long"' in text
+        assert "上限" in text and "聞こえていない" in text
+        assert (
+            '<source file_id="f-d" name="f-d.bin" audio="inline" duration="0:02"'
+            ' dictation="true" extraction="none">(この発言の文はこの録音の文字起こし。'
+            "音声もこの発言にそのまま入っているので、聞いて確かめられる)</source>"
+        ) in text
+        # 分かれた録音も各々。上限を超えるものは音声を入れず、文字起こしであることと長さを言う
+        third = out[4]["content"]
+        assert isinstance(third, str)
+        assert (
+            '<source file_id="f-dl" name="f-dl.bin" audio="too_long" duration="0:03"'
+            ' dictation="true" part="2" parts="2" extraction="none">'
+            "(この発言の文はこの録音の文字起こし。録音は 0:03 あり、"
+        ) in third
 
     def test_non_audio_model_says_the_audio_is_not_passed(self):
         """聞けないモデル: 音声は入れず、<source> が「音声ファイルで、聞けないので渡していない」と言う

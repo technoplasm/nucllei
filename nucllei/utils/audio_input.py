@@ -18,7 +18,8 @@ mp3 の base64 にする。base64 は DB にも戻り境界にも載らない。
 
 - **添付の音声**(`plan_attachment_audio`): `audio/*` の添付を、それを付けた発言に入れる
   (置き場所は `utils/conversation_context` — `<source>` と同じ発言)。音声入力の通し録音
-  (`meta.dictation`)は入れない(本文に文字起こし済み)。長さが `AUDIO_INPUT_MAX_MINUTES` を
+  (`meta.dictation`)も同じ規則で入れる(発言の文はその文字起こしで、音声も聞ける — 分かれた録音は
+  ファイルごと)。長さが `AUDIO_INPUT_MAX_MINUTES` を
   超えるものは入れず、`<source>` がそう告げる(聞くなら feed_audio で区間を指定する)。
   添付は履歴に残るので、以後のターンも毎回入る(画像の添付と同じ)。
 - **feed_audio**(`builtin_tools/feed_audio.py`): tool が参照を sink に積み、middleware が
@@ -350,12 +351,14 @@ class AttachedAudio:
     - `too_long` — 上限(`AUDIO_INPUT_MAX_MINUTES`)を超えるので入れない
     - `unsupported` — モデルが音声を聞けない(`capabilities.audio` が無い)ので入れない
 
-    `duration` は秒(測れなければ None。`unsupported` は測らない)。"""
+    `duration` は秒(測れなければ None。`unsupported` は測らない)。`dictation` は音声入力の
+    通し録音(`meta.dictation` — 発言の文はその文字起こし)か。"""
 
     file_id: str
     name: str
     duration: float | None
     state: str
+    dictation: bool = False
 
     @property
     def inline(self) -> bool:
@@ -406,10 +409,11 @@ def _file_entry_id(entry) -> str | None:
 async def plan_attachment_audio(files, user, model) -> dict[str, AttachedAudio]:
     """添付(`metadata["files"]` — 読取権限で絞った後)の音声の扱い(file id → AttachedAudio)。
 
-    対象は Files.meta の content_type が `audio/*` のものだけで、音声入力の通し録音
-    (`meta.dictation` — 本文に文字起こし済み)は除く。モデルが音声を聞けなければ全部
-    `unsupported`(中身は読まない — `<source>` が音声で、渡していないと言うため)。聞けるモデルでは
-    長さを測り、上限(`AUDIO_INPUT_MAX_MINUTES`)以下は `inline`、超えるものは `too_long`。"""
+    対象は Files.meta の content_type が `audio/*` のもの。モデルが音声を聞けなければ全部
+    `unsupported`(中身は読まない — `<source>` が音声で、渡していないと言うため)。ただし音声入力の
+    通し録音(`meta.dictation`)は聞けないモデルでは対象にしない(発言の文がその文字起こしなので、
+    「渡していない」とは言わない)。聞けるモデルでは通し録音も含めて長さを測り、上限
+    (`AUDIO_INPUT_MAX_MINUTES`)以下は `inline`、超えるものは `too_long`。"""
     audio_capable = is_audio_model(model)
     plans: dict[str, AttachedAudio] = {}
     for entry in files or []:
@@ -422,7 +426,8 @@ async def plan_attachment_audio(files, user, model) -> dict[str, AttachedAudio]:
         meta = record.meta or {}
         if not base_media_type(meta.get("content_type")).startswith("audio/"):
             continue
-        if meta.get("dictation"):
+        dictation = bool(meta.get("dictation"))
+        if dictation and not audio_capable:
             continue
         name = record.filename or meta.get("name") or file_id
         if not audio_capable:
@@ -447,6 +452,7 @@ async def plan_attachment_audio(files, user, model) -> dict[str, AttachedAudio]:
                 if duration is None or duration <= max_seconds()
                 else "too_long"
             ),
+            dictation=dictation,
         )
     return plans
 

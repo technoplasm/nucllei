@@ -339,12 +339,24 @@ def _audio_source_note(file_id, plan) -> str:
             "話なら、ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、"
             "話の内容を文字で貼ってもらえれば読める」と伝える)"
         )
-    if plan.inline:
+    if plan.dictation:
+        # 音声入力の通し録音: 発言の文がこの録音の文字起こし (区切りで語が崩れることがある)
+        if plan.inline:
+            return (
+                "(この発言の文はこの録音の文字起こし。音声もこの発言にそのまま入っているので、"
+                "聞いて確かめられる)"
+            )
+        note = (
+            f"この発言の文はこの録音の文字起こし。録音は {format_time(plan.duration or 0)} あり、"
+            f"一度に聞ける上限 {max_minutes_text()} を超えるので、音声はこの発言には入れていない"
+        )
+    elif plan.inline:
         return "(この音声はこの発言にそのまま入っている)"
-    note = (
-        f"この音声は {format_time(plan.duration or 0)} あり、一度に聞ける上限 "
-        f"{max_minutes_text()} を超えるので、この発言には入れていない — 中身は聞こえていない"
-    )
+    else:
+        note = (
+            f"この音声は {format_time(plan.duration or 0)} あり、一度に聞ける上限 "
+            f"{max_minutes_text()} を超えるので、この発言には入れていない — 中身は聞こえていない"
+        )
     if tool_in_turn("feed_audio") and file_id:
         note += (
             f'。次の手: 聞くなら feed_audio(file_id="{file_id}", start=…, end=…) で'
@@ -363,7 +375,8 @@ def build_source_context(sources: list[dict], audio: Optional[dict] = None) -> s
     長い録音が複数のファイルに分かれたときだけ、どれを読み直すか決められるように
     `part="2" parts="3"`(何本中の何本目か)も全ファイルに付ける。
 
-    audio(file id → `audio_input.AttachedAudio`)は添付の音声(通し録音を除く)の扱い。
+    audio(file id → `audio_input.AttachedAudio`)は添付の音声の扱い(音声を聞けないモデルでは
+    通し録音は入らない — 発言の文がその文字起こし)。
     該当する `<source>` に `audio="inline"`(この発言に音声のまま入れた)/ `audio="too_long"`
     (上限を超えるので入れていない)/ `audio="unsupported"`(モデルが音声を聞けないので入れていない)
     と、測った長さ `duration="H:MM:SS"` を付け、文字の本文が無ければ本文をその旨の注記にする
@@ -1033,7 +1046,7 @@ async def process_chat_payload(
     # (utils/conversation_context)。system には入れない — 全モデル同じ。<source> は 1 ファイル 1 つ
     # (本文の無い添付の次の手は、このターンに出している tool だけを名指しする)
     # 音声を聞けるモデル (capabilities.audio) には、添付の音声を音声のまま同じ発言に入れる
-    # (utils/audio_input — 音声入力の通し録音と、上限 AUDIO_INPUT_MAX_MINUTES を超える長さは
+    # (utils/audio_input — 音声入力の通し録音も。上限 AUDIO_INPUT_MAX_MINUTES を超える長さは
     # 入れない)。入れたか・入れなかったか (聞けないモデルでは「聞けないので渡していない」) は
     # <source> の audio 属性と本文が言う
     audio_plan = await plan_attachment_audio(metadata.get("files"), user, model)

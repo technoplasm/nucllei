@@ -247,7 +247,7 @@ Form `prompt` と `transcribe(request, file_path, prompt=None)` は残してあ�
   - 受け口は upload の Form `dictation`(JSON)。**クライアントが meta に書けるのはこれだけ**で、
     `routers/files.py::DictationMeta` が形を検証する(未知のキーは拒否・512KB まで・音声のみ)。
   - モデルへ注入する `<source>` には `dictation="true"`(分かれた録音だけ `part` / `parts` も)。
-    区間一覧・本文は prompt に入れない。
+    区間一覧・本文は prompt に入れない。音声を聞けるモデルには録音そのものも音声で入る(「音声のまま聞かせる」)。
   - チャット JSON に残るスナップショット(`files[].file.meta`)からは `dictation` を外している
     (本文と同じ量の文字が毎回の保存と送信に乗るのを避ける。読むのは Files から)。
 - **再生**: 添付チップのモーダル(`FileItemModal`)が `audio/*` を `<audio controls>` で出す
@@ -483,7 +483,8 @@ faster-whisper 1.1.1(ctranslate2 4.8.4 — 4.5.0 はこのマシンの kernel �
 - **モデルの能力 `info.meta.capabilities.audio`、既定 OFF**(vision と違い、キーが無いときも OFF)。
   音声を受けない上流に音声を送るとリクエストごと落ちる(staging: openrouter/kimi-k2.6 が 404
   "No endpoints found that support input audio")。OFF のモデルには音声を送らない。
-- **聞けないモデルの `<source>`**: 音声の添付(通し録音を除く)は `audio="unsupported"`、文字の本文が無ければ
+- **聞けないモデルの `<source>`**: 音声の添付は `audio="unsupported"`(通し録音は対象にしない — 発言の文が
+  その文字起こしなので「渡していない」とは言わず、今までどおりの `<source>`)、文字の本文が無ければ
   本文は「(音声ファイル — このモデルは音声を聞けないので、中身は渡していない。次の手: 中身が要る話なら、
   ユーザーに「このモデルは音声を聞けない。音声を聞けるモデルに切り替えるか、話の内容を文字で貼ってもらえれば
   読める」と伝える)」。文書と同じ「文字が抜き出されていない」だと、音声と分からないモデル(staging の glm)が
@@ -499,8 +500,12 @@ faster-whisper 1.1.1(ctranslate2 4.8.4 — 4.5.0 はこのマシンの kernel �
 - **添付の音声**: Files.meta の content_type が `audio/*` の添付を、`<source>` と同じ発言の content の末尾に
   入れる(置き場所の規則は `conversation_context` と同じ)。`<source>` には `audio="inline"` / `audio="too_long"` と
   `duration`、本文が無ければ「この発言にそのまま入っている」/「上限を超えるので入れていない — 聞くなら
-  feed_audio で区間を指定」の注記。**入れないもの**: 音声入力の通し録音(`meta.dictation` — 本文に文字起こし済み)、
-  `AUDIO_INPUT_MAX_MINUTES`(既定 120 分)より長いもの。添付は履歴に残るので、**毎ターン送り直す**
+  feed_audio で区間を指定」の注記。**音声入力の通し録音**(`meta.dictation`)も同じ規則で入れる(ken 決定 —
+  マイクで取り込み、録音の file_id と文字起こしが発言に入って送られるのは全モデル共通。聞けるモデルには
+  それに加えて音声も入る。分かれた録音はファイルごと)。その `<source>` の本文は「この発言の文はこの録音の
+  文字起こし。音声もこの発言にそのまま入っているので、聞いて確かめられる」/ 上限を超えれば「… 音声はこの
+  発言には入れていない」。**入れないもの**: `AUDIO_INPUT_MAX_MINUTES`(既定 120 分)より長いもの。
+  添付は履歴に残るので、**毎ターン送り直す**
   (ken 了承: MiMo で 60 分 ≈ 2.26 万 token)。
 - **長さを測る場所は送信時**(upload では測らない)。理由: 音声の File は upload 以外(sandbox から
   fetch_from_workspace・tool の生成物)でもでき、Files.meta に書く口を増やさずにどの経路にも同じ規則で効く。
@@ -522,7 +527,7 @@ faster-whisper 1.1.1(ctranslate2 4.8.4 — 4.5.0 はこのマシンの kernel �
   `results[i].context_audio` に永続し、履歴では context_images と同じ user メッセージの画像の後ろに入る
   (BE `content_blocks` と FE `chat-messages.ts` の両方。共有 fixture `history_wire/context_images.json`)。
   **能力のあるモデルにだけ出す**(toolkit の `available` フック)— 行は常に登録で、モデルの toolIds に入れて使うのは
-  他の builtin と同じ。通し録音も feed_audio では聞ける(聞き違いを原本で確かめる用途)。
+  他の builtin と同じ。通し録音も feed_audio で聞ける(上限を超えて発言に入らなかった録音を区間で聞く)。
   background 実行(exec 行)の context_audio は拾わない(積む tool が feed_audio だけで、background にしない)。
 - **実機の確認(2026-11-02、staging gateway `10.105.2.2:4000`)**: AivisSpeech で作った 2 文 + 5 秒の無音の webm
   (MediaRecorder と同じく Duration 無し)を `inline_audio_refs` に通した payload を投げた。mimo-v2.6-pro は全体を
