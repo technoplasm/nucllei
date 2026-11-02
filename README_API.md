@@ -1190,6 +1190,12 @@ calls carry the turn's reasoning back to the model — see "Reasoning in the
 history" under 4.3. Turn it off only for an OpenAI-compatible API that rejects or
 misreads `reasoning_content` on assistant messages.
 
+The model editor's Capabilities row shows exactly `vision` / `audio` / `usage` /
+`preserve_reasoning`, and saving writes those four. A stored `continuous_usage`
+(default on; `false` stops requesting `stream_options.continuous_usage_stats` —
+set through the API only) is kept as is; any other key in `meta.capabilities` is
+read by nothing and is dropped when the editor saves.
+
 `POST /api/v1/models/preview` (admin-only, like preset edits) — body `{model: <ModelForm, unsaved>,
 variables?: {"{{CURRENT_TIMEZONE}}": …, "{{USER_LANGUAGE}}": …}}` (`variables` = what
 the chat sends as `metadata.variables` — the browser's `getPromptVariables`; only

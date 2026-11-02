@@ -3,10 +3,16 @@
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { render } from '$lib/utils/markdown-it';
+	import {
+		CAPABILITY_DEFAULTS,
+		CAPABILITY_KEYS,
+		type CapabilityKey,
+		type EditableCapabilities
+	} from './model-capabilities';
 
 	const i18n = getContext('i18n');
 
-	const helpText: Record<string, string> = {
+	const helpText: Record<CapabilityKey, string> = {
 		vision: $i18n.t('Model accepts image inputs'),
 		audio: $i18n.t(
 			'Model hears audio: attached audio, including microphone dictation recordings, is sent as audio. Turn this on only for models whose API accepts audio input — other APIs reject the whole request'
@@ -19,9 +25,7 @@
 		)
 	};
 
-	// キーは vision / audio / usage / preserve_reasoning(usage はベースモデル依存でキーごと消える)。
-	// audio は既定 OFF(backend の is_audio_model と対 — 音声を受けない API はリクエストごと落とす)。
-	// preserve_reasoning は既定 ON(backend の is_reasoning_preserved と対 — 2026-10-19)。
+	// 能力のキーと既定値は model-capabilities の CAPABILITY_KEYS (nucllei が読むキーだけ)。
 	// llens(#70): 機能「スキル」(meta.features.skills、既定 ON)のトグルも先頭に置く。
 	// OFF でこのモデルの manifest(load_skill)と /command 発火が両方止まる。
 	// llens(#140): 旧「サブエージェント」トグル(meta.features.subagent)は撤去 —
@@ -30,11 +34,11 @@
 	// ON でこのモデルに load_recipe / save_recipe / edit_recipe と見えるレシピの一覧が入る
 	// (backend の is_recipes_feature_enabled。sandbox の無い配備では入らない)。
 	let {
-		capabilities = $bindable({}),
+		capabilities = $bindable({ ...CAPABILITY_DEFAULTS }),
 		featureSkills = $bindable(true),
 		featureRecipes = $bindable(true)
 	}: {
-		capabilities?: Record<string, boolean | undefined>;
+		capabilities?: EditableCapabilities;
 		featureSkills?: boolean;
 		featureRecipes?: boolean;
 	} = $props();
@@ -87,7 +91,7 @@
 			</div>
 		</label>
 
-		{#each Object.keys(capabilities) as capability}
+		{#each CAPABILITY_KEYS as capability}
 			<!-- llens(#49): label で行クリックトグル -->
 			<label class=" flex items-center gap-2 mr-3 cursor-pointer">
 				<span class="flex items-center">

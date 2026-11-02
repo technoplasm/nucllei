@@ -19,6 +19,12 @@
 	import SubagentPresetsSelector from './SubagentPresetsSelector.svelte';
 	import FunctionsSelector from './FunctionsSelector.svelte';
 	import Capabilities from './Capabilities.svelte';
+	import {
+		CAPABILITY_DEFAULTS,
+		capabilitiesToSave,
+		editableCapabilities,
+		type EditableCapabilities
+	} from './model-capabilities';
 	import SystemPromptPreview from './SystemPromptPreview.svelte';
 	import PreamblePreview from './PreamblePreview.svelte';
 	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
@@ -98,20 +104,8 @@
 	let params = $state<Record<string, any>>({
 		system: ''
 	});
-	// llens(#70): vision は既定 OFF(2026-07-15。画像入力は明示的に有効化したモデルだけ)。
-	// usage は既定 ON — stream_options を弾く互換 API 向けの opt-out(backend の
-	// is_usage_requested と対。旧 addUsage の owned_by 分岐は廃止)。
-	// preserve_reasoning は既定 ON — tool ループの追撃に同じターンの reasoning_content を
-	// 載せ直す(backend の is_reasoning_preserved と対、2026-10-19)。
-	// audio は既定 OFF — 音声を聞けるモデルだけ添付の音声を音声のまま渡す(backend の is_audio_model と対。
-	// 音声を受けない API はリクエストごと落とす)。能力はツールを出さない — feed_audio / feed_image は
-	// ツールで選んだうえで、能力のあるモデルにだけ出る(backend の Tools.available)。
-	let capabilities = $state<Record<string, boolean | undefined>>({
-		vision: false,
-		audio: false,
-		usage: true,
-		preserve_reasoning: true
-	});
+	// 能力の行はキーも既定値も model-capabilities が持つ (nucllei が読むキーだけを出し、保存で未知のキーを落とす)
+	let capabilities = $state<EditableCapabilities>({ ...CAPABILITY_DEFAULTS });
 
 	let toolIds = $state<string[]>([]);
 	let skillIds = $state<string[]>([]);
@@ -216,7 +210,7 @@
 		info.name = name;
 
 		info.access_control = accessControl;
-		info.meta.capabilities = capabilities;
+		info.meta.capabilities = capabilitiesToSave(capabilities, info.meta.capabilities);
 
 		info.meta.description =
 			(info.meta.description ?? '').trim() === '' ? null : info.meta.description;
@@ -365,7 +359,7 @@
 			featureRecipes = (model?.meta?.features?.recipes ?? true) !== false;
 			filterIds = model?.meta?.filterIds ?? [];
 			actionIds = model?.meta?.actionIds ?? [];
-			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
+			capabilities = editableCapabilities(model?.meta?.capabilities);
 
 			accessControl = 'access_control' in model ? model.access_control : {};
 
