@@ -103,8 +103,11 @@
 	// is_usage_requested と対。旧 addUsage の owned_by 分岐は廃止)。
 	// preserve_reasoning は既定 ON — tool ループの追撃に同じターンの reasoning_content を
 	// 載せ直す(backend の is_reasoning_preserved と対、2026-10-19)。
+	// audio は既定 OFF — 音声を聞けるモデルだけ添付の音声を音声のまま渡し、feed_audio を出す
+	// (backend の is_audio_model と対。音声を受けない API はリクエストごと落とす)。
 	let capabilities = $state<Record<string, boolean | undefined>>({
 		vision: false,
+		audio: false,
 		usage: true,
 		preserve_reasoning: true
 	});

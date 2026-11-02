@@ -8,6 +8,9 @@
 
 	const helpText: Record<string, string> = {
 		vision: $i18n.t('Model accepts image inputs'),
+		audio: $i18n.t(
+			'Model hears audio: attached audio (except microphone dictation recordings) is sent as audio, and the feed_audio tool is offered. Turn this on only for models whose API accepts audio input — other APIs reject the whole request'
+		),
 		usage: $i18n.t(
 			'Request measured usage (token consumption) via stream_options.include_usage. Turn this off only for OpenAI-compatible APIs that reject it as an unknown parameter'
 		),
@@ -16,7 +19,8 @@
 		)
 	};
 
-	// キーは vision / usage / preserve_reasoning(usage はベースモデル依存でキーごと消える)。
+	// キーは vision / audio / usage / preserve_reasoning(usage はベースモデル依存でキーごと消える)。
+	// audio は既定 OFF(backend の is_audio_model と対 — 音声を受けない API はリクエストごと落とす)。
 	// preserve_reasoning は既定 ON(backend の is_reasoning_preserved と対 — 2026-10-19)。
 	// llens(#70): 機能「スキル」(meta.features.skills、既定 ON)のトグルも先頭に置く。
 	// OFF でこのモデルの manifest(load_skill)と /command 発火が両方止まる。

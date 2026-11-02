@@ -4,6 +4,8 @@
 	"(If the message has attachments, their <source> blocks go here, after the preamble.)": "(その発言に添付があれば、前置きの後のここに <source> が入ります)",
 	"(no description)": "(説明なし)",
 	"(The first message of the user goes here.)": "(ここに利用者の最初の発言)",
+	"audio": "音声の聞き取り",
+	"Model hears audio: attached audio (except microphone dictation recordings) is sent as audio, and the feed_audio tool is offered. Turn this on only for models whose API accepts audio input — other APIs reject the whole request": "モデルが音声を聞けます。添付の音声 (マイクの音声入力の録音を除く) を音声のまま渡し、feed_audio ツールを使えるようにします。音声を受け付けない API ではリクエストごと失敗するので、受け付けるモデルだけオンにします",
 	"{{chars}} chars · ~{{tokens}} tokens": "{{chars}} 文字 · 約 {{tokens}} トークン",
 	"{{COUNT}} hidden lines": "{{COUNT}} 行を非表示",
 	"{{COUNT}} warnings or errors inside": "中に警告・ERROR が {{COUNT}} 件",

@@ -782,6 +782,8 @@ export interface ModelMeta {
 	// llens(#70 C): FE が参照するフラグを型付け(ModelEditor は任意キーの boolean 束として扱う)
 	capabilities?: {
 		vision?: boolean;
+		// 音声を聞けるか(既定 OFF — backend utils/audio_input.is_audio_model)
+		audio?: boolean;
 		usage?: boolean;
 		[key: string]: boolean | undefined;
 	};
