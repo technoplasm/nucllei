@@ -1204,16 +1204,18 @@ prompt_tokens へのフォールバック・owner-only(他人の chat_id は無�
 - `timeouts` クラス属性の非正値(0 / -1)は「システム側上限なし」として per-entry に載るようになった
   (以前は無視して `TOOL_EXEC_TIMEOUT_S`)。
 
-## 改訂(2026-11-02)— `builtin_feed_audio`(音声を聞けるモデルにだけ出る)
+## 改訂(2026-11-02)— `builtin_feed_audio` / 能力とツールの境界
 
 - 常に登録の builtin は 8 本(history / chat_files / attachment_text / context_budget /
   feed_image / **feed_audio** / fetch_url / subagent)+ env ゲートの sandbox。
 - `feed_audio(url?, path?, file_id?, start?, end?)` は feed_image の音声版(引数の意味・resolver・所有者チェック・
   File を作らない・`__feed_audio__` の tool-push は同じ)。積んだ参照は `results[i].context_audio`。
-- **出すかはモデルの能力で決める**: toolkit の `available` フックが `capabilities.audio`(既定 OFF)を見る。
-  feed_image は画像を受けないモデルに出ても呼んだ結果が届かないだけだが、音声は受けない上流に送ると
-  リクエストごと落ちるので、能力の無いモデルには tool ごと見せない。行は常に登録で、使うにはモデルの toolIds に
-  入れる(他の builtin と同じ)。
+- **能力とツールの境界**(ken 決定): 能力(`capabilities.vision` / `audio`)はモデルが何を受けられるかの事実で、
+  ツールを出す・入れる働きは持たない。何を使わせるかは管理者がツール(toolIds)で選ぶ。能力が前提のツールは
+  「選ばれている AND 能力がある」ときだけ出す — 能力の無いモデルに選ばれていても、呼べば必ず失敗するので出さない。
+  仕組みは toolkit の `available` フック: feed_audio は `capabilities.audio`(既定 OFF)が true のとき、
+  feed_image は `capabilities.vision` が明示的に false でないとき(vision はキーが無いと ON —
+  `image_refs.is_vision_disabled`)。音声は受けない上流に送るとリクエストごと落ちる。行は常に登録。
 - 本文の無い添付の次の手(`<source>` の注記・read_attachment の ERROR)は、feed_audio がそのターンに出ていれば
   「音声は feed_audio で聞く」を足す。
 - 詳細は `audio.md`「音声のまま聞かせる」、契約は README_API §5.7。

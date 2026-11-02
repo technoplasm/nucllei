@@ -526,8 +526,8 @@ faster-whisper 1.1.1(ctranslate2 4.8.4 — 4.5.0 はこのマシンの kernel �
   (W3C Media Fragments の形)を付けて積む。1 回の区間も `AUDIO_INPUT_MAX_MINUTES` まで。積んだ参照は
   `results[i].context_audio` に永続し、履歴では context_images と同じ user メッセージの画像の後ろに入る
   (BE `content_blocks` と FE `chat-messages.ts` の両方。共有 fixture `history_wire/context_images.json`)。
-  **能力のあるモデルにだけ出す**(toolkit の `available` フック)— 行は常に登録で、モデルの toolIds に入れて使うのは
-  他の builtin と同じ。通し録音も feed_audio で聞ける(上限を超えて発言に入らなかった録音を区間で聞く)。
+  **出すのはツール(toolIds)に選ばれていて、能力のあるモデルだけ**(toolkit の `available` フック)— 能力は
+  モデルが音声を受けられるかの事実でツールは出さず、何を使わせるかはツールで選ぶ(`builtin-tools.md`)。通し録音も feed_audio で聞ける(上限を超えて発言に入らなかった録音を区間で聞く)。
   background 実行(exec 行)の context_audio は拾わない(積む tool が feed_audio だけで、background にしない)。
 - **実機の確認(2026-11-02、staging gateway `10.105.2.2:4000`)**: AivisSpeech で作った 2 文 + 5 秒の無音の webm
   (MediaRecorder と同じく Duration 無し)を `inline_audio_refs` に通した payload を投げた。mimo-v2.6-pro は全体を

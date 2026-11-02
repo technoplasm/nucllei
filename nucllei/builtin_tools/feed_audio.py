@@ -1,10 +1,10 @@
 """組み込みツール: file_id の音声、URL (url)、sandbox の絶対パス (path) を主モデル自身の耳に
 同一ターンで入れる (feed_image の音声版)。File は発行しない。
 
-**音声を聞けるモデル (`capabilities.audio`) にだけ出す** (`Tools.available`)。feed_image と違い、
-音声を受けない上流に音声を送るとリクエストごと落ちる (staging: openrouter/kimi-k2.6 が 404
-"No endpoints found that support input audio") ので、能力の無いモデルには tool ごと見せない。
-`capabilities.audio` は既定 OFF。
+出すのはツールに選ばれている (toolIds) AND モデルが音声を聞ける (`capabilities.audio`、既定 OFF) とき
+だけ (`Tools.available`)。能力はモデルが何を受けられるかの事実で、ツールを出す働きは持たない — 出すかは
+toolIds で決め、能力の無いモデルでは選ばれていても出さない (音声を受けない上流に音声を送るとリクエスト
+ごと落ちる。staging: openrouter/kimi-k2.6 が 404 "No endpoints found that support input audio")。
 
 仕組み (feed_image と同じ汎用 tool-push 経路): tool は検証して `__feed_audio__(参照)` を呼ぶだけ。
 middleware が実行中 tool-call の sink から参照を harvest して results[i].context_audio

@@ -9,7 +9,7 @@
 	const helpText: Record<string, string> = {
 		vision: $i18n.t('Model accepts image inputs'),
 		audio: $i18n.t(
-			'Model hears audio: attached audio, including microphone dictation recordings, is sent as audio, and the feed_audio tool is offered. Turn this on only for models whose API accepts audio input — other APIs reject the whole request'
+			'Model hears audio: attached audio, including microphone dictation recordings, is sent as audio. Turn this on only for models whose API accepts audio input — other APIs reject the whole request'
 		),
 		usage: $i18n.t(
 			'Request measured usage (token consumption) via stream_options.include_usage. Turn this off only for OpenAI-compatible APIs that reject it as an unknown parameter'

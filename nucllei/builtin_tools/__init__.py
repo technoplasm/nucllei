@@ -83,7 +83,8 @@ BUILTIN_TOOLS = {
     },
     # feed_image は常に登録: file_id 経路は nucllei 自身の Files / Storage だけで動き、
     # url / path 経路は共有 resolver(utils/image_refs)が解決する(配信元の無い配備でも
-    # file_id の添付 PDF を見る用途は残る)。
+    # file_id の添付 PDF を見る用途は残る)。モデルに出るのは toolIds に選ばれていて、vision が
+    # 明示的に false でないターンだけ(Tools.available)。
     "builtin_feed_image": {
         "module": feed_image,
         "name": "Feed Image",
@@ -92,9 +93,9 @@ BUILTIN_TOOLS = {
             "by file_id, URL or sandbox path (feed_image). Issues no File; owner-only"
         ),
     },
-    # feed_audio も常に登録(行は常にある)。ただしモデルに出るのは、そのモデルが音声を聞ける
-    # (capabilities.audio — 既定 OFF)ターンだけ(Tools.available)。音声を受けない上流に音声を
-    # 送るとリクエストごと落ちるので、toolIds に入っていても能力の無いモデルには見せない。
+    # feed_audio も常に登録(行は常にある)。モデルに出るのは toolIds に選ばれていて、そのモデルが
+    # 音声を聞ける(capabilities.audio — 既定 OFF)ターンだけ(Tools.available)。音声を受けない
+    # 上流に音声を送るとリクエストごと落ちるので、能力の無いモデルには選ばれていても見せない。
     "builtin_feed_audio": {
         "module": feed_audio,
         "name": "Feed Audio",

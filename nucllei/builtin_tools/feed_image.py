@@ -92,6 +92,7 @@ from nucllei.utils.image_refs import (
     base_media_type,
     detect_media_type,
     file_id_of_url,
+    is_vision_disabled,
     pdf_page_count,
     resolve_path,
     resolve_url,
@@ -486,6 +487,12 @@ def _iter_context_files(__files__, __metadata__):
 
 
 class Tools:
+    # ツール (toolIds) は管理者の選択、能力 (capabilities) はモデルが何を受けられるかの事実。
+    # 出すのは「選ばれている AND 画像を受けられる」ときだけ — vision が明示的に false のモデルに
+    # 入れても、目に入れた画像は届かない (feed_audio と同じ仕組み)。
+    def available(self, request, user, model, metadata) -> bool:
+        return not is_vision_disabled(model)
+
     class Valves(BaseModel):
         max_image_mb: float = Field(
             default=8.0,

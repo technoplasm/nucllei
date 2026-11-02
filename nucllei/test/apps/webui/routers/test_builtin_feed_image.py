@@ -1614,3 +1614,58 @@ def json_dumps(obj):
     import json
 
     return json.dumps(obj, ensure_ascii=False)
+
+
+# --- 出す / 出さない: ツールに選ばれている AND 画像を受けられる (vision が明示的に false でない) ---
+
+
+def _model(caps):
+    return {
+        "id": "m",
+        "info": {"meta": {"capabilities": caps} if caps is not None else {}},
+    }
+
+
+def test_offered_unless_vision_is_explicitly_off():
+    """vision はキーが無いとき ON。明示の false のモデルにだけ出さない (feed_audio と同じ available)。"""
+    tools = _mod().Tools()
+    assert tools.available(None, None, _model({"vision": True}), {})
+    assert tools.available(None, None, _model({}), {})
+    assert tools.available(None, None, _model(None), {})
+    assert tools.available(None, None, {}, {})
+    assert not tools.available(None, None, _model({"vision": False}), {})
+
+
+def test_get_tools_hides_it_from_models_without_vision(monkeypatch):
+    """toolIds に入っていても、vision が false のモデルのターンには載らない (get_tools の available)。"""
+    from nucllei.utils import tools as tools_mod
+
+    def row(tool_id):
+        return types.SimpleNamespace(
+            id=tool_id,
+            user_id="system",
+            access_control=None,
+            name="Feed Image",
+            specs=tools_mod.get_tool_specs(_mod().Tools()),
+        )
+
+    monkeypatch.setattr(tools_mod.Tools, "get_tool_by_id", row)
+    monkeypatch.setattr(tools_mod.Tools, "get_tool_valves_by_id", lambda tool_id: {})
+    request = types.SimpleNamespace(
+        app=types.SimpleNamespace(
+            state=types.SimpleNamespace(TOOLS={"builtin_feed_image": _mod().Tools()})
+        )
+    )
+    user = types.SimpleNamespace(id="u1", role="admin")
+    for caps, expected in (
+        ({"vision": True}, ["feed_image"]),
+        ({}, ["feed_image"]),
+        ({"vision": False}, []),
+    ):
+        got = tools_mod.get_tools(
+            request,
+            ["builtin_feed_image"],
+            user,
+            {"__metadata__": {"model": _model(caps)}, "__user__": {"id": "u1"}},
+        )
+        assert list(got) == expected, caps

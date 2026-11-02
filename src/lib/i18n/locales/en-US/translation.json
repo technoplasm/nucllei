@@ -5,7 +5,7 @@
 	"(no description)": "",
 	"(The first message of the user goes here.)": "",
 	"audio": "",
-	"Model hears audio: attached audio, including microphone dictation recordings, is sent as audio, and the feed_audio tool is offered. Turn this on only for models whose API accepts audio input — other APIs reject the whole request": "",
+	"Model hears audio: attached audio, including microphone dictation recordings, is sent as audio. Turn this on only for models whose API accepts audio input — other APIs reject the whole request": "",
 	"{{chars}} chars · ~{{tokens}} tokens": "",
 	"{{COUNT}} hidden lines": "",
 	"{{COUNT}} warnings or errors inside": "",

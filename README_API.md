@@ -1030,8 +1030,8 @@ Measurements are in `_memos/audio.md` ("幻聴対策").
 | `AUDIO_STT_REPEAT_MAX_UNIT_CHARS`         | env  | `50`    | 1 – 200     | longest unit (in characters) the repeat collapse looks for                                                                                                                                        |
 
 Audio input to the model — env only. Applies to models with
-`meta.capabilities.audio` (§4.2), which hear attached audio and `feed_audio`
-(§4.3 "Audio attachments", §5.7):
+`meta.capabilities.audio` (§4.2): attached audio (§4.3 "Audio attachments") and
+`feed_audio` when the model has it among its tools (§5.7):
 
 | Var                       | Kind | Default | Range      | Effect                                                                                                                                                                                                                                                |
 | ------------------------- | ---- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1168,10 +1168,17 @@ a sync that writes `params.context` overwrites edits made in the editor. Where i
 goes and how it is frozen: §4.3 "Conversation side". A subagent's child turn
 ignores the child preset's preamble.
 
+**Capabilities and tools.** `meta.capabilities.vision` / `.audio` state what the
+model can take in — a fact about the model; they never add a tool. Which tools a
+model gets is the admin's choice in `meta.toolIds`. A tool that only makes sense
+with a capability (`feed_image` — vision, `feed_audio` — audio) is offered when it
+is selected **and** the model has the capability; selected on a model without it,
+it is not offered (a call could only fail) — the toolkit's `available` hook, §5.1.
+
 `meta.capabilities.audio` (**default off**; the model editor's Capabilities,
 "Audio" — 「音声の聞き取り」) says the model hears audio. When it is `true`, attached
-audio goes into the user message as audio (§4.3 "Audio attachments") and the
-builtin `feed_audio` is offered (§5.7). Turn it on only for a model whose API
+audio goes into the user message as audio (§4.3 "Audio attachments"), and
+`feed_audio` can be offered if it is among the model's tools (§5.7). Turn it on only for a model whose API
 accepts `input_audio`: an API that does not rejects the whole request (seen on
 staging: `openrouter/kimi-k2.6` → 404 "No endpoints found that support input
 audio"). With it off no audio is sent; the `<source>` of an audio attachment says
@@ -2248,7 +2255,9 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     version was one turn stale and needed a hand-written context-size valve.
   - `builtin_feed_image` — `feed_image(url?, path?, file_id?, filename?, pages?)`:
     shows an image or PDF page(s) to the model itself (a VLM) in the same turn,
-    through `__feed_image__` (§5.3). Exactly one reference argument, interpreted
+    through `__feed_image__` (§5.3). **Offered only when it is among the model's
+    tools and `meta.capabilities.vision` is not `false`** (unset counts as on;
+    the toolkit's `available` hook, §4.2 "Capabilities and tools"). Exactly one reference argument, interpreted
     by name (§3.8): `url` = an absolute URL or a same-server `/ext/{rest}` /
     `/api/v1/files/{id}/content`, `path` = a sandbox absolute path (`/ext/…`,
     `/workspace/…`; `/ext/…` is the same file whichever argument it comes in),
@@ -2301,10 +2310,11 @@ null` (all users) / `{}` (owner only) / `{"read":{group_ids,user_ids}}`.
     Always registered. Usage guidance beyond the docstring: §5.7.1.
   - `builtin_feed_audio` — `feed_audio(url?, path?, file_id?, start?, end?)`:
     lets the model hear audio (a recording, an audio file, the sound of a video)
-    in the same turn, through `__feed_audio__` (§5.3). **Offered only on turns
-    whose model has `meta.capabilities.audio`** (the toolkit's `available` hook,
-    §5.1) — the row is always registered and goes into a model's tools like any
-    builtin, but a model without the capability never sees it. Exactly one
+    in the same turn, through `__feed_audio__` (§5.3). **Offered only when it is
+    among the model's tools and the model has `meta.capabilities.audio`** (the
+    toolkit's `available` hook, §4.2 "Capabilities and tools") — the row is always
+    registered; a model without the capability does not get it even when it is
+    selected. Exactly one
     reference argument, interpreted by name like `feed_image` (owner check for
     `file_id` and `/api/v1/files/{id}/content`; `path` up to the sandbox limit).
     `start` / `end` are `"23:10"` (m:ss), `"1:02:03"` (h:mm:ss) or seconds; the
@@ -2832,7 +2842,7 @@ copied into answers just as easily.
   次にすることを書く。ユーザーに伝えるのは事実だけ。「読めなかった」を全部リンク切れと
   言い換えない。
 
-**feed_audio** (音声を聞けるモデルにだけ出る)
+**feed_audio** (ツールに選ばれていて、音声を聞けるモデルにだけ出る)
 
 - 話の中身・話者・言い方・音を実際に聞いて判断するためのもの。上限以内の添付の音声
   (音声入力の録音を含む) は既に聞こえているので呼ばない。入れた音声は以降のターンにも残る

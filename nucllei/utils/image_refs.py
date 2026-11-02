@@ -398,6 +398,13 @@ _IMAGE_TYPE_ALIASES = {
 }
 
 
+def is_vision_disabled(model) -> bool:
+    """モデルが画像を受けないと明示されているか(`info.meta.capabilities.vision` が false)。
+    vision はキーが無いとき ON(FE の `?? true` と同じ)— 明示の false だけを見る。"""
+    meta = ((model or {}).get("info") or {}).get("meta") or {}
+    return (meta.get("capabilities") or {}).get("vision") is False
+
+
 def base_media_type(content_type: str | None) -> str:
     """パラメータを除いた小文字の型。同じ形式の別名は正の名前に寄せる。"""
     base = (content_type or "").split(";")[0].strip().lower()
