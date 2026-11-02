@@ -1315,9 +1315,8 @@ curl -N http://HOST/api/chat/completions \
   `(この音声はこの発言に音声のまま入っていて、あなたに聞こえている)` or
   `(この音声は 2:05:00 あり、一度に聞ける上限 120 分 を超えるので、この発言には入れていない)`
   — facts only, like the `unsupported` note below. The inline note says the model
-  itself hears it (with only "it is in the message", a model under a system prompt
-  read it as "in the message, but I only see text" and went to transcribe it —
-  staging, mimo). No next step (text inside
+  itself hears it (with only "it is in the message", a model can read it as "in
+  the message, but I only see text" and transcribe it instead). No next step (text inside
   `<source>` is read as material, not as instructions; hearing a section is what
   `feed_audio`'s description says to call it for, §5.7.1). For a dictation recording
   (`dictation="true"` follows the `audio` attributes) the body says the message
