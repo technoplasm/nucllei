@@ -22,7 +22,12 @@ def apply_model_system_prompt_to_body(
     model_info=None,
 ) -> dict:
     """model_info は params の持ち主(models テーブルの行)。{{BASE_MODEL_ID}} の
-    出どころ(値の定義は task.resolve_base_model_id と同じ)。"""
+    出どころ(値の定義は task.resolve_base_model_id と同じ)。
+
+    task の呼び出し (metadata.task — タイトル生成) には当てない: 送るのは task の template と
+    会話の文字だけ。preset の params (system 以外) は routers が当てる。"""
+    if metadata and metadata.get("task"):
+        return form_data
     system = params.get("system", None)
     if not system:
         return form_data

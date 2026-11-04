@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 import re
+import time
 
 from nucllei.utils.chat import generate_chat_completion
 
@@ -170,8 +171,24 @@ async def generate_title(
     except Exception as e:
         raise e
 
+    # middleware は import 時にこの module を読むので、ここで引く
+    from nucllei.utils.middleware import log_model_response
+
+    started = time.monotonic()
     try:
-        return await generate_chat_completion(request, form_data=payload, user=user)
+        response = await generate_chat_completion(request, form_data=payload, user=user)
+        metadata = payload.get("metadata") or {}
+        log_model_response(
+            response,
+            metadata={
+                "chat_id": metadata.get("chat_id"),
+                "message_id": metadata.get("message_id"),
+            },
+            model=task_model_id,
+            call_index="title",
+            elapsed=time.monotonic() - started,
+        )
+        return response
     except Exception:
         log.error("Exception occurred", exc_info=True)
         return JSONResponse(

@@ -247,6 +247,7 @@ DB upsert は「構造変化時 + 2 秒スロットル + done/cancel/error 時�
 形は `model call chat_id=… message_id=… call=N model=… finish_reason=stop text_chars=… reasoning_chars=… tool_calls=1['search_phone'] completion_tokens=… unknown_delta_keys=[]`(`call` はターン内の何回目か)。
 WARNING は (a) `tool_calls` 終了なのに 0 件 / (b) finish_reason 無し / (c) `length` / (d) tool 付きで reasoning も tool call も無い 200 字未満の text が句点で終わらない、のとき。行末の `WARN:` に理由。
 WARNING の行だけ `head_frames=` / `tail_frames=` に生 SSE の先頭・末尾 3 フレーム(各 500 字、本文・tool 引数の delta は 40 字に丸め)を付ける。`grep 'model call' | grep WARN` で拾い、`unknown_delta_keys` と末尾フレームで上流の取りこぼしを見る。
+タイトル生成 (非 stream、`routers/tasks.generate_title`) も同じ形で 1 行出す (`middleware.log_model_response`): `call=title`、`model` は呼んだ preset (task model を設定していればそれ)、末尾に `elapsed=…s` (要求を出してから応答を読み終えるまで)。WARNING の条件は同じで、frames は応答の JSON 全体を 1 フレーム (本文は 40 字に丸め)。
 
 ## テスト
 

@@ -241,40 +241,6 @@ export const updateTaskConfig = async (config: object) => {
 	return res;
 };
 
-export const generateTitle = async (model: string, messages: string[], chat_id?: string) => {
-	let error = null;
-
-	const res = await apiFetch(`${WEBUI_BASE_URL}/api/v1/tasks/title/completions`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify({
-			model: model,
-			messages: messages,
-			...(chat_id && { chat_id: chat_id })
-		})
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.log(err);
-			if ('detail' in err) {
-				error = err.detail;
-			}
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res?.choices[0]?.message?.content.replace(/["']/g, '') ?? 'New Chat';
-};
-
 export const getPipelinesList = async () => {
 	let error = null;
 

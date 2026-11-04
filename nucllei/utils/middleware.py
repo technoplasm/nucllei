@@ -1639,7 +1639,12 @@ def _redact_raw_frame(line: str) -> str:
         data = json.loads(payload)
         if isinstance(data, dict):
             for choice in data.get("choices") or []:
-                delta = choice.get("delta") if isinstance(choice, dict) else None
+                # stream のフレームは delta、非 stream の応答 (タイトル生成) は message
+                delta = (
+                    (choice.get("delta") or choice.get("message"))
+                    if isinstance(choice, dict)
+                    else None
+                )
                 if not isinstance(delta, dict):
                     continue
                 for key in ("content", "reasoning_content", "reasoning"):
@@ -1726,7 +1731,9 @@ class _ModelCallDiag:
             reasons.append("short text-only reply cut mid-sentence")
         return reasons
 
-    def log(self, *, metadata, model, call_index, finish_reason, tool_calls):
+    def log(
+        self, *, metadata, model, call_index, finish_reason, tool_calls, elapsed=None
+    ):
         try:
             names = [
                 ((call or {}).get("function") or {}).get("name")
@@ -1743,6 +1750,8 @@ class _ModelCallDiag:
                 f"completion_tokens={self.completion_tokens} "
                 f"unknown_delta_keys={sorted(self.unknown_delta_keys)}"
             )
+            if elapsed is not None:
+                line += f" elapsed={elapsed:.2f}s"
             reasons = self.warning_reasons(
                 finish_reason, tool_calls, bool(metadata.get("tools"))
             )
@@ -1759,6 +1768,41 @@ class _ModelCallDiag:
             )
         except Exception as e:
             log.debug("model call diagnostic log failed: %s", e)
+
+
+def log_model_response(response, *, metadata, model, call_index, elapsed=None):
+    """非 stream のモデル応答 1 つを、stream の `model call` と同じ形の 1 行にする。
+
+    `elapsed` は要求を出してから応答を読み終えるまでの秒数。WARNING の行の frames には
+    応答の JSON 全体を 1 フレームとして付ける (本文は丸め済み)。挙動は変えない (観測のみ)。
+    """
+    diag = _ModelCallDiag()
+    finish_reason = None
+    tool_calls = []
+    try:
+        if isinstance(response, dict):
+            diag.observe_line(json.dumps(response, ensure_ascii=False))
+            diag.observe_usage(response.get("usage"))
+            choices = response.get("choices") or []
+            choice = choices[0] if choices else None
+            if isinstance(choice, dict):
+                finish_reason = choice.get("finish_reason")
+                message = choice.get("message")
+                if isinstance(message, dict):
+                    diag.observe_delta(message)
+                    tool_calls = message.get("tool_calls") or []
+        elif response is not None:
+            diag.observe_line(str(response))
+    except Exception:
+        pass
+    diag.log(
+        metadata=metadata,
+        model=model,
+        call_index=call_index,
+        finish_reason=finish_reason,
+        tool_calls=tool_calls,
+        elapsed=elapsed,
+    )
 
 
 async def consume_model_stream(
