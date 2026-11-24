@@ -46,7 +46,7 @@ def _check_task_model_access(user, models: dict, model_id: str) -> None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Model not found",
-            )
+            ) from None
 
 
 ##################################
@@ -92,16 +92,19 @@ async def update_task_config(
     }
 
 
-@router.post("/title/completions")
-async def generate_title(
-    request: Request, form_data: dict, user=Depends(get_verified_user)
-):
+class TitleCallError(Exception):
+    """タイトル生成のモデル呼び出しが失敗した (`__cause__` が元の例外)。"""
 
+
+async def run_title_generation(request: Request, form_data: dict, user):
+    """タイトル生成を 1 回呼び、上流の応答 (dict) を返す。タイトル生成が無効なら None。
+
+    read ACL の 404・inlet filter の例外はそのまま上げる。モデル呼び出しの失敗は
+    TitleCallError に包んで上げる。モデルを呼んだら、成功でも失敗でも
+    `model call … call=title` を 1 行出す。
+    """
     if not request.app.state.config.ENABLE_TITLE_GENERATION:
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={"detail": "Title generation is disabled"},
-        )
+        return None
 
     models = request.app.state.MODELS
 
@@ -163,32 +166,53 @@ async def generate_title(
     }
 
     # Process the payload through the pipeline
-    try:
-        payload = await process_pipeline_inlet_filter(request, payload, user, models)
-    except Exception as e:
-        raise e
+    payload = await process_pipeline_inlet_filter(request, payload, user, models)
 
     # middleware は import 時にこの module を読むので、ここで引く
-    from nucllei.utils.middleware import log_model_response
+    from nucllei.utils.middleware import log_model_call_error, log_model_response
 
+    metadata = payload.get("metadata") or {}
+    log_metadata = {
+        "chat_id": metadata.get("chat_id"),
+        "message_id": metadata.get("message_id"),
+    }
     started = time.monotonic()
     try:
         response = await generate_chat_completion(request, form_data=payload, user=user)
-        metadata = payload.get("metadata") or {}
-        log_model_response(
-            response,
-            metadata={
-                "chat_id": metadata.get("chat_id"),
-                "message_id": metadata.get("message_id"),
-            },
+    except Exception as e:
+        log_model_call_error(
+            e,
+            metadata=log_metadata,
             model=task_model_id,
             call_index="title",
             elapsed=time.monotonic() - started,
         )
-        return response
-    except Exception:
-        log.error("Exception occurred", exc_info=True)
+        raise TitleCallError() from e
+    log_model_response(
+        response,
+        metadata=log_metadata,
+        model=task_model_id,
+        call_index="title",
+        elapsed=time.monotonic() - started,
+    )
+    return response
+
+
+@router.post("/title/completions")
+async def generate_title(
+    request: Request, form_data: dict, user=Depends(get_verified_user)
+):
+    try:
+        response = await run_title_generation(request, form_data, user)
+    except TitleCallError:
+        # 失敗は run_title_generation の `model call … call=title` の行に出ている
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": "An internal error has occurred."},
         )
+    if response is None:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"detail": "Title generation is disabled"},
+        )
+    return response

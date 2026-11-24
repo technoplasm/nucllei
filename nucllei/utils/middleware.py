@@ -14,7 +14,8 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
 
-from fastapi import Request
+import aiohttp
+from fastapi import HTTPException, Request
 from starlette.responses import StreamingResponse
 
 
@@ -28,7 +29,8 @@ from nucllei.utils.completion_events import (
     sse_event_generator,
 )
 from nucllei.routers.tasks import (
-    generate_title,
+    TitleCallError,
+    run_title_generation,
 )
 from nucllei.routers.pipelines import (
     process_pipeline_inlet_filter,
@@ -1150,7 +1152,7 @@ async def apply_fallback_title_on_abnormal_end(metadata, tasks, event_emitter):
     """異常終了(中断・エラー)時のフォールバックタイトル。モデルは呼ばない。
 
     この turn でタイトル生成が予約されていた(= 最初の応答ターン)のに応答が
-    確定しなかった場合、最初のユーザー発話の先頭 50 文字をタイトルにする。
+    確定しなかった場合、最初のユーザー発話をタイトルにする(first_message_text)。
     LLM を呼ばないのは、エラー経路では呼び先が死んでいる可能性が高く二次ハングの
     温床になるため(cancel 経路も分岐を増やさず同じ扱い)。同チャットの応答が
     後で正常完了すれば通常のタイトル生成が上書きする。
@@ -1172,7 +1174,7 @@ async def apply_fallback_title_on_abnormal_end(metadata, tasks, event_emitter):
     if not messages:
         return
 
-    title = " ".join((messages[0].get("content") or "").split())[:50]
+    title = first_message_text(messages)
     if not title:
         return
 
@@ -1207,68 +1209,85 @@ def parse_generated_title(text: str) -> str:
     return title
 
 
-def first_message_title(messages: list) -> str:
-    """最初の発話から作るタイトル(生成に失敗したとき・自動生成 OFF のとき)。"""
+FIRST_MESSAGE_TITLE_MAX_CHARS = 50
+
+
+def first_message_text(messages: list) -> str:
+    """最初のユーザー発話から作るタイトル: 空白 (改行を含む) を 1 つの空白に詰め、
+    先頭 FIRST_MESSAGE_TITLE_MAX_CHARS 文字に切る。発話が無い・空なら ""。"""
     for m in messages or []:
         if m.get("role", "user") == "user":
             content = m.get("content")
-            if isinstance(content, str) and content.strip():
-                return content
-            break
-    return "New Chat"
+            if not isinstance(content, str):
+                return ""
+            return " ".join(content.split())[:FIRST_MESSAGE_TITLE_MAX_CHARS]
+    return ""
 
 
-def _title_response_text(res) -> str:
-    """タイトル生成の応答から本文を取り出す。取れなければ ""。
+def first_message_title(messages: list) -> str:
+    """最初の発話から作るタイトル(生成に失敗したとき・自動生成 OFF のとき)。
+    作れなければ "New Chat"。"""
+    return first_message_text(messages) or "New Chat"
 
-    dict 以外(上流の 400・例外を generate_title が包んだ JSONResponse、タイトル生成が
-    無効のときの応答)と、choices が 1 つでない応答は "" — 呼び手が最初の発話へ
-    フォールバックする。content は reasoning がトークン予算を使い切ると null になる
-    (.get の既定値は「キーが無い」時しか効かない)ので、None もここで "" に落とす。
+
+def _title_from_response(res) -> tuple[str, str]:
+    """タイトル生成の応答から (タイトル, 取れなかった理由) を返す。
+
+    取れたら理由は ""。取れないのは: 応答が dict でない・choices が 1 つでない・
+    content が null (reasoning がトークン予算を使い切ったとき) か空・本文から title が
+    取れない。理由は WARNING の行にそのまま載せる `key=value` の形。
     """
     if not isinstance(res, dict):
-        return ""
+        return "", f"response={type(res).__name__}"
     choices = res.get("choices") or []
     if len(choices) != 1:
-        return ""
-    content = ((choices[0] or {}).get("message") or {}).get("content")
-    return content if isinstance(content, str) else ""
+        return "", f"choices={len(choices)}"
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    finish_reason = choice.get("finish_reason")
+    content = (choice.get("message") or {}).get("content")
+    if content is None:
+        return "", f"content=null finish_reason={finish_reason}"
+    if not isinstance(content, str) or not content.strip():
+        return "", f"content=empty finish_reason={finish_reason}"
+    title = parse_generated_title(content)
+    if not title:
+        return "", f"content=no_title text_chars={len(content)}"
+    return title, ""
 
 
 async def _generate_title_or_fallback(request, user, metadata, message, messages):
     """タイトルを生成し、使えなければ最初の発話から作る(生成の失敗を外へ出さない)。
 
     失敗 = 上流のエラー・例外(ACL・inlet filter を含む)・応答が dict でない・
-    content が空 / null・本文から title が取れない。どれも first_message_title。
+    content が空 / null・本文から title が取れない。どれも WARNING を 1 行出して
+    first_message_title。タイトル生成が無効なら警告せずに first_message_title。
     """
+    chat_id = metadata["chat_id"]
     try:
-        res = await generate_title(
+        res = await run_title_generation(
             request,
             {
                 "model": message.get("model") or metadata.get("model", {}).get("id"),
                 "messages": messages,
-                "chat_id": metadata["chat_id"],
+                "chat_id": chat_id,
             },
             user,
         )
     except asyncio.CancelledError:
         raise
     except Exception as e:
-        log.warning(
-            f"title generation failed (chat {metadata['chat_id']}): {e!r}; "
-            "using the first message"
-        )
-        res = None
+        reason = describe_call_error(e)
     else:
-        if not isinstance(res, dict):
-            log.warning(
-                f"title generation failed (chat {metadata['chat_id']}): "
-                f"{type(res).__name__} {getattr(res, 'status_code', '')}; "
-                "using the first message"
-            )
-    return parse_generated_title(_title_response_text(res)) or first_message_title(
-        messages
+        if res is None:
+            log.debug(f"title generation is disabled (chat {chat_id})")
+            return first_message_title(messages)
+        title, reason = _title_from_response(res)
+        if title:
+            return title
+    log.warning(
+        f"title generation failed (chat {chat_id}): {reason}; using the first message"
     )
+    return first_message_title(messages)
 
 
 async def resolve_response_title(request, user, metadata, tasks) -> Optional[str]:
@@ -1847,6 +1866,65 @@ def log_model_response(response, *, metadata, model, call_index, elapsed=None):
         tool_calls=tool_calls,
         elapsed=elapsed,
     )
+
+
+def _chained_exception(exc):
+    """traceback の表示と同じ規則で 1 つ内側の例外 (`from` の元 / 処理中だった例外)。"""
+    if exc.__cause__ is not None:
+        return exc.__cause__
+    if exc.__suppress_context__:
+        return None
+    return exc.__context__
+
+
+def describe_call_error(exc) -> str:
+    """モデル呼び出しの失敗を `status=<HTTP status> exception=<例外クラス>` の形で返す。
+
+    router は上流の失敗を HTTPException に包み (応答が無い失敗にも 500 を付ける)、
+    タイトル生成はそれを TitleCallError に包む。包みを内側へたどり、原因の例外の
+    クラスを書く。status は上流が返した HTTP status (原因が
+    aiohttp.ClientResponseError のとき) か、包みでない HTTPException 自身の status。
+    接続断・timeout など上流の応答が無い失敗は status を書かない。
+    """
+    cause = exc
+    while isinstance(cause, (HTTPException, TitleCallError)):
+        inner = _chained_exception(cause)
+        if inner is None:
+            break
+        cause = inner
+    status = None
+    if isinstance(cause, aiohttp.ClientResponseError):
+        status = cause.status
+    elif isinstance(cause, HTTPException):
+        status = cause.status_code
+    parts = [f"status={status}"] if status is not None else []
+    parts.append(f"exception={type(cause).__name__}")
+    return " ".join(parts)
+
+
+def log_model_call_error(exc, *, metadata, model, call_index, elapsed=None):
+    """非 stream のモデル呼び出しが例外で終わったときの `model call` の 1 行 (WARNING)。
+
+    `model call chat_id=… message_id=… call=… model=… status=… exception=… elapsed=…s
+    WARN: call failed`。HTTPException は router が traceback を出してから包んだもの
+    (または意図した 4xx) なので traceback を付けない。それ以外の例外は付ける。
+    """
+    try:
+        model_id = model.get("id") if isinstance(model, dict) else model
+        line = (
+            f"model call chat_id={metadata.get('chat_id')} "
+            f"message_id={metadata.get('message_id')} call={call_index} "
+            f"model={model_id} {describe_call_error(exc)}"
+        )
+        if elapsed is not None:
+            line += f" elapsed={elapsed:.2f}s"
+        line += " WARN: call failed"
+        if isinstance(exc, HTTPException):
+            log.warning(line)
+        else:
+            log.warning(line, exc_info=exc)
+    except Exception as e:
+        log.debug("model call diagnostic log failed: %s", e)
 
 
 async def consume_model_stream(

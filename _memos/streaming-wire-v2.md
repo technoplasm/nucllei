@@ -135,9 +135,14 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
     書き込みは重ねない(計測の usage は done の前、タイトルは done の後)。どちらかの失敗・例外は
     ログだけでもう片方と done を止めない(計測の例外も応答をエラーにしない)。タイトルの書き込み
     (`Chats.update_chat_title_by_id`)は CAS — done 直後の FE の完了時保存と重なっても保存を
-    古い chat で上書きしない。生成が失敗(上流の 400・例外・content が空 / null・title が
-    取れない)したら最初の発話がタイトル(`first_message_title`)。異常終了(中断・エラー)では
-    タイトル生成を止め、`apply_fallback_title_on_abnormal_end` が付ける。ollama 経路では
+    古い chat で上書きしない。生成が失敗(上流の 400・接続断・例外・content が空 / null・title が
+    取れない)したら WARNING `title generation failed (chat …): <理由>; using the first message`
+    を 1 行出し、最初の発話がタイトル(`first_message_title`)。理由は呼び出しの失敗なら
+    `status=400 exception=ClientResponseError` / `exception=ServerDisconnectedError`
+    (`describe_call_error` — status は上流が返したときだけ)、応答の中身なら
+    `content=null finish_reason=length` / `content=empty …` / `content=no_title text_chars=…`。
+    異常終了(中断・エラー)ではタイトル生成を止め、`apply_fallback_title_on_abnormal_end` が
+    付ける。最初の発話から作るタイトルはどちらも `first_message_text`(空白を詰めて先頭 50 文字)。ollama 経路では
     `max_tokens: 1` / `max_completion_tokens: 1` が `options.num_predict` になる
     (`convert_payload_openai_to_ollama`。preset に max_tokens があればそちらが勝つ)。
     回帰: `test_native_tool_calling.py` の `test_turn_end_title_*` / `test_turn_end_measurement_*`、
@@ -262,7 +267,8 @@ DB upsert は「構造変化時 + 2 秒スロットル + done/cancel/error 時�
 形は `model call chat_id=… message_id=… call=N model=… finish_reason=stop text_chars=… reasoning_chars=… tool_calls=1['search_phone'] completion_tokens=… unknown_delta_keys=[]`(`call` はターン内の何回目か)。
 WARNING は (a) `tool_calls` 終了なのに 0 件 / (b) finish_reason 無し / (c) `length` / (d) tool 付きで reasoning も tool call も無い 200 字未満の text が句点で終わらない、のとき。行末の `WARN:` に理由。
 WARNING の行だけ `head_frames=` / `tail_frames=` に生 SSE の先頭・末尾 3 フレーム(各 500 字、本文・tool 引数の delta は 40 字に丸め)を付ける。`grep 'model call' | grep WARN` で拾い、`unknown_delta_keys` と末尾フレームで上流の取りこぼしを見る。
-タイトル生成 (非 stream、`routers/tasks.generate_title`) も同じ形で 1 行出す (`middleware.log_model_response`): `call=title`、`model` は呼んだ preset (task model を設定していればそれ)、末尾に `elapsed=…s` (要求を出してから応答を読み終えるまで)。WARNING の条件は同じで、frames は応答の JSON 全体を 1 フレーム (本文は 40 字に丸め)。
+タイトル生成 (非 stream、`routers/tasks.run_title_generation`) も同じ形で 1 行出す (`middleware.log_model_response`): `call=title`、`model` は呼んだ preset (task model を設定していればそれ)、末尾に `elapsed=…s` (要求を出してから応答を読み終えるまで)。WARNING の条件は同じで、frames は応答の JSON 全体を 1 フレーム (本文は 40 字に丸め)。
+呼び出しが例外で終わったときも 1 行 (WARNING、`middleware.log_model_call_error`): `model call chat_id=… message_id=… call=title model=… status=400 exception=ClientResponseError elapsed=…s WARN: call failed`。`status` は上流が返した HTTP status で、接続断・timeout のように応答が無ければ書かない (`exception=ServerDisconnectedError` など — router が付ける 500 は書かない)。router を通った失敗 (HTTPException) は router が traceback を出しているのでこの行には付けず、それ以外の例外だけ traceback を付ける。
 
 ## テスト
 
