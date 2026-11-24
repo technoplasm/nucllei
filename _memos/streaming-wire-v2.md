@@ -128,6 +128,21 @@ FE = `src/lib/utils/chat-events.ts` / `completion-streams.ts`。
     router で body を上書きするので `max_completion_tokens: 1` も送る(router が後で max_tokens へ
     移す)。`"."` の user ターンぶん(数 token)はゲージに乗る — 次ターンの発言で置き換わる量。
     subagent の子ターンも process_chat_response を通るので同じく実測される。
+    ターン末の順序: 最終形の保存 → タイトル生成(`middleware.resolve_response_title`、モデル
+    呼び出しまで)を task で始める → 計測 → done → タイトルを付けて `chat:title`
+    (`run_response_background_tasks`)。タイトル生成と計測は並列に走る(順序の依存は無い —
+    タイトルが読む本文は先に保存済み、計測が書くのは message の usage だけ)。chat への
+    書き込みは重ねない(計測の usage は done の前、タイトルは done の後)。どちらかの失敗・例外は
+    ログだけでもう片方と done を止めない(計測の例外も応答をエラーにしない)。タイトルの書き込み
+    (`Chats.update_chat_title_by_id`)は CAS — done 直後の FE の完了時保存と重なっても保存を
+    古い chat で上書きしない。生成が失敗(上流の 400・例外・content が空 / null・title が
+    取れない)したら最初の発話がタイトル(`first_message_title`)。異常終了(中断・エラー)では
+    タイトル生成を止め、`apply_fallback_title_on_abnormal_end` が付ける。ollama 経路では
+    `max_tokens: 1` / `max_completion_tokens: 1` が `options.num_predict` になる
+    (`convert_payload_openai_to_ollama`。preset に max_tokens があればそちらが勝つ)。
+    回帰: `test_native_tool_calling.py` の `test_turn_end_title_*` / `test_turn_end_measurement_*`、
+    `routers/test_title_generation.py`、`routers/test_chats.py` の `test_title_update_*`、
+    `utils/test_payload_ollama.py`。
     dev 実測(prism-gw、preset `llens`): tool 1 回のターン 実測 carried 3872 → 次ターン prompt 3876
     (+4)、reasoning 無しで長文 4.2k token のターン 7932 → 7936(+4)。計測 1 回 0.9 秒(長い出力の
     直後は prefill ぶん 2.5 秒)。回帰: `test_native_tool_calling.py` の

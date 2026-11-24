@@ -674,6 +674,31 @@ class TestChatSaveCas(AbstractPostgresTest):
         assert updated is None
         assert self.chats.get_chat_by_id(self.chat_id).title != "stale"
 
+    def test_title_update_does_not_clobber_an_interleaved_save(self, monkeypatch):
+        """タイトルの書き込み(done の直後 — FE の完了時保存と時間が重なる)は CAS:
+        読んだ後に別の書き込み(ここでは driver の notice 追記)が挟まっても、古い chat で
+        上書きせず読み直して書く。"""
+        self._interleave_driver_append(monkeypatch)
+        updated = self.chats.update_chat_title_by_id(self.chat_id, "札幌の天気")
+        assert updated is not None
+        chat = self.chats.get_chat_by_id(self.chat_id)
+        assert chat.title == "札幌の天気"
+        assert chat.chat["title"] == "札幌の天気"
+        assert len(self._notice_ids()) == 1  # 挟まった書き込みは消えない
+
+    def test_title_update_gives_up_after_three_conflicts(self, monkeypatch):
+        """CAS に 3 回負けたら書かずに None(無限に回らない)。"""
+        calls = []
+
+        def always_conflict(id, chat, expected_version):
+            calls.append(expected_version)
+            return ("conflict", None)
+
+        monkeypatch.setattr(self.chats, "update_chat_by_id_guarded", always_conflict)
+        assert self.chats.update_chat_title_by_id(self.chat_id, "x") is None
+        assert len(calls) == 3
+        assert self.chats.get_chat_by_id(self.chat_id).title == "t"
+
 
 # ---- migration ac4c52211a8e(chat.version と未来の updated_at の丸め)----
 

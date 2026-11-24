@@ -304,34 +304,36 @@ def convert_payload_openai_to_ollama(openai_payload: dict) -> dict:
     if "format" in openai_payload:
         ollama_payload["format"] = openai_payload["format"]
 
-    # If there are advanced parameters in the payload, format them in Ollama's options field
-    if openai_payload.get("options"):
-        ollama_payload["options"] = openai_payload["options"]
-        ollama_options = openai_payload["options"]
+    # 生成パラメータは Ollama では options に載る。呼び手の dict は書き換えない
+    # (tool ループの追撃・計測は初回の form_data の options を共有して載せてくる)。
+    ollama_options = dict(openai_payload.get("options") or {})
 
-        # Re-Mapping OpenAI's `max_tokens` -> Ollama's `num_predict`
-        if "max_tokens" in ollama_options:
-            ollama_options["num_predict"] = ollama_options["max_tokens"]
-            del ollama_options[
-                "max_tokens"
-            ]  # To prevent Ollama warning of invalid option provided
+    # Re-Mapping OpenAI's `max_tokens` -> Ollama's `num_predict`
+    if "max_tokens" in ollama_options:
+        ollama_options["num_predict"] = ollama_options.pop("max_tokens")
 
-        # Ollama lacks a "system" prompt option. It has to be provided as a direct parameter, so we copy it down.
-        if "system" in ollama_options:
-            ollama_payload["system"] = ollama_options["system"]
-            del ollama_options[
-                "system"
-            ]  # To prevent Ollama warning of invalid option provided
+    # 呼び出しごとの出力上限(トップレベルの max_completion_tokens / max_tokens —
+    # タイトル生成の 4000・carried_tokens 計測の 1・API 利用者の指定)も
+    # num_predict へ。options(チャットの params)より勝つ。両方あれば
+    # max_completion_tokens(routers.openai と同じ優先)。
+    for key in ("max_completion_tokens", "max_tokens"):
+        if openai_payload.get(key) is not None:
+            ollama_options["num_predict"] = openai_payload[key]
+            break
 
-        # Extract keep_alive from options if it exists
-        if "keep_alive" in ollama_options:
-            ollama_payload["keep_alive"] = ollama_options["keep_alive"]
-            del ollama_options["keep_alive"]
+    # Ollama lacks a "system" prompt option. It has to be provided as a direct parameter, so we copy it down.
+    if "system" in ollama_options:
+        ollama_payload["system"] = ollama_options.pop("system")
+
+    # Extract keep_alive from options if it exists
+    if "keep_alive" in ollama_options:
+        ollama_payload["keep_alive"] = ollama_options.pop("keep_alive")
 
     # If there is the "stop" parameter in the openai_payload, remap it to the ollama_payload.options
     if "stop" in openai_payload:
-        ollama_options = ollama_payload.get("options", {})
         ollama_options["stop"] = openai_payload.get("stop")
+
+    if ollama_options:
         ollama_payload["options"] = ollama_options
 
     if "metadata" in openai_payload:

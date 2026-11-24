@@ -1218,74 +1218,116 @@ def first_message_title(messages: list) -> str:
     return "New Chat"
 
 
-async def run_response_background_tasks(request, user, metadata, tasks, event_emitter):
-    """応答確定後のバックグラウンドタスク(現状はタイトル生成のみ)。"""
+def _title_response_text(res) -> str:
+    """タイトル生成の応答から本文を取り出す。取れなければ ""。
+
+    dict 以外(上流の 400・例外を generate_title が包んだ JSONResponse、タイトル生成が
+    無効のときの応答)と、choices が 1 つでない応答は "" — 呼び手が最初の発話へ
+    フォールバックする。content は reasoning がトークン予算を使い切ると null になる
+    (.get の既定値は「キーが無い」時しか効かない)ので、None もここで "" に落とす。
+    """
+    if not isinstance(res, dict):
+        return ""
+    choices = res.get("choices") or []
+    if len(choices) != 1:
+        return ""
+    content = ((choices[0] or {}).get("message") or {}).get("content")
+    return content if isinstance(content, str) else ""
+
+
+async def _generate_title_or_fallback(request, user, metadata, message, messages):
+    """タイトルを生成し、使えなければ最初の発話から作る(生成の失敗を外へ出さない)。
+
+    失敗 = 上流のエラー・例外(ACL・inlet filter を含む)・応答が dict でない・
+    content が空 / null・本文から title が取れない。どれも first_message_title。
+    """
+    try:
+        res = await generate_title(
+            request,
+            {
+                "model": message.get("model") or metadata.get("model", {}).get("id"),
+                "messages": messages,
+                "chat_id": metadata["chat_id"],
+            },
+            user,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.warning(
+            f"title generation failed (chat {metadata['chat_id']}): {e!r}; "
+            "using the first message"
+        )
+        res = None
+    else:
+        if not isinstance(res, dict):
+            log.warning(
+                f"title generation failed (chat {metadata['chat_id']}): "
+                f"{type(res).__name__} {getattr(res, 'status_code', '')}; "
+                "using the first message"
+            )
+    return parse_generated_title(_title_response_text(res)) or first_message_title(
+        messages
+    )
+
+
+async def resolve_response_title(request, user, metadata, tasks) -> Optional[str]:
+    """このターンの応答に付けるタイトル。付けないなら None。
+
+    タイトルの生成(モデル呼び出し)までで、DB への書き込みと chat:title の emit は
+    しない — 呼び手がターン末の carried_tokens 計測と並列に走らせ、done の後に
+    run_response_background_tasks で付ける。例外は外へ出さない(ログだけ — 計測と
+    done を止めない)。
+    """
     # llens(#107): agent session の子ターンはタイトル生成を走らせない
     # (spawn 時の決定的タイトルが正。tasks=None でも来ないはずの二重ガード)。
-    if metadata.get("agent_session"):
-        return
+    if metadata.get("agent_session") or not tasks:
+        return None
+    if TASKS.TITLE_GENERATION not in tasks:
+        return None
+    try:
+        message_map = await asyncio.to_thread(
+            Chats.get_messages_by_chat_id, metadata["chat_id"]
+        )
+        message = message_map.get(metadata["message_id"]) if message_map else None
+        if not message:
+            return None
+        messages = get_message_list(message_map, message.get("id"))
+        if not messages:
+            return None
 
-    message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
-    message = message_map.get(metadata["message_id"]) if message_map else None
-
-    if not message:
-        return
-
-    messages = get_message_list(message_map, message.get("id"))
-
-    if not (tasks and messages):
-        return
-
-    if TASKS.TITLE_GENERATION in tasks:
         if tasks[TASKS.TITLE_GENERATION]:
-            res = await generate_title(
-                request,
-                {
-                    "model": message.get("model")
-                    or metadata.get("model", {}).get("id"),
-                    "messages": messages,
-                    "chat_id": metadata["chat_id"],
-                },
-                user,
+            return await _generate_title_or_fallback(
+                request, user, metadata, message, messages
             )
+        if len(messages) == 2:
+            # タイトル自動生成 OFF: 最初のユーザー発話をタイトルにする
+            # (New Chat が並ぶよりよい)
+            return first_message_title(messages)
+        return None
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception(f"post-response title failed (chat {metadata['chat_id']})")
+        return None
 
-            if res and isinstance(res, dict):
-                if len(res.get("choices", [])) == 1:
-                    # llens(#68): content は reasoning がトークン予算を
-                    # 使い切ると null になる(.get の既定値は「キーが無い」
-                    # 時しか効かない)。None はここで空文字に落とす。
-                    title_string = (
-                        res.get("choices", [])[0].get("message", {}).get("content")
-                    ) or ""
-                else:
-                    title_string = ""
 
-                title = parse_generated_title(title_string) or first_message_title(
-                    messages
-                )
+async def run_response_background_tasks(metadata, title_job, event_emitter):
+    """応答確定(done)の後: resolve_response_title の結果をタイトルに付けて emit する。
 
-                Chats.update_chat_title_by_id(metadata["chat_id"], title)
-
-                await event_emitter(
-                    {
-                        "type": "chat:title",
-                        "data": title,
-                    }
-                )
-        elif len(messages) == 2:
-            # タイトル自動生成 OFF: 最初のユーザー発話をタイトルにする(仕様 2026-07-17
-            # 決定 — New Chat が並ぶよりよい)。emit は DB と同じ値を流す
-            # (旧実装は応答本文を流していて表示が食い違った)
-            title = first_message_title(messages)
-
-            Chats.update_chat_title_by_id(metadata["chat_id"], title)
-
-            await event_emitter(
-                {
-                    "type": "chat:title",
-                    "data": title,
-                }
-            )
+    title_job は resolve_response_title の task(計測と並列に走らせたもの)。
+    emit は DB と同じ値を流す。
+    """
+    title = await title_job
+    if not title:
+        return
+    await asyncio.to_thread(Chats.update_chat_title_by_id, metadata["chat_id"], title)
+    await event_emitter(
+        {
+            "type": "chat:title",
+            "data": title,
+        }
+    )
 
 
 async def _persist_message_snapshot(metadata, snapshot):
@@ -1480,6 +1522,8 @@ async def measure_carried_tokens(
       max_completion_tokens も 1 で送る(router はその後で max_completion_tokens を
       max_tokens へ移す — api.openai.com 以外。api.openai.com では
       max_completion_tokens が残り max_tokens が落ちる。どちらでも 1 token で止まる)。
+      ollama 経路では options.num_predict=1 になる(preset に max_tokens があれば
+      そちらが勝つ)。
     - 失敗・タイムアウト・usage 無しは None(呼び手は推定値のまま)。
     """
     messages = build_carried_measure_messages(form_data["messages"], content_blocks)
@@ -2745,6 +2789,9 @@ async def process_chat_response(
             seed_blocks=seed_blocks,
             tools=metadata.get("tools", {}),
         )
+        # ターン末のタイトル生成(計測と並列 — resolve_response_title)。
+        # 異常終了の経路では止める(フォールバックタイトルが付く)。
+        title_job = None
 
         try:
             for event in events:
@@ -2954,33 +3001,48 @@ async def process_chat_response(
                     }
                 )
 
+            # 最終形を先に保存する — タイトル生成はこの turn の応答を DB から読む。
+            final_snapshot = blocks_event_data(assembler.content_blocks)
+            await _persist_message_snapshot(metadata, final_snapshot)
+
+            # タイトルの生成(モデル呼び出し)は carried_tokens の計測と並列に走らせる。
+            # 両者に順序の依存は無い(計測は DB の message の usage を書くだけで、
+            # タイトル生成が読む本文は上で保存済み)。chat への書き込みは
+            # 計測(usage)→ done の後のタイトル、の順で重ねない(どちらも chat を
+            # 丸ごと読み書きする)。どちらかの失敗・例外はもう片方を止めない。
+            title_job = asyncio.create_task(
+                resolve_response_title(request, user, metadata, tasks)
+            )
+
             # ken 指示 2026-10-05: ゲージの確定値(carried_tokens)を推定から実測へ。
             # 次ターン最初の呼び出しと同じ形を 1 回流して prompt_tokens を取る —
             # done の前(完了時保存が推定値で DB を上書きしないように)。
-            await _record_measured_carried(
-                request,
-                user,
-                model,
-                model_id,
-                metadata,
-                form_data,
-                assembler.content_blocks,
-                event_emitter,
-                image_cache=image_cache,
-                audio_cache=audio_cache,
-            )
+            try:
+                await _record_measured_carried(
+                    request,
+                    user,
+                    model,
+                    model_id,
+                    metadata,
+                    form_data,
+                    assembler.content_blocks,
+                    event_emitter,
+                    image_cache=image_cache,
+                    audio_cache=audio_cache,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("carried_tokens measurement failed")
 
             title = await asyncio.to_thread(
                 Chats.get_chat_title_by_id, metadata["chat_id"]
             )
-            final_snapshot = blocks_event_data(assembler.content_blocks)
             data = {
                 "done": True,
                 **final_snapshot,
                 "title": title,
             }
-
-            await _persist_message_snapshot(metadata, final_snapshot)
 
             # webhook(triage KEEP): 「この応答を誰も見ていなかった」場合に通知。
             # 管理者が ENABLE_USER_WEBHOOKS を切っていれば、ユーザーが保存した
@@ -3027,13 +3089,13 @@ async def process_chat_response(
             # 落とすと、成功した応答に「Connection to the model was lost」が保存され
             # done が 2 回飛ぶ — 独立に握ってログだけ残す。
             try:
-                await run_response_background_tasks(
-                    request, user, metadata, tasks, event_emitter
-                )
+                await run_response_background_tasks(metadata, title_job, event_emitter)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("post-response background tasks (title) failed")
+            finally:
+                title_job.cancel()
         except asyncio.CancelledError:
             # llens: 中断でも open な reasoning を閉じてから保存・emit する。
             # done=false のブロックが DB に残ると「Thinking…」スピナーが
@@ -3041,6 +3103,8 @@ async def process_chat_response(
             # フロントに interrupted マークを立てさせ、その後の done イベントで
             # FE の完了時保存が interrupted 込みで走る。
             log.warning("Task was cancelled!")
+            if title_job is not None:
+                title_job.cancel()
             assembler.close_open_reasoning_block()
             data = {
                 "done": True,
@@ -3058,6 +3122,8 @@ async def process_chat_response(
             # 「Preparing…」のまま固まる(ollama 無応答障害で実証)。error は
             # message にも永続化し、リロード後もエラーとして見えるようにする。
             log.exception("Chat response task failed mid-stream")
+            if title_job is not None:
+                title_job.cancel()
             assembler.close_open_reasoning_block()
             # done も同時に立てる: フロントの done 経路(完了時保存)を通し、
             # error 付きのまま保存されるようにする

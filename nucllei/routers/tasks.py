@@ -150,13 +150,10 @@ async def generate_title(
         # llens(#68): Kimi は reasoning が常時出て title 1 つに 1000 トークン超を
         # 消費し得る(実測 reasoning_tokens=1002 で finish_reason=length →
         # content=null → 全チャット "New Chat" になっていた)。予算を 4000 に拡大。
-        **(
-            {"max_tokens": 4000}
-            if models[task_model_id].get("owned_by") == "ollama"
-            else {
-                "max_completion_tokens": 4000,
-            }
-        ),
+        # OpenAI 互換経路では max_completion_tokens が preset の params.max_tokens に
+        # 負けない(router が上書きの後で max_tokens へ移す)。ollama 経路では
+        # options.num_predict になる(preset に max_tokens があればそちらが勝つ)。
+        "max_completion_tokens": 4000,
         "metadata": {
             **(request.state.metadata if hasattr(request.state, "metadata") else {}),
             "task": str(TASKS.TITLE_GENERATION),

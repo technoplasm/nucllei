@@ -1456,6 +1456,165 @@ def test_title_failure_after_done_does_not_error_the_response(monkeypatch):
     assert all("error" not in u for u in upserts)
 
 
+# ---- ターン末: タイトル生成と carried_tokens 計測の並列 ----------------------
+
+
+def _patch_turn_end_title(monkeypatch, resolve):
+    """resolve_response_title を差し替え、タイトルの DB 書き込みを記録する。"""
+    from nucllei.utils import middleware
+
+    titles = []
+    monkeypatch.setattr(middleware, "resolve_response_title", resolve)
+    monkeypatch.setattr(
+        middleware.Chats,
+        "update_chat_title_by_id",
+        lambda chat_id, title: titles.append((chat_id, title)),
+    )
+    return titles
+
+
+def _types_in_order(events):
+    out = []
+    for e in events:
+        if e.get("type") == "chat:title":
+            out.append(("title", e["data"]))
+        elif e.get("type") == "chat:completion" and e.get("data", {}).get("done"):
+            out.append(("done", bool(e["data"].get("error"))))
+        elif e.get("type") == "chat:completion" and (
+            (e.get("data", {}).get("usage") or {}).get("carried_source") == "measured"
+        ):
+            out.append(("measured", e["data"]["usage"]["carried_tokens"]))
+    return out
+
+
+def test_turn_end_title_generation_runs_concurrently_with_measurement(monkeypatch):
+    """タイトル生成は計測の終わりを待たずに始まる(計測の最中にタイトル生成が
+    動いていなければ、計測は title_started を待ち切れずに失敗する)。chat:title は
+    done の後、DB と同じ値で 1 回。"""
+    state = {}
+
+    def event(name):
+        return state.setdefault(name, asyncio.Event())
+
+    async def resolve(request, user, metadata, tasks):
+        await asyncio.wait_for(event("measure_started").wait(), timeout=5)
+        event("title_started").set()
+        return "札幌の天気"
+
+    async def measure(*args, **kwargs):
+        event("measure_started").set()
+        await asyncio.wait_for(event("title_started").wait(), timeout=5)
+        return 4321
+
+    titles = _patch_turn_end_title(monkeypatch, resolve)
+    usage_records = []
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="text_basic",
+            measure_carried=measure,
+            usage_records=usage_records,
+        )
+    )
+
+    assert {"carried_tokens": 4321, "carried_source": "measured"} in usage_records
+    assert _types_in_order(events) == [
+        ("measured", 4321),
+        ("done", False),
+        ("title", "札幌の天気"),
+    ]
+    assert titles == [("chat-1", "札幌の天気")]
+
+
+def test_turn_end_measurement_exception_does_not_stop_title(monkeypatch):
+    """計測が例外を出しても、応答はエラーにならず done は 1 回、タイトルは付く。"""
+
+    async def resolve(request, user, metadata, tasks):
+        return "札幌の天気"
+
+    async def measure(*args, **kwargs):
+        raise RuntimeError("measure broke")
+
+    titles = _patch_turn_end_title(monkeypatch, resolve)
+    upserts = []
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="text_basic",
+            measure_carried=measure,
+            upserts=upserts,
+        )
+    )
+
+    assert _types_in_order(events) == [("done", False), ("title", "札幌の天気")]
+    assert titles == [("chat-1", "札幌の天気")]
+    assert all("error" not in u for u in upserts)
+
+
+def test_turn_end_title_exception_does_not_stop_measurement(monkeypatch):
+    """タイトル側が例外を出しても、計測の結果は記録・emit され、done は 1 回でエラー無し。"""
+
+    async def resolve(request, user, metadata, tasks):
+        raise RuntimeError("title broke")
+
+    async def measure(*args, **kwargs):
+        return 4321
+
+    titles = _patch_turn_end_title(monkeypatch, resolve)
+    usage_records = []
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="text_basic",
+            measure_carried=measure,
+            usage_records=usage_records,
+        )
+    )
+
+    assert {"carried_tokens": 4321, "carried_source": "measured"} in usage_records
+    assert _types_in_order(events) == [("measured", 4321), ("done", False)]
+    assert titles == []
+
+
+def test_turn_end_title_reads_the_final_response(monkeypatch):
+    """タイトル生成が始まる時点で、この turn の最終形は DB に保存済み(タイトルは
+    応答を DB から読む)。"""
+    upserts = []
+    seen = []
+
+    async def resolve(request, user, metadata, tasks):
+        seen.append([dict(u) for u in upserts])
+        return None
+
+    _patch_turn_end_title(monkeypatch, resolve)
+    events, _, _ = asyncio.run(
+        _drive_tool_call_loop(
+            monkeypatch,
+            cap=None,
+            followup_responses=[],
+            initial_fixture="text_basic",
+            upserts=upserts,
+        )
+    )
+
+    done = next(
+        e["data"]
+        for e in events
+        if e.get("type") == "chat:completion" and e.get("data", {}).get("done")
+    )
+    assert done["content"]
+    assert len(seen) == 1
+    assert seen[0], "タイトル生成の前に最終形が保存されていない"
+    assert seen[0][-1]["content"] == done["content"]
+    assert seen[0][-1]["content_blocks"] == done["content_blocks"]
+
+
 def _drive_unwatched_turn(monkeypatch, enable_user_webhooks):
     """誰も見ていない(完了時点で購読ゼロの)ターンを、ユーザーの webhook URL を
     保存した状態で 1 回流し、post_webhook へ渡った URL の列を返す。"""

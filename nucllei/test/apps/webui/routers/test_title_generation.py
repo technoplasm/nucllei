@@ -5,9 +5,14 @@
 - model の read ACL は今まで通り効く (ACL 外は 404、上流へは出ない)
 - pipeline の inlet filter を通る
 - 呼び出しごとに `model call ... call=title` の 1 行が出る
+- 生成に失敗しても (上流の 400・例外・content が空 / null) 最初の発話がタイトルになる
+  (middleware.resolve_response_title)
 """
 
+import asyncio
+import copy
 import json
+import types
 
 from test.util.abstract_integration_test import AbstractPostgresTest
 from test.util.mock_user import mock_webui_user
@@ -40,14 +45,21 @@ UPSTREAM_RESPONSE = {
 
 
 class _FakeJsonResponse:
-    status = 200
     headers = {"Content-Type": "application/json"}
 
+    def __init__(self, body=None, status=200):
+        self.status = status
+        self._body = UPSTREAM_RESPONSE if body is None else body
+
     async def json(self):
-        return json.loads(json.dumps(UPSTREAM_RESPONSE))
+        return json.loads(json.dumps(self._body))
+
+    async def text(self):
+        return json.dumps(self._body)
 
     def raise_for_status(self):
-        pass
+        if self.status >= 400:
+            raise RuntimeError(f"HTTP {self.status}")
 
     def close(self):
         pass
@@ -59,7 +71,7 @@ class _FakeJsonResponse:
 class TestTitleGenerationPayload(AbstractPostgresTest):
     BASE_PATH = "/api/v1/tasks"
 
-    def _setup(self, monkeypatch, access_control):
+    def _setup(self, monkeypatch, access_control, reply=None, reply_status=200):
         from nucllei.main import app
         from nucllei.models.models import ModelForm, ModelParams, Models
         from nucllei.routers import openai as openai_router
@@ -107,7 +119,7 @@ class TestTitleGenerationPayload(AbstractPostgresTest):
 
             async def request(self, method, url, data=None, headers=None):
                 sent.append(json.loads(data))
-                return _FakeJsonResponse()
+                return _FakeJsonResponse(reply, reply_status)
 
             async def close(self):
                 pass
@@ -131,6 +143,9 @@ class TestTitleGenerationPayload(AbstractPostgresTest):
 
             def warning(self, line, *args):
                 logged.append(("warning", line))
+
+            def exception(self, line, *args, **kwargs):
+                logged.append(("exception", line))
 
             def debug(self, *args, **kwargs):
                 pass
@@ -203,6 +218,114 @@ class TestTitleGenerationPayload(AbstractPostgresTest):
         assert response.status_code == 404
         assert sent == []
         assert inlet_calls == []
+
+    # ---- 生成に失敗したときの救済 (resolve_response_title) ----------------------
+
+    def _resolve(self, monkeypatch, user_id="1", role="admin", tasks=None):
+        """middleware.resolve_response_title を実物の tasks.generate_title・
+        routers.openai に通して呼ぶ。返り値はタイトル (付けないなら None)。"""
+        from nucllei.main import app
+        from nucllei.utils import middleware
+
+        message_map = {
+            "u1": {
+                "id": "u1",
+                "parentId": None,
+                "role": "user",
+                "content": MESSAGES[0]["content"],
+            },
+            "a1": {
+                "id": "a1",
+                "parentId": "u1",
+                "role": "assistant",
+                "model": "preset",
+                "content": MESSAGES[1]["content"],
+            },
+        }
+        monkeypatch.setattr(
+            middleware.Chats,
+            "get_messages_by_chat_id",
+            lambda chat_id: copy.deepcopy(message_map),
+        )
+        metadata = {"chat_id": "c1", "message_id": "a1"}
+        request = types.SimpleNamespace(
+            app=app, state=types.SimpleNamespace(metadata=metadata)
+        )
+        user = types.SimpleNamespace(
+            id=user_id, email=f"{user_id}@nucllei.local", name="u", role=role
+        )
+        return asyncio.run(
+            middleware.resolve_response_title(
+                request,
+                user,
+                metadata,
+                {"title_generation": True} if tasks is None else tasks,
+            )
+        )
+
+    def test_title_is_generated(self, monkeypatch):
+        sent, _, _ = self._setup(monkeypatch, access_control=None)
+        assert self._resolve(monkeypatch) == "札幌の冬"
+        assert len(sent) == 1
+
+    def test_upstream_400_falls_back_to_first_message(self, monkeypatch):
+        sent, _, logged = self._setup(
+            monkeypatch,
+            access_control=None,
+            reply={"object": "error", "message": "bad request"},
+            reply_status=400,
+        )
+        assert self._resolve(monkeypatch) == MESSAGES[0]["content"]
+        assert len(sent) == 1
+        assert any(
+            level == "warning" and "title generation failed" in line
+            for level, line in logged
+        )
+
+    def test_exception_falls_back_to_first_message(self, monkeypatch):
+        # read ACL 外 = generate_title が HTTPException(404) を投げる (上流へは出ない)
+        sent, _, logged = self._setup(monkeypatch, access_control={})
+        assert self._resolve(monkeypatch, user_id="9", role="user") == (
+            MESSAGES[0]["content"]
+        )
+        assert sent == []
+        assert any(
+            level == "warning" and "title generation failed" in line
+            for level, line in logged
+        )
+
+    def test_null_content_falls_back_to_first_message(self, monkeypatch):
+        reply = copy.deepcopy(UPSTREAM_RESPONSE)
+        reply["choices"][0]["finish_reason"] = "length"
+        reply["choices"][0]["message"]["content"] = None
+        self._setup(monkeypatch, access_control=None, reply=reply)
+        assert self._resolve(monkeypatch) == MESSAGES[0]["content"]
+
+    def test_empty_content_falls_back_to_first_message(self, monkeypatch):
+        reply = copy.deepcopy(UPSTREAM_RESPONSE)
+        reply["choices"][0]["message"]["content"] = ""
+        self._setup(monkeypatch, access_control=None, reply=reply)
+        assert self._resolve(monkeypatch) == MESSAGES[0]["content"]
+
+    def test_disabled_title_generation_falls_back_to_first_message(self, monkeypatch):
+        from nucllei.main import app
+
+        sent, _, _ = self._setup(monkeypatch, access_control=None)
+        monkeypatch.setattr(app.state.config, "ENABLE_TITLE_GENERATION", False)
+        assert self._resolve(monkeypatch) == MESSAGES[0]["content"]
+        assert sent == []
+
+    def test_auto_title_off_uses_first_message_without_calling(self, monkeypatch):
+        sent, _, _ = self._setup(monkeypatch, access_control=None)
+        assert self._resolve(monkeypatch, tasks={"title_generation": False}) == (
+            MESSAGES[0]["content"]
+        )
+        assert sent == []
+
+    def test_no_title_task_resolves_to_none(self, monkeypatch):
+        sent, _, _ = self._setup(monkeypatch, access_control=None)
+        assert self._resolve(monkeypatch, tasks={}) is None
+        assert sent == []
 
 
 def test_system_prompt_is_not_applied_to_task_calls():

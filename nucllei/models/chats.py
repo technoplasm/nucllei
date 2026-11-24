@@ -338,7 +338,8 @@ class ChatTable:
         append_delivery_turn と同じバージョンスタンプを取り合うので、保存の
         read-modify-write の間に driver append(notice 追記)が挟まっても
         無言で上書き(notice 消失)しない。無ガード版 update_chat_by_id は
-        単一書き手の内部経路(タイトル・usage・agent session 等)専用に残る。
+        単一書き手の内部経路(usage・agent session 等)専用に残る(タイトルは
+        update_chat_title_by_id がこの CAS で書く)。
         戻り値は (status, chat):
         - ("ok", 更新後 ChatModel) — 成功
         - ("conflict", None) — CAS 負け。呼び出し側は再読して検証し直す
@@ -373,14 +374,25 @@ class ChatTable:
             return ("conflict", None)
 
     def update_chat_title_by_id(self, id: str, title: str) -> Optional[ChatModel]:
-        chat = self.get_chat_by_id(id)
-        if chat is None:
-            return None
+        """タイトルだけを書き換える(CAS — FE の保存と取り合う)。
 
-        chat = chat.chat
-        chat["title"] = title
-
-        return self.update_chat_by_id(id, chat)
+        応答の done の直後に走るので、FE の完了時保存(update_chat_by_id_guarded)と
+        時間が重なる。無ガードの read-modify-write だと、読んだ後に FE が保存した
+        履歴を古い chat で上書きして消す。読んだ version を期待値に書き、負けたら
+        読み直す(最大 3 回)。
+        """
+        for _ in range(3):
+            chat = self.get_chat_by_id(id)
+            if chat is None:
+                return None
+            updated = {**chat.chat, "title": title}
+            status, result = self.update_chat_by_id_guarded(id, updated, chat.version)
+            if status == "ok":
+                return result
+            if status == "missing":
+                return None
+        log.warning(f"chat {id}: title update lost the CAS race 3 times")
+        return None
 
     def get_chat_title_by_id(self, id: str) -> Optional[str]:
         chat = self.get_chat_by_id(id)
