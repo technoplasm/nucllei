@@ -209,7 +209,11 @@ from nucllei.utils.chat import (
     generate_chat_completion as chat_completion_handler,
     chat_action as chat_action_handler,
 )
-from nucllei.utils.middleware import process_chat_payload, process_chat_response
+from nucllei.utils.middleware import (
+    process_chat_payload,
+    process_chat_response,
+    run_model_call_with_retry,
+)
 from nucllei.utils.access_control import has_access
 
 from nucllei.utils.auth import (
@@ -852,7 +856,14 @@ async def chat_completion(
         )
 
     try:
-        response = await chat_completion_handler(request, form_data, user)
+        # 接続系の失敗(接続断・timeout・上流の 502/503/504 等)は同じ body でやり直す
+        # (README_API §3.5)。応答を読み始めてからの失敗は process_chat_response が持つ
+        response = await run_model_call_with_retry(
+            lambda: chat_completion_handler(request, form_data, user),
+            metadata=metadata,
+            model=model,
+            call_index=1,
+        )
 
         return await process_chat_response(
             request,

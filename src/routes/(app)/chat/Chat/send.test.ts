@@ -22,8 +22,11 @@ vi.mock('$lib/utils', () => ({
 	createMessagesList: vi.fn(() => []),
 	getPromptVariables: () => ({})
 }));
-vi.mock('$lib/utils/chat-messages', () => ({
+vi.mock('$lib/utils/chat-messages', async () => ({
 	buildWireMessages: vi.fn(() => []),
+	isEmptyErrorResponse: (
+		await vi.importActual<typeof import('$lib/utils/chat-messages')>('$lib/utils/chat-messages')
+	).isEmptyErrorResponse,
 	parseStopSequences: () => undefined
 }));
 vi.mock('$lib/utils/completion-streams', () => ({
@@ -421,5 +424,77 @@ describe('ChatSend.sendPrompt — サイドバー一覧の取り直し', () => {
 		expect(session.initChatHandler).toHaveBeenCalledWith(expect.anything(), {
 			refreshList: false
 		});
+	});
+});
+
+// tool ループの途中でモデルの呼び出しが落ちた応答は、本文が空でも tool 呼び出しと結果が
+// content_blocks に残る。その後の「再開」は送れる(何も残っていないエラーの応答の後だけ止める)
+describe('ChatSend.submitPrompt — エラーで終わった応答の後の送信', () => {
+	const afterError = (assistant: Record<string, unknown>) => {
+		vi.stubGlobal('document', { getElementById: () => null });
+		const ctx = makeSend();
+		chatId.set('chat-1');
+		(ctx.session as Record<string, unknown>).chat = { title: 't' };
+		(ctx.session as Record<string, unknown>).files = [];
+		(ctx.session as Record<string, unknown>).saveSessionSelectedModels = () => {};
+		ctx.session.history = {
+			messages: {
+				u1: { id: 'u1', parentId: null, childrenIds: ['a1'], role: 'user', content: 'hi' },
+				a1: {
+					id: 'a1',
+					parentId: 'u1',
+					childrenIds: [],
+					role: 'assistant',
+					content: '',
+					done: true,
+					error: { content: 'Follow-up model call after tool execution failed: 500' },
+					...assistant
+				}
+			},
+			currentId: 'a1'
+		} as unknown as ChatHistory;
+		vi.mocked(createMessagesList).mockImplementation(
+			() => [ctx.session.history.messages['u1'], ctx.session.history.messages['a1']] as never
+		);
+		vi.mocked(generateOpenAIChatCompletion).mockResolvedValue({ body: {} } as never);
+		return ctx;
+	};
+	const cleanup = () => {
+		vi.unstubAllGlobals();
+		vi.mocked(createMessagesList).mockImplementation(() => []);
+	};
+
+	it('tool 呼び出しまで進んだ応答の後は送れる', async () => {
+		try {
+			const { send } = afterError({
+				content_blocks: [
+					{
+						type: 'tool_calls',
+						calls: [{ id: 'c1', function: { name: 'f', arguments: '{}' } }],
+						results: [{ tool_call_id: 'c1', content: 'ok' }]
+					},
+					{ type: 'text', content: '' }
+				]
+			});
+			await send.submitPrompt('再開');
+			expect(toast.error).not.toHaveBeenCalled();
+			expect(generateOpenAIChatCompletion).toHaveBeenCalledTimes(1);
+		} finally {
+			cleanup();
+		}
+	});
+
+	it('本文も tool 呼び出しも無いエラーの応答の後は止めてトーストを出す', async () => {
+		try {
+			const { send, session } = afterError({ content_blocks: [{ type: 'text', content: '' }] });
+			await send.submitPrompt('再開');
+			expect(toast.error).toHaveBeenCalledWith(
+				'Oops! There was an error in the previous response.'
+			);
+			expect(generateOpenAIChatCompletion).not.toHaveBeenCalled();
+			expect(session.prompt).toBe('');
+		} finally {
+			cleanup();
+		}
 	});
 });

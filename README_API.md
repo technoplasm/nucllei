@@ -275,6 +275,27 @@ managed per-group in the DB/UI.
 | `AIOHTTP_CLIENT_TIMEOUT_CONNECT`                          | env      | `10`                               | TCP connect timeout (dead-connection detection)                                                                                                                                                                                                            |
 | `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ`                        | env      | `300`                              | max silent gap between streamed bytes                                                                                                                                                                                                                      |
 | `AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST` / `_TOOL_SERVER_DATA` | env      | `10` / `10`                        | model-list / tool-server fetch timeouts                                                                                                                                                                                                                    |
+| `MODEL_CALL_RETRIES`                                      | env      | `3` (`0` off)                      | how many times a chat model call is retried after a connection failure (see below)                                                                                                                                                                         |
+| `MODEL_CALL_RETRY_DELAY_S`                                | env      | `2`                                | wait before the first retry, in seconds; doubles for each further retry (2, 4, 8 s)                                                                                                                                                                        |
+
+**Retrying a model call.** The first model call of a chat turn and every
+tool-loop follow-up are retried with the same body when they fail with a
+connection failure: no response from the engine (connection refused or closed,
+timeout, the stream cut off), a `502` / `503` / `504`, or a `500` whose message
+reports a connection failure further upstream (e.g. LiteLLM's
+`litellm.APIConnectionError: … Connection closed.`, `litellm.Timeout`). A `4xx`
+(a bad request, a permission, a rate limit) and any other `500` are not retried.
+A stream that breaks **after** output has arrived (text, reasoning, a tool call,
+usage) is not retried either: that output is already on screen and saved, and a
+second answer would be appended to it — the turn ends with the error and keeps
+what arrived. Each retry logs one `model call … WARN: retry 1/3 in 2s` line, and
+giving up logs `… WARN: call failed after 3 retries`
+(`_memos/streaming-wire-v2.md`). The title generation and the `carried_tokens`
+measurement are not retried. A turn that fails in the middle of its tool loop
+keeps its tool calls and their results in `content_blocks` (a call that has no
+result is paired with an `[interrupted]` result in the history), so the UI lets
+the user send the next message to continue from there; only an error response
+with neither text nor tool calls asks for a regeneration.
 
 Reference wiring for a local engine:
 `OPENAI_API_BASE_URLS=http://host.docker.internal:13300/v1`, `OPENAI_API_KEYS=EMPTY`,

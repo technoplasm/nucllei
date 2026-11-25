@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
-import { buildWireMessages, expandAssistantToolHistory, parseStopSequences } from './chat-messages';
+import {
+	buildWireMessages,
+	expandAssistantToolHistory,
+	isEmptyErrorResponse,
+	parseStopSequences
+} from './chat-messages';
 
 describe('expandAssistantToolHistory(#18-2)', () => {
 	it('tool_calls ブロックが無ければ従来どおり縮約 1 メッセージ', () => {
@@ -477,5 +482,84 @@ describe('parseStopSequences', () => {
 
 	it('配列(settings.params.stop 由来)も受ける — upstream では TypeError だった経路', () => {
 		expect(parseStopSequences(['END', '\\n'])).toEqual(['END', '\n']);
+	});
+});
+
+// tool ループの途中でモデルの呼び出しが落ちた応答(本文は空・error 付き・tool 往復は残る)
+describe('エラーで終わった応答', () => {
+	const error = { content: 'Follow-up model call after tool execution failed: 500' };
+	const call = (id: string, args = '{"city": "札幌"}') => ({
+		id,
+		type: 'function',
+		function: { name: 'get_weather', arguments: args }
+	});
+	const failedTurn = {
+		id: 'a1',
+		role: 'assistant',
+		content: '',
+		error,
+		content_blocks: [
+			{ type: 'reasoning', content: '調べる' },
+			{
+				type: 'tool_calls',
+				calls: [call('c1')],
+				results: [{ tool_call_id: 'c1', content: '晴れ' }]
+			},
+			{
+				type: 'tool_calls',
+				// 結果の前に落ちた call と、引数の途中で切れた call
+				calls: [call('c2'), call('c3', '{"city": "函')]
+			},
+			{ type: 'text', content: '' }
+		]
+	};
+
+	it('isEmptyErrorResponse: 本文も tool 呼び出しも無いエラーの応答だけ', () => {
+		expect(isEmptyErrorResponse(failedTurn)).toBe(false);
+		expect(isEmptyErrorResponse({ error, content: '途中まで' })).toBe(false);
+		expect(isEmptyErrorResponse({ error, content: '' })).toBe(true);
+		expect(
+			isEmptyErrorResponse({ error, content: '', content_blocks: [{ type: 'text', content: '' }] })
+		).toBe(true);
+		expect(
+			isEmptyErrorResponse({
+				error,
+				content: '',
+				content_blocks: [{ type: 'tool_calls', calls: [] }]
+			})
+		).toBe(true);
+		expect(isEmptyErrorResponse({ content: '' })).toBe(false);
+		expect(isEmptyErrorResponse(undefined)).toBe(false);
+	});
+
+	it('次の発言の履歴では tool_call と結果が対になる(壊れた call は落とす)', () => {
+		const wire = buildWireMessages(
+			[
+				{ id: 'u1', role: 'user', content: '天気を調べて' },
+				failedTurn,
+				{ id: 'u2', role: 'user', content: '再開' }
+			],
+			null
+		);
+		expect(wire).toEqual([
+			{ role: 'user', content: '天気を調べて', id: 'u1' },
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [call('c1')]
+			},
+			{ role: 'tool', tool_call_id: 'c1', content: '晴れ' },
+			{
+				role: 'assistant',
+				content: '',
+				tool_calls: [call('c2')]
+			},
+			{
+				role: 'tool',
+				tool_call_id: 'c2',
+				content: '[interrupted: this tool call produced no result]'
+			},
+			{ role: 'user', content: '再開', id: 'u2' }
+		]);
 	});
 });

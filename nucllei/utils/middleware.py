@@ -144,6 +144,8 @@ from nucllei.tasks import create_task
 from nucllei.env import (
     SRC_LOG_LEVELS,
     GLOBAL_LOG_LEVEL,
+    MODEL_CALL_RETRIES,
+    MODEL_CALL_RETRY_DELAY_S,
     TOOL_CALL_MAX_ITERATIONS,
     TOOL_EXEC_TIMEOUT_S,
 )
@@ -1887,7 +1889,7 @@ def describe_call_error(exc) -> str:
     接続断・timeout など上流の応答が無い失敗は status を書かない。
     """
     cause = exc
-    while isinstance(cause, (HTTPException, TitleCallError)):
+    while isinstance(cause, (HTTPException, TitleCallError, ModelStreamInterrupted)):
         inner = _chained_exception(cause)
         if inner is None:
             break
@@ -1902,12 +1904,15 @@ def describe_call_error(exc) -> str:
     return " ".join(parts)
 
 
-def log_model_call_error(exc, *, metadata, model, call_index, elapsed=None):
-    """非 stream のモデル呼び出しが例外で終わったときの `model call` の 1 行 (WARNING)。
+def log_model_call_error(
+    exc, *, metadata, model, call_index, elapsed=None, warn="call failed"
+):
+    """モデル呼び出しが例外で終わったときの `model call` の 1 行 (WARNING)。
 
     `model call chat_id=… message_id=… call=… model=… status=… exception=… elapsed=…s
-    WARN: call failed`。HTTPException は router が traceback を出してから包んだもの
-    (または意図した 4xx) なので traceback を付けない。それ以外の例外は付ける。
+    WARN: call failed`。`warn` は行末の理由 (やり直しの行は `retry 1/3 in 2s` など)。
+    HTTPException は router が traceback を出してから包んだもの (または意図した 4xx) なので
+    traceback を付けない。やり直しの行も付けない。それ以外の例外の `call failed` には付ける。
     """
     try:
         model_id = model.get("id") if isinstance(model, dict) else model
@@ -1918,13 +1923,156 @@ def log_model_call_error(exc, *, metadata, model, call_index, elapsed=None):
         )
         if elapsed is not None:
             line += f" elapsed={elapsed:.2f}s"
-        line += " WARN: call failed"
-        if isinstance(exc, HTTPException):
+        line += f" WARN: {warn}"
+        if isinstance(exc, HTTPException) or warn != "call failed":
             log.warning(line)
         else:
             log.warning(line, exc_info=exc)
     except Exception as e:
         log.debug("model call diagnostic log failed: %s", e)
+
+
+# --- モデル呼び出しのやり直し ------------------------------------------------
+#
+# チャットの最初の呼び出しと tool ループの追撃が、接続系の失敗で落ちたら同じ body で
+# やり直す (MODEL_CALL_RETRIES 回、待ち時間は MODEL_CALL_RETRY_DELAY_S 秒から 2 倍ずつ)。
+# やり直すのは出力をまだ 1 つも受け取っていないときだけ — 受け取った分はもう画面に出て
+# DB にも書かれているので、やり直すと出力が重なる (README_API §3.5)。
+
+# 上流 (gateway) が「その先に届かない・応答が無い」と返す status
+_RETRYABLE_STATUSES = frozenset({502, 503, 504})
+# 上流の 500 のうち、その先との接続の失敗を伝えるもの (LiteLLM の
+# `litellm.APIConnectionError: … Connection closed.` / `litellm.Timeout` など)。小文字で比べる
+_CONNECTION_ERROR_MARKERS = (
+    "apiconnectionerror",
+    "connection closed",
+    "connection reset",
+    "connection refused",
+    "connection aborted",
+    "connection error",
+    "server disconnected",
+    "timed out",
+    "timeout",
+)
+
+
+class ModelStreamInterrupted(Exception):
+    """モデル応答のストリームを読んでいる途中で上流との接続が切れた。
+
+    `output_started` はそれまでに出力 (本文・reasoning・tool call・usage・エラーの
+    フレーム) を 1 つでも畳み込んだか。文面は元の例外と同じにする (エラーの表示は変えない)。
+    """
+
+    def __init__(self, cause: BaseException, *, output_started: bool):
+        super().__init__(str(cause))
+        self.__cause__ = cause
+        self.output_started = output_started
+
+
+def is_retryable_model_call_error(exc) -> bool:
+    """モデル呼び出しの失敗が、同じ body でやり直してよい接続系の失敗か。
+
+    - 出力を受け取った後に切れたストリーム (ModelStreamInterrupted.output_started) → しない
+    - 上流の応答が無い失敗 (接続できない・接続断・timeout・途中で切れた本文) → する
+    - 上流の 502 / 503 / 504 → する
+    - 上流の 500 は、接続の失敗を伝える文面 (_CONNECTION_ERROR_MARKERS) のときだけ → する
+    - 4xx (要求の誤り・権限・上限) とそれ以外の例外 → しない
+    """
+    cause = exc
+    texts = []
+    while isinstance(cause, (HTTPException, ModelStreamInterrupted)):
+        if isinstance(cause, ModelStreamInterrupted) and cause.output_started:
+            return False
+        if isinstance(cause, HTTPException):
+            texts.append(str(cause.detail))
+        inner = _chained_exception(cause)
+        if inner is None:
+            break
+        cause = inner
+
+    if isinstance(cause, aiohttp.ClientResponseError):
+        status = cause.status
+        texts.append(str(cause.message))
+    elif isinstance(cause, HTTPException):
+        status = cause.status_code
+    else:
+        return isinstance(
+            cause,
+            (
+                aiohttp.ClientConnectionError,
+                aiohttp.ClientPayloadError,
+                asyncio.TimeoutError,
+                ConnectionError,
+            ),
+        )
+
+    if status in _RETRYABLE_STATUSES:
+        return True
+    if status == 500:
+        text = " ".join(texts).lower()
+        return any(marker in text for marker in _CONNECTION_ERROR_MARKERS)
+    return False
+
+
+async def run_model_call_with_retry(
+    attempt, *, metadata, model, call_index, before_retry=None
+):
+    """`await attempt()` を返す。接続系の失敗ならやり直す (is_retryable_model_call_error)。
+
+    やり直すたびに `model call … WARN: retry 1/3 in 2s` を 1 行、やり直しを使い切って
+    諦めたときに `… WARN: call failed after 3 retries` を 1 行出す。`before_retry` は
+    次の試行の前に呼ぶ (assembler の呼び出し番号を戻す等)。stop (CancelledError) は
+    待ち時間の間でもそのまま上げる。
+    """
+    retries = MODEL_CALL_RETRIES
+    done = 0
+    while True:
+        started = time.monotonic()
+        try:
+            return await attempt()
+        except Exception as e:
+            if not is_retryable_model_call_error(e):
+                raise
+            elapsed = time.monotonic() - started
+            if done >= retries:
+                if retries:
+                    log_model_call_error(
+                        e,
+                        metadata=metadata,
+                        model=model,
+                        call_index=call_index,
+                        elapsed=elapsed,
+                        warn=f"call failed after {retries} retries",
+                    )
+                raise
+            done += 1
+            delay = MODEL_CALL_RETRY_DELAY_S * 2 ** (done - 1)
+            log_model_call_error(
+                e,
+                metadata=metadata,
+                model=model,
+                call_index=call_index,
+                elapsed=elapsed,
+                warn=f"retry {done}/{retries} in {delay}s",
+            )
+        if before_retry is not None:
+            before_retry()
+        await asyncio.sleep(delay)
+
+
+async def consume_model_response(request, response, assembler, **kwargs):
+    """モデル応答 (stream / 非 stream) を assembler へ畳み込み、組めた tool calls を返す。
+
+    上流の接続は成否にかかわらず閉じる (stop や途中失敗で読み捨てたままにすると、
+    上流は接続が残っている限り最後まで生成し続ける)。
+    """
+    try:
+        if isinstance(response, StreamingResponse):
+            return await consume_model_stream(request, response, assembler, **kwargs)
+        return await ingest_model_response_json(request, response, assembler, **kwargs)
+    finally:
+        if isinstance(response, StreamingResponse) and response.background is not None:
+            await response.background()
 
 
 async def consume_model_stream(
@@ -1989,119 +2137,136 @@ async def consume_model_stream(
     # 診断ログ(refs #142)— 観測のみ。下の処理には一切影響させない。
     diag = _ModelCallDiag()
 
-    async for line in response.body_iterator:
-        line = line.decode("utf-8") if isinstance(line, bytes) else line
-        data = line
+    # 出力(本文・reasoning・tool call・usage・エラーのフレーム・素通しのイベント)を
+    # 1 つでも畳み込んだか。読み取り中に接続が切れたら ModelStreamInterrupted に載せ、
+    # やり直してよいか(何も受け取っていない)の判断に使う(run_model_call_with_retry)。
+    output_started = False
 
-        # Skip empty lines
-        if not data.strip():
-            continue
+    try:
+        async for line in response.body_iterator:
+            line = line.decode("utf-8") if isinstance(line, bytes) else line
+            data = line
 
-        # "data:" is the prefix for each event
-        if not data.startswith("data:"):
-            continue
-
-        diag.observe_line(line)
-
-        # Remove the prefix
-        data = data[len("data:") :].strip()
-
-        try:
-            data = json.loads(data)
-
-            if not data:
+            # Skip empty lines
+            if not data.strip():
                 continue
 
-            if "event" in data:
-                await event_emitter(data.get("event", {}))
-
-            choices = data.get("choices", [])
-            if not choices:
-                error = data.get("error", {})
-                if error:
-                    # エラー形の一元化: {"error": {"content": str}}。上流の
-                    # {"message": ...}(OpenAI / SGLang)は message を取り出す
-                    # (dict の repr を見せない)。emit だけでなく DB にも残す —
-                    # リロード後もエラーとして見えるように(途中失敗の except と同じ規律)。
-                    error_data = {"error": {"content": stream_error_content(error)}}
-                    await event_emitter(
-                        {
-                            "type": "chat:completion",
-                            "data": error_data,
-                        }
-                    )
-                    await _persist_message_snapshot(metadata, error_data)
-                # #102: usage の主たる永続化点はこの最終フレーム(choices: [])。
-                # チャンクに載る累積 usage(continuous)は下の chat:usage(揮発)で
-                # 流すのみで、ここを通らない限り DB には書かない。
-                usage = data.get("usage", {})
-                diag.observe_usage(usage)
-                if usage:
-                    # 生成所要時間(#102): この呼び出しの stream 消費の壁時計を実測して
-                    # usage に添える(DB では completion 同様に累積 → ターンの生成時間。
-                    # tool 実行時間は含まれない)。クライアント積算はリロードで消えるため
-                    # 計測は backend の責務。
-                    usage = {**usage, "duration": round(loop.time() - started_at, 3)}
-                    await _record_usage(
-                        request,
-                        model,
-                        metadata,
-                        usage,
-                        event_emitter,
-                        output_blocks=assembler.stream_blocks(),
-                    )
-                    recorded_usage = True
+            # "data:" is the prefix for each event
+            if not data.startswith("data:"):
                 continue
 
-            # llens(#102): continuous_usage_stats でチャンクに載る累積 usage を
-            # leading-edge throttle で揮発イベントとして流す。tail flush は不要 —
-            # 最終真値は上の choices: [] フレーム(chat:completion {usage})、
-            # それが来ない配備ではストリーム終端の後始末が受け持つ。
-            live_usage = data.get("usage")
-            diag.observe_usage(live_usage)
-            if live_usage:
-                pending_usage = live_usage
-                if (
-                    last_usage_emit_at is None
-                    or loop.time() - last_usage_emit_at >= USAGE_EMIT_INTERVAL
-                ):
-                    last_usage_emit_at = loop.time()
-                    await event_emitter(
-                        {
-                            "type": "chat:usage",
-                            "data": _live_usage_payload(live_usage, context_size),
-                        }
-                    )
+            diag.observe_line(line)
 
-            assembler.note_finish_reason(choices[0].get("finish_reason"))
-            diag.observe_delta(choices[0].get("delta", {}))
+            # Remove the prefix
+            data = data[len("data:") :].strip()
 
-            changed = assembler.handle_delta(choices[0].get("delta", {}))
+            try:
+                data = json.loads(data)
 
-            if changed:
-                frame = assembler.last_frame
-                if frame["structural"]:
-                    await emit_snapshot(persist=True)
-                elif loop.time() - last_snapshot_at >= SNAPSHOT_INTERVAL:
-                    await emit_snapshot(persist=True)
-                else:
-                    for append in frame["appends"]:
+                if not data:
+                    continue
+
+                if "event" in data:
+                    output_started = True
+                    await event_emitter(data.get("event", {}))
+
+                choices = data.get("choices", [])
+                if not choices:
+                    error = data.get("error", {})
+                    if error:
+                        output_started = True
+                        # エラー形の一元化: {"error": {"content": str}}。上流の
+                        # {"message": ...}(OpenAI / SGLang)は message を取り出す
+                        # (dict の repr を見せない)。emit だけでなく DB にも残す —
+                        # リロード後もエラーとして見えるように(途中失敗の except と同じ規律)。
+                        error_data = {"error": {"content": stream_error_content(error)}}
                         await event_emitter(
                             {
                                 "type": "chat:completion",
-                                "data": {"delta": append},
+                                "data": error_data,
                             }
                         )
-        except Exception as e:
-            done = "data: [DONE]" in line
-            if done:
-                pass
-            else:
-                # デルタ処理の例外をここで握りつぶすとフレームが黙って欠落する
-                # (qwen の arguments デルタ全滅が debug ログのまま無言死した前科、
-                # 2026-08-18)。異常は warning で見えるようにする。
-                log.warning("stream frame processing failed (frame dropped): %s", e)
-                continue
+                        await _persist_message_snapshot(metadata, error_data)
+                    # #102: usage の主たる永続化点はこの最終フレーム(choices: [])。
+                    # チャンクに載る累積 usage(continuous)は下の chat:usage(揮発)で
+                    # 流すのみで、ここを通らない限り DB には書かない。
+                    usage = data.get("usage", {})
+                    diag.observe_usage(usage)
+                    if usage:
+                        # 生成所要時間(#102): この呼び出しの stream 消費の壁時計を実測して
+                        # usage に添える(DB では completion 同様に累積 → ターンの生成時間。
+                        # tool 実行時間は含まれない)。クライアント積算はリロードで消えるため
+                        # 計測は backend の責務。
+                        usage = {
+                            **usage,
+                            "duration": round(loop.time() - started_at, 3),
+                        }
+                        await _record_usage(
+                            request,
+                            model,
+                            metadata,
+                            usage,
+                            event_emitter,
+                            output_blocks=assembler.stream_blocks(),
+                        )
+                        recorded_usage = True
+                        output_started = True
+                    continue
+
+                # llens(#102): continuous_usage_stats でチャンクに載る累積 usage を
+                # leading-edge throttle で揮発イベントとして流す。tail flush は不要 —
+                # 最終真値は上の choices: [] フレーム(chat:completion {usage})、
+                # それが来ない配備ではストリーム終端の後始末が受け持つ。
+                live_usage = data.get("usage")
+                diag.observe_usage(live_usage)
+                if live_usage:
+                    pending_usage = live_usage
+                    if (
+                        last_usage_emit_at is None
+                        or loop.time() - last_usage_emit_at >= USAGE_EMIT_INTERVAL
+                    ):
+                        last_usage_emit_at = loop.time()
+                        await event_emitter(
+                            {
+                                "type": "chat:usage",
+                                "data": _live_usage_payload(live_usage, context_size),
+                            }
+                        )
+
+                assembler.note_finish_reason(choices[0].get("finish_reason"))
+                diag.observe_delta(choices[0].get("delta", {}))
+
+                changed = assembler.handle_delta(choices[0].get("delta", {}))
+
+                if changed:
+                    output_started = True
+                    frame = assembler.last_frame
+                    if frame["structural"]:
+                        await emit_snapshot(persist=True)
+                    elif loop.time() - last_snapshot_at >= SNAPSHOT_INTERVAL:
+                        await emit_snapshot(persist=True)
+                    else:
+                        for append in frame["appends"]:
+                            await event_emitter(
+                                {
+                                    "type": "chat:completion",
+                                    "data": {"delta": append},
+                                }
+                            )
+            except Exception as e:
+                done = "data: [DONE]" in line
+                if done:
+                    pass
+                else:
+                    # デルタ処理の例外をここで握りつぶすとフレームが黙って欠落する
+                    # (qwen の arguments デルタ全滅が debug ログのまま無言死した前科、
+                    # 2026-08-18)。異常は warning で見えるようにする。
+                    log.warning("stream frame processing failed (frame dropped): %s", e)
+                    continue
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        raise ModelStreamInterrupted(e, output_started=output_started) from e
 
     if not recorded_usage and pending_usage is not None:
         # llens(#102): usage を `choices: []` の専用フレームで送るのは SGLang の形で、
@@ -2886,20 +3051,39 @@ async def process_chat_response(
                 "metadata": metadata,
                 "event_emitter": event_emitter,
             }
-            ingest_kwargs = {
-                "model": model,
-                "metadata": metadata,
-                "event_emitter": event_emitter,
-            }
 
-            if isinstance(response, StreamingResponse):
-                response_tool_calls = await consume_model_stream(
-                    request, response, assembler, **stream_kwargs
+            async def call_with_retry(make_response):
+                """1 回のモデル呼び出し(要求 + 応答の畳み込み)を、接続系の失敗なら
+                やり直す。やり直しても assembler の呼び出し番号は同じにする。"""
+                call_index = assembler.stream_count + 1
+
+                async def attempt():
+                    res = await make_response()
+                    return await consume_model_response(
+                        request, res, assembler, **stream_kwargs
+                    )
+
+                def before_retry():
+                    assembler.stream_count = call_index - 1
+
+                return await run_model_call_with_retry(
+                    attempt,
+                    metadata=metadata,
+                    model=model,
+                    call_index=call_index,
+                    before_retry=before_retry,
                 )
-            else:
-                response_tool_calls = await ingest_model_response_json(
-                    request, response, assembler, **ingest_kwargs
-                )
+
+            # 最初の応答は main.py が取ったもの(要求の段階の失敗は向こうでやり直し済み)。
+            # 読み取りの途中で、まだ何も受け取らないうちに切れたら同じ form_data で取り直す。
+            first_response = [response]
+
+            async def make_first_response():
+                if first_response:
+                    return first_response.pop()
+                return await generate_chat_completion(request, form_data, user)
+
+            response_tool_calls = await call_with_retry(make_first_response)
             if response_tool_calls:
                 tool_calls.append(response_tool_calls)
 
@@ -2979,60 +3163,44 @@ async def process_chat_response(
                         audio_capable=is_audio_model(model),
                         cache=audio_cache,
                     )
-                    res = await generate_chat_completion(
-                        request,
-                        {
-                            # 初回と同じ生成パラメータ(チャット / ユーザー単位の
-                            # temperature・max_tokens・stop・seed 等)を追撃にも載せる
-                            **initial_call_params(form_data),
-                            "model": model_id,
-                            # 追撃呼び出しは元リクエストの stream 指定を尊重する
-                            # (stream 非対応モデル向けの opt-out を殺さない)
-                            "stream": form_data.get("stream", True),
-                            # llens(#57): tool ループの各呼び出しでも usage を受け取る
-                            # (capabilities.usage=False のモデルは opt-out)。
-                            # #102: continuous_usage_stats もここで再度要求する —
-                            # 初回 payload だけに付けると tool 実行後の追撃ストリームで
-                            # ライブ usage が止まる。
-                            **(
-                                {
-                                    "stream_options": {
-                                        "include_usage": True,
-                                        **(
-                                            {"continuous_usage_stats": True}
-                                            if is_continuous_usage_requested(model)
-                                            else {}
-                                        ),
-                                    }
+                    followup_body = {
+                        # 初回と同じ生成パラメータ(チャット / ユーザー単位の
+                        # temperature・max_tokens・stop・seed 等)を追撃にも載せる
+                        **initial_call_params(form_data),
+                        "model": model_id,
+                        # 追撃呼び出しは元リクエストの stream 指定を尊重する
+                        # (stream 非対応モデル向けの opt-out を殺さない)
+                        "stream": form_data.get("stream", True),
+                        # llens(#57): tool ループの各呼び出しでも usage を受け取る
+                        # (capabilities.usage=False のモデルは opt-out)。
+                        # #102: continuous_usage_stats もここで再度要求する —
+                        # 初回 payload だけに付けると tool 実行後の追撃ストリームで
+                        # ライブ usage が止まる。
+                        **(
+                            {
+                                "stream_options": {
+                                    "include_usage": True,
+                                    **(
+                                        {"continuous_usage_stats": True}
+                                        if is_continuous_usage_requested(model)
+                                        else {}
+                                    ),
                                 }
-                                if form_data.get("stream", True)
-                                and is_usage_requested(model)
-                                else {}
-                            ),
-                            "tools": form_data["tools"],
-                            "messages": followup_msgs,
-                        },
-                        user,
-                    )
+                            }
+                            if form_data.get("stream", True)
+                            and is_usage_requested(model)
+                            else {}
+                        ),
+                        "tools": form_data["tools"],
+                        "messages": followup_msgs,
+                    }
 
-                    try:
-                        if isinstance(res, StreamingResponse):
-                            followup_tool_calls = await consume_model_stream(
-                                request, res, assembler, **stream_kwargs
-                            )
-                        else:
-                            followup_tool_calls = await ingest_model_response_json(
-                                request, res, assembler, **ingest_kwargs
-                            )
-                    finally:
-                        # 追撃の上流接続を必ず閉じる(初回の応答と同じ扱い)。stop
-                        # (CancelledError)や途中失敗で読み捨てたままにすると、上流
-                        # (SGLang)は接続が残っている限り最後まで生成し続ける。
-                        if (
-                            isinstance(res, StreamingResponse)
-                            and res.background is not None
-                        ):
-                            await res.background()
+                    async def make_followup_response():
+                        return await generate_chat_completion(
+                            request, followup_body, user
+                        )
+
+                    followup_tool_calls = await call_with_retry(make_followup_response)
                     if followup_tool_calls:
                         tool_calls.append(followup_tool_calls)
                 except Exception as e:
@@ -3040,6 +3208,9 @@ async def process_chat_response(
                     # (tool 実行後に続きが来ないまま done になる無言死)。
                     # エラーをチャット内に出し、message にも永続化する。
                     log.exception("follow-up model call failed in tool loop")
+                    # 出力の途中で切れたら reasoning が開いたまま残る — 閉じてから保存する
+                    # (done=false の reasoning は「Thinking…」が回り続ける)
+                    assembler.close_open_reasoning_block()
                     error_data = {
                         "error": {
                             "content": (

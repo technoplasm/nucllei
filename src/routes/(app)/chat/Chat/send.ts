@@ -14,7 +14,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { chatId, config, models, settings } from '$lib/stores';
 import type { Model } from '$lib/stores';
 import { createMessagesList, getPromptVariables } from '$lib/utils';
-import { buildWireMessages, parseStopSequences } from '$lib/utils/chat-messages';
+import {
+	buildWireMessages,
+	isEmptyErrorResponse,
+	parseStopSequences
+} from '$lib/utils/chat-messages';
 import { stripLocalTurn } from '$lib/utils/history-graft';
 import { branchRequestFiles } from '$lib/utils/chat-files';
 import { consumeCompletionStream, getActiveTaskIds } from '$lib/utils/completion-streams';
@@ -96,8 +100,8 @@ export class ChatSend {
 			// Response not done
 			return;
 		}
-		if (lastMessage && lastMessage.error && !lastMessage.content) {
-			// Error in response
+		if (isEmptyErrorResponse(lastMessage)) {
+			// エラーで終わり、本文も tool 呼び出しも残っていない応答の後は送らない(再生成で作り直す)
 			toast.error(this.#t(`Oops! There was an error in the previous response.`));
 			return;
 		}

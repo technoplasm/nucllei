@@ -386,7 +386,11 @@ async def start_internal_turn(
     (元 Request の state には一切書かない)。
     """
     # 循環 import 回避: middleware が本モジュールを import する(mount 側)
-    from nucllei.utils.middleware import process_chat_payload, process_chat_response
+    from nucllei.utils.middleware import (
+        process_chat_payload,
+        process_chat_response,
+        run_model_call_with_retry,
+    )
 
     # llens(#110): background 実行の runner が立てた in_exec は ContextVar なので
     # このターンにも伝播しうる。内部起動するターンは対象 chat の正規のターンであり、
@@ -440,7 +444,13 @@ async def start_internal_turn(
         form_data, metadata, events = await process_chat_payload(
             child_request, form_data, user, metadata, model, events_stream
         )
-        response = await generate_chat_completion(child_request, form_data, user)
+        # 接続系の失敗は同じ body でやり直す(main.py の最初の呼び出しと同じ規則)
+        response = await run_model_call_with_retry(
+            lambda: generate_chat_completion(child_request, form_data, user),
+            metadata=metadata,
+            model=model,
+            call_index=1,
+        )
         # tasks=None: 内部起動ターンではタイトル生成等のバックグラウンドタスクを
         # 予約しない(subagent は spawn 時の決定的タイトルが正 / 続きターンは
         # 契約 M5 — background_tasks None)。戻り値(SSE 応答)は捨てる。

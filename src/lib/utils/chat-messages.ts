@@ -175,6 +175,29 @@ export const expandAssistantToolHistory = (
 };
 
 /**
+ * 直前の応答がエラーで終わり、本文も tool 呼び出しも残っていないか(次の発言を送らせない)。
+ *
+ * tool ループの途中でモデルの呼び出しが落ちた応答は、本文が空でも tool 呼び出しと結果が
+ * content_blocks に残る。次の発言の履歴にはそれが載る(結果の無い call は
+ * expandAssistantToolHistory が合成の結果で対にする)ので、送って続けさせる。
+ * 何も残っていないエラーの応答の後は、再生成で作り直す。
+ */
+export const isEmptyErrorResponse = (
+	message:
+		| {
+				error?: unknown;
+				content?: string;
+				content_blocks?: { type: string; content?: unknown; calls?: unknown[] }[];
+		  }
+		| undefined
+): boolean =>
+	!!message?.error &&
+	!message.content &&
+	!(message.content_blocks ?? []).some(
+		(block) => block.type === 'tool_calls' && (block.calls?.length ?? 0) > 0
+	);
+
+/**
  * チャット履歴(createMessagesList の出力)+ 任意の system 文を、
  * OpenAI 互換 wire のメッセージ配列へ組み立てる(Chat.svelte の送信経路)。
  *
