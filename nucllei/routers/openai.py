@@ -1,7 +1,9 @@
 import asyncio
+import copy
 import hashlib
 import json
 import logging
+import time
 from typing import Optional
 
 import aiohttp
@@ -23,6 +25,7 @@ from nucllei.env import (
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
     ENABLE_FORWARD_USER_INFO_HEADERS,
+    MODEL_LIST_CACHE_TTL,
 )
 from nucllei.models.users import UserModel
 
@@ -77,6 +80,59 @@ async def send_get_request(url, key=None, user: UserModel = None):
         # Handle connection error here
         log.error(f"Connection error: {e}")
         return None
+
+
+def _is_model_list(response) -> bool:
+    return isinstance(response, list) or (
+        isinstance(response, dict) and isinstance(response.get("data"), list)
+    )
+
+
+def _model_list_cache(request: Request) -> dict:
+    cache = getattr(request.app.state, "OPENAI_MODEL_LIST_CACHE", None)
+    if cache is None:
+        cache = request.app.state.OPENAI_MODEL_LIST_CACHE = {}
+    return cache
+
+
+async def fetch_model_list(
+    request: Request, url: str, key: str, user: UserModel, refresh: bool = False
+):
+    """接続先の `{url}/models` を、覚えておいた値があればそれで返す。
+
+    覚えておくのは取れた値 (`data` の配列か配列そのもの) だけで、鍵は (url, key)、
+    期間は MODEL_LIST_CACHE_TTL 秒 (0 で覚えない)。`refresh=True` は期間内でも取りに行く。
+    取りに行って失敗したら (接続できない・エラーの応答)、前に取れた値を返し、
+    次に取りに行くのを MODEL_LIST_CACHE_TTL 秒後へ送る — 上流が落ちている間、
+    一覧を開くたびに timeout まで待たせない。前に取れた値が無ければ失敗をそのまま返す。
+    返すのは複製 (呼び手が prefix_id を足すなど中身を書き換えるため)。
+    """
+    if MODEL_LIST_CACHE_TTL <= 0:
+        return await send_get_request(f"{url}/models", key, user=user)
+
+    cache = _model_list_cache(request)
+    cache_key = (url, key)
+    entry = cache.get(cache_key)
+    if (
+        entry is not None
+        and not refresh
+        and time.monotonic() - entry[0] < MODEL_LIST_CACHE_TTL
+    ):
+        return copy.deepcopy(entry[1])
+
+    response = await send_get_request(f"{url}/models", key, user=user)
+    if _is_model_list(response):
+        cache[cache_key] = (time.monotonic(), response)
+        return copy.deepcopy(response)
+
+    if entry is not None:
+        log.warning(
+            f"model list from {url} failed; serving the previous list "
+            f"for {MODEL_LIST_CACHE_TTL}s: {response!r:.200}"
+        )
+        cache[cache_key] = (time.monotonic(), entry[1])
+        return copy.deepcopy(entry[1])
+    return response
 
 
 async def cleanup_response(
@@ -221,8 +277,10 @@ async def update_config(
     }
 
     # 接続の並び・有効/無効・prefix が変わると OPENAI_MODELS の urlIdx / id が
-    # 陳腐化する — 捨てて、次の completion(miss)か /api/models で取り直させる
+    # 陳腐化する — 覚えておいた /models ごと捨てて、次の completion(miss)か
+    # /api/models で取り直させる
     request.app.state.OPENAI_MODELS = {}
+    request.app.state.OPENAI_MODEL_LIST_CACHE = {}
 
     return {
         "ENABLE_OPENAI_API": request.app.state.config.ENABLE_OPENAI_API,
@@ -323,7 +381,9 @@ async def speech(request: Request, user=Depends(get_verified_user)):
         raise HTTPException(status_code=401, detail=ERROR_MESSAGES.OPENAI_NOT_FOUND)
 
 
-async def get_all_models_responses(request: Request, user: UserModel) -> list:
+async def get_all_models_responses(
+    request: Request, user: UserModel, refresh: bool = False
+) -> list:
     if not request.app.state.config.ENABLE_OPENAI_API:
         return []
 
@@ -346,10 +406,12 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
             url not in request.app.state.config.OPENAI_API_CONFIGS  # Legacy support
         ):
             request_tasks.append(
-                send_get_request(
-                    f"{url}/models",
+                fetch_model_list(
+                    request,
+                    url,
                     request.app.state.config.OPENAI_API_KEYS[idx],
                     user=user,
+                    refresh=refresh,
                 )
             )
         else:
@@ -366,10 +428,12 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
             if enable:
                 if len(model_ids) == 0:
                     request_tasks.append(
-                        send_get_request(
-                            f"{url}/models",
+                        fetch_model_list(
+                            request,
+                            url,
                             request.app.state.config.OPENAI_API_KEYS[idx],
                             user=user,
+                            refresh=refresh,
                         )
                     )
                 else:
@@ -430,17 +494,18 @@ async def get_filtered_models(models, user):
     return filtered_models
 
 
-async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
-    # 2026-10-04: 旧 @cached(ttl=1) は撤去(鍵に Request が入るので別リクエスト間で
-    # ヒットせず、hot path の再取得を防いでいなかった)。呼べば必ず upstream を
-    # 取り直して OPENAI_MODELS を張り替える = 明示的な refresh。hot path は
-    # generate_chat_completion が OPENAI_MODELS から引く(miss 時だけここへ来る)。
+async def get_all_models(
+    request: Request, user: UserModel, refresh: bool = False
+) -> dict[str, list]:
+    # 接続先の /models は fetch_model_list が MODEL_LIST_CACHE_TTL 秒覚えておく
+    # (refresh=True はその間でも取りに行く)。結果で OPENAI_MODELS を張り替える。
+    # hot path は generate_chat_completion が OPENAI_MODELS から引く(miss 時だけここへ来る)。
     log.info("get_all_models()")
 
     if not request.app.state.config.ENABLE_OPENAI_API:
         return {"data": []}
 
-    responses = await get_all_models_responses(request, user=user)
+    responses = await get_all_models_responses(request, user=user, refresh=refresh)
 
     def extract_data(response):
         if response and "data" in response:
@@ -740,19 +805,16 @@ async def generate_chat_completion(
                 detail="Model not found",
             )
 
-    # 2026-10-04: hot path(tool ループの追撃・subagent の子ターン — 1 ターンに
-    # 何度も来る)では upstream の /models を叩かない。旧実装は毎回
-    # get_all_models を踏んでいた(@cached(ttl=1) は Request が鍵に入るので
-    # 事実上ヒットしなかった)— 1 回 8〜18 ms、接続が固まれば
-    # AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST まで待つ。ここで要るのは model_id →
-    # urlIdx の対応だけなので、OPENAI_MODELS(/api/models 等の既存の更新経路が
-    # 張り替える)から引き、**引けないときだけ**取り直す(新しく足された upstream
-    # モデル・起動直後の空キャッシュ)。preset の params / access_control は上で
-    # DB(Models.get_model_by_id)から毎回読むのでキャッシュの影響を受けない。
-    # 接続設定の更新(update_config)は OPENAI_MODELS を捨てる(urlIdx の陳腐化防止)。
+    # hot path(tool ループの追撃・subagent の子ターン — 1 ターンに何度も来る)では
+    # upstream の /models を叩かない。ここで要るのは model_id → urlIdx の対応だけなので、
+    # OPENAI_MODELS(/api/models 等の更新経路が張り替える)から引き、**引けないときだけ**
+    # 覚えておいた /models を使わずに取り直す(新しく足された upstream モデル・起動直後の
+    # 空キャッシュ)。preset の params / access_control は上で DB(Models.get_model_by_id)
+    # から毎回読むのでキャッシュの影響を受けない。接続設定の更新(update_config)は
+    # OPENAI_MODELS を捨てる(urlIdx の陳腐化防止)。
     model = request.app.state.OPENAI_MODELS.get(model_id)
     if model is None:
-        await get_all_models(request, user=user)
+        await get_all_models(request, user=user, refresh=True)
         model = request.app.state.OPENAI_MODELS.get(model_id)
     if model:
         idx = model["urlIdx"]

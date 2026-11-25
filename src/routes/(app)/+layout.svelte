@@ -31,10 +31,20 @@
 			return;
 		}
 
-		const userSettings = await getUserSettings().catch((error) => {
-			console.error(error);
-			return null;
-		});
+		// 互いに依存しない 5 本は同時に取る (順に待つと往復の分だけ画面が出るのが遅れる)。
+		// store へ入れる順は変えない。
+		const [userSettings, modelList, bannerList, toolList, skillList] = await Promise.all([
+			getUserSettings().catch((error) => {
+				console.error(error);
+				return null;
+			}),
+			getModels(),
+			getBanners(),
+			getTools(),
+			// llens(issue #35): /command ハイライト判定は picker を開く前から必要なため
+			// skill 一覧を初期ロードしておく。
+			getSkills()
+		]);
 
 		if (userSettings) {
 			settings.set(userSettings.ui);
@@ -50,13 +60,11 @@
 			settings.set(localStorageSettings);
 		}
 
-		models.set(await getModels());
+		models.set(modelList);
 
-		banners.set(await getBanners());
-		tools.set(await getTools());
-		// llens(issue #35): /command ハイライト判定は picker を開く前から必要なため
-		// skill 一覧を初期ロードしておく。
-		skills.set(await getSkills());
+		banners.set(bannerList);
+		tools.set(toolList);
+		skills.set(skillList);
 
 		document.addEventListener('keydown', async function (event) {
 			const isCtrlPressed = event.ctrlKey || event.metaKey; // metaKey is for Cmd key on Mac

@@ -1,3 +1,4 @@
+import asyncio
 import time
 import logging
 import sys
@@ -24,13 +25,17 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
-async def get_all_base_models(request: Request, user: UserModel = None):
+async def get_all_base_models(
+    request: Request, user: UserModel = None, refresh: bool = False
+):
+    """接続由来のモデルと pipe function のモデル。OpenAI 互換接続の /models は
+    MODEL_LIST_CACHE_TTL 秒覚えておいた値を使う(refresh=True は取りに行く)。"""
     function_models = []
     openai_models = []
     ollama_models = []
 
     if request.app.state.config.ENABLE_OPENAI_API:
-        openai_models = await openai.get_all_models(request, user=user)
+        openai_models = await openai.get_all_models(request, user=user, refresh=refresh)
         openai_models = openai_models["data"]
 
     if request.app.state.config.ENABLE_OLLAMA_API:
@@ -53,8 +58,8 @@ async def get_all_base_models(request: Request, user: UserModel = None):
     return models
 
 
-async def get_all_models(request, user: UserModel = None):
-    models = await get_all_base_models(request, user=user)
+async def get_all_models(request, user: UserModel = None, refresh: bool = False):
+    models = await get_all_base_models(request, user=user, refresh=refresh)
 
     # If there are no models, return an empty list
     if len(models) == 0:
@@ -64,11 +69,15 @@ async def get_all_models(request, user: UserModel = None):
 
     # llens(#46): global/active 撤去 → action はモデルの actionIds 割り当てのみ。
     # 実在する action type の function に絞る(削除済み ID を弾く)。
-    action_function_ids = [
-        function.id for function in Functions.get_functions_by_type("action")
-    ]
+    # 同期の DB 読みはイベントループの外で(ループ上で回すと、その間に来た他の
+    # request が全部待たされる)
+    def read_rows():
+        return (
+            [function.id for function in Functions.get_functions_by_type("action")],
+            Models.get_all_models(),
+        )
 
-    custom_models = Models.get_all_models()
+    action_function_ids, custom_models = await asyncio.to_thread(read_rows)
     for custom_model in custom_models:
         if custom_model.base_model_id is None:
             for model in models:

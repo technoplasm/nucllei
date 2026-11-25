@@ -32,6 +32,9 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.rstrip("/") == "/v1/models":
             self.server.models_gets += 1
+            if self.server.models_fail:
+                self._json({"error": "upstream down"}, 500)
+                return
             self._json(
                 {
                     "object": "list",
@@ -141,6 +144,7 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         cls.mock_server = ThreadingHTTPServer(("127.0.0.1", 0), MockOpenAIHandler)
         cls.mock_server.received = []
         cls.mock_server.models_gets = 0
+        cls.mock_server.models_fail = False
         cls.server_thread = threading.Thread(
             target=cls.mock_server.serve_forever, daemon=True
         )
@@ -169,9 +173,11 @@ class TestOpenAICompatChat(AbstractPostgresTest):
         # モデル一覧・関数モジュールのキャッシュをテスト間で分離する
         app.state.MODELS = {}
         app.state.OPENAI_MODELS = {}
+        app.state.OPENAI_MODEL_LIST_CACHE = {}
         app.state.FUNCTIONS = {}
         self.mock_server.received.clear()
         self.mock_server.models_gets = 0
+        self.mock_server.models_fail = False
 
     def _register_e2e_filter(self):
         from nucllei.models.functions import FunctionForm, Functions
@@ -475,3 +481,141 @@ class TestOpenAICompatChat(AbstractPostgresTest):
                 },
             )
         assert response.status_code in (404, 405), response.text
+
+    def _expire_model_list_cache(self):
+        """覚えておいた /models を MODEL_LIST_CACHE_TTL より古くする。"""
+        import time
+
+        from nucllei.main import app
+        from nucllei.routers import openai
+
+        cache = app.state.OPENAI_MODEL_LIST_CACHE
+        for key, (_, value) in list(cache.items()):
+            cache[key] = (time.monotonic() - openai.MODEL_LIST_CACHE_TTL - 1, value)
+
+    def _get(self, path, role="admin", user_id="1"):
+        with mock_webui_user(id=user_id, role=role):
+            response = self.fast_api_client.get(path)
+        assert response.status_code == 200, response.text
+        return [m["id"] for m in response.json()["data"]]
+
+    def test_models_endpoint_reuses_the_upstream_list(self):
+        """GET /api/models は接続先の /models を MODEL_LIST_CACHE_TTL 秒覚えておく。
+
+        /api/models/base・preset の保存は取り直し、接続設定の保存は捨てる。期間を
+        過ぎたら取り直す。
+        """
+        self._create_preset(model_id="cached-preset")
+        gets = self.mock_server.models_gets  # preset の保存で 1 回取り直している
+        assert gets == 1
+
+        for _ in range(3):
+            assert "cached-preset" in self._get("/api/models")
+            assert "cached-preset" in self._get("/api/models", role="user", user_id="2")
+        assert self.mock_server.models_gets == gets
+
+        assert "mock-model" in self._get("/api/models/base")
+        assert self.mock_server.models_gets == gets + 1
+
+        self._create_preset(model_id="cached-preset-2")
+        assert self.mock_server.models_gets == gets + 2
+
+        with mock_webui_user(id="1", role="admin"):
+            response = self.fast_api_client.post(
+                "/openai/config/update",
+                json={
+                    "ENABLE_OPENAI_API": True,
+                    "OPENAI_API_BASE_URLS": [self.base_url],
+                    "OPENAI_API_KEYS": ["sk-dummy"],
+                    "OPENAI_API_CONFIGS": {},
+                },
+            )
+        assert response.status_code == 200, response.text
+        from nucllei.main import app
+
+        assert app.state.OPENAI_MODEL_LIST_CACHE == {}
+        self._get("/api/models")
+        assert self.mock_server.models_gets == gets + 3
+
+        self._expire_model_list_cache()
+        self._get("/api/models")
+        assert self.mock_server.models_gets == gets + 4
+
+    def test_model_list_cache_ttl_zero_fetches_every_time(self, monkeypatch):
+        """MODEL_LIST_CACHE_TTL=0 は覚えない(毎回取りに行く)。"""
+        from nucllei.routers import openai
+
+        monkeypatch.setattr(openai, "MODEL_LIST_CACHE_TTL", 0)
+        for _ in range(3):
+            self._get("/api/models")
+        assert self.mock_server.models_gets == 3
+
+    def test_previous_list_is_served_while_upstream_fails(self):
+        """取りに行って失敗したら、前に取れた一覧を返し、次は期間の後まで取りに行かない。
+
+        前に取れた一覧が無ければ、その接続のモデルは出ない。
+        """
+        assert self._get("/api/models/base") == ["mock-model"]
+        assert self.mock_server.models_gets == 1
+
+        self.mock_server.models_fail = True
+        self._expire_model_list_cache()
+        assert "mock-model" in self._get("/api/models/base")  # 取りに行って失敗
+        assert self.mock_server.models_gets == 2
+        self._get("/api/models")  # 失敗のあとは期間内なので取りに行かない
+        assert self.mock_server.models_gets == 2
+
+        from nucllei.main import app
+
+        app.state.OPENAI_MODEL_LIST_CACHE = {}
+        assert "mock-model" not in self._get("/api/models/base")
+        assert self.mock_server.models_gets == 3
+
+        # 戻ったら次の取り直しで新しい一覧になる
+        self.mock_server.models_fail = False
+        assert "mock-model" in self._get("/api/models/base")
+
+    def test_cached_list_is_not_mutated_by_prefix_id(self):
+        """prefix_id は返した複製に付く(覚えておいた値に何度も重ならない)。"""
+        from nucllei.main import app
+
+        app.state.config.OPENAI_API_CONFIGS = {"0": {"enable": True, "prefix_id": "p"}}
+        try:
+            for _ in range(3):
+                assert self._get("/api/models/base") == ["p.mock-model"]
+            self._get("/api/models")
+            self._get("/api/models")
+            assert self._get("/api/models/base") == ["p.mock-model"]
+        finally:
+            app.state.config.OPENAI_API_CONFIGS = {}
+
+    def test_models_endpoint_reads_model_rows_at_once(self, monkeypatch):
+        """/api/models は Models 行をまとめて読む(モデルごとの get_model_by_id を呼ばない)。
+
+        ACL の判定は変わらない: 読める利用者にだけ非公開 preset が出る。
+        """
+        from nucllei.models.models import Models
+
+        self._create_preset(
+            model_id="private-preset",
+            access_control={"read": {"user_ids": ["2"], "group_ids": []}},
+        )
+        self._create_preset(model_id="open-preset")
+
+        calls = []
+        original = Models.get_model_by_id
+
+        def counting(model_id):
+            calls.append(model_id)
+            return original(model_id)
+
+        monkeypatch.setattr(Models, "get_model_by_id", counting)
+
+        assert {"private-preset", "open-preset"} <= set(
+            self._get("/api/models", role="user", user_id="2")
+        )
+        other = self._get("/api/models", role="user", user_id="3")
+        assert "open-preset" in other
+        assert "private-preset" not in other
+        assert {"private-preset", "open-preset"} <= set(self._get("/api/models"))
+        assert calls == []

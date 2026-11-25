@@ -204,7 +204,7 @@ is read per request (edits apply without a restart):
 | `ENV`                                                                                                                       | env  | `dev` (`prod` in Docker)                      | dev exposes Swagger UI at `/docs`                                                         |
 | `DATA_DIR`                                                                                                                  | env  | `./data` (`/app/data`)                        | root of all persistent state (the `/ext/**` table is `EXT_MOUNTS`, §3.8)                  |
 | `DATABASE_URL`                                                                                                              | env  | `sqlite:///$DATA_DIR/webui.db`                | SQLAlchemy URL; Postgres supported (`postgres://` auto-rewritten)                         |
-| `DATABASE_SCHEMA` / `DATABASE_POOL_SIZE` / `DATABASE_POOL_MAX_OVERFLOW` / `DATABASE_POOL_TIMEOUT` / `DATABASE_POOL_RECYCLE` | env  | — / `0` (NullPool) / `0` / `30` / `3600`      | Postgres tuning                                                                           |
+| `DATABASE_SCHEMA` / `DATABASE_POOL_SIZE` / `DATABASE_POOL_MAX_OVERFLOW` / `DATABASE_POOL_TIMEOUT` / `DATABASE_POOL_RECYCLE` | env  | — / `10` / `-1` (no cap) / `30` / `3600`      | Postgres connection pool (below)                                                          |
 | `UVICORN_WORKERS`                                                                                                           | env  | `1`                                           | worker count for `serve` — keep at 1 (multi-worker unsupported)                           |
 | `WEBUI_URL`                                                                                                                 | RC   | `http://localhost:3000`                       | public base URL (webhooks, links)                                                         |
 | `WEBUI_NAME`                                                                                                                | env  | `Nucllei`                                     | brand name shown in the UI                                                                |
@@ -218,6 +218,15 @@ is read per request (edits apply without a restart):
 | `STATIC_DIR` / `FONTS_DIR`                                                                                                  | env  | `<package>/static` / `<package>/static/fonts` | bundled static assets / font files (source-run overrides; the image uses the defaults)    |
 | `FRONTEND_BUILD_DIR`                                                                                                        | env  | `./build` (`/app/build`)                      | compiled SvelteKit frontend served at `/`                                                 |
 | `RESET_CONFIG_ON_START`                                                                                                     | env  | `false`                                       | delete stored runtime config at startup — takes effect from the _next_ restart (see §3.1) |
+
+**Postgres connection pool.** The backend keeps `DATABASE_POOL_SIZE` connections
+open and reuses them; beyond that it opens extra connections without a cap
+(`DATABASE_POOL_MAX_OVERFLOW=-1`) and closes each one when it is returned. A
+positive `DATABASE_POOL_MAX_OVERFLOW` caps the total at size + overflow, and a
+request that finds the pool used up waits up to `DATABASE_POOL_TIMEOUT` seconds.
+`DATABASE_POOL_SIZE=0` opens a new connection for every query (about 3 ms each on
+a local Docker network — a page that runs a few dozen queries spends most of its
+time connecting). SQLite ignores these settings.
 
 ### 3.3 Auth & security
 
@@ -275,6 +284,7 @@ managed per-group in the DB/UI.
 | `AIOHTTP_CLIENT_TIMEOUT_CONNECT`                          | env      | `10`                               | TCP connect timeout (dead-connection detection)                                                                                                                                                                                                            |
 | `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ`                        | env      | `300`                              | max silent gap between streamed bytes                                                                                                                                                                                                                      |
 | `AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST` / `_TOOL_SERVER_DATA` | env      | `10` / `10`                        | model-list / tool-server fetch timeouts                                                                                                                                                                                                                    |
+| `MODEL_LIST_CACHE_TTL`                                    | env      | `60` (`0` off)                     | seconds the engine's `/models` list is reused before it is fetched again (§4.2)                                                                                                                                                                            |
 | `MODEL_CALL_RETRIES`                                      | env      | `3` (`0` off)                      | how many times a chat model call is retried after a connection failure (see below)                                                                                                                                                                         |
 | `MODEL_CALL_RETRY_DELAY_S`                                | env      | `2`                                | wait before the first retry, in seconds; doubles for each further retry (2, 4, 8 s)                                                                                                                                                                        |
 
@@ -1163,13 +1173,26 @@ delete are admin-only). Every model row **must** declare a `base_model_id`
 exposed as chat models; they only exist as base choices (admin inventory:
 `GET /api/models/base`).
 
-The raw connection model list is fetched from the engine's `/models` when
-`GET /api/models` (or `/api/models/base`, `/openai/models`) is called, and
-cached in-process. Completions do not re-fetch it: they look the base model up
-in the cache and only refetch when the id is missing (a model just added
-upstream) or after the connection settings were updated. Preset fields
-(params, system prompt, ACL) are read from the database on every completion,
-so preset edits apply immediately.
+The raw connection model list comes from each OpenAI-compatible connection's
+`/models`, and the backend reuses a fetched list for `MODEL_LIST_CACHE_TTL`
+seconds (default `60`; `0` fetches on every call). Within that time
+`GET /api/models` and `/openai/models` do not contact the engine, so a model
+added to or removed from the engine can take up to that long to show there.
+These always fetch: `GET /api/models/base` (so a model just added upstream can
+be picked as a base right away), saving a preset (create / update / toggle / delete), and
+a completion whose base model id is not in the list. Saving the connection
+settings (`POST /openai/config/update`) drops the reused lists. When a fetch
+fails (no connection, an error response), the previous list for that connection
+is returned and the next fetch waits another `MODEL_LIST_CACHE_TTL` seconds, so
+an engine that is down does not make every page load wait for
+`AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST`; with no previous list, that connection's
+models are missing from the answer (and when no connection and no pipe function
+returns a model, `GET /api/models` is empty). The list is shared by all users: with
+`ENABLE_FORWARD_USER_INFO_HEADERS` the engine sees the user of the request that
+fetched it. Ollama connections are fetched on every call. Completions look the
+base model up in the in-process list and only refetch when the id is missing.
+Preset fields (params, system prompt, ACL) are read from the database on every
+call, so preset edits apply immediately.
 
 A model preset is where all capability wiring happens (`meta` fields):
 `toolIds` (tools available to the model — `feed_image` / `feed_audio` instead come

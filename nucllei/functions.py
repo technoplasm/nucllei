@@ -58,7 +58,7 @@ def get_function_module_by_id(request: Request, pipe_id: str):
 
 async def get_function_models(request):
     # llens(#46): active 撤去 → 存在する pipe function はすべてモデルとして列挙。
-    pipes = Functions.get_functions_by_type("pipe")
+    pipes = await asyncio.to_thread(Functions.get_functions_by_type, "pipe")
     pipe_models = []
 
     for pipe in pipes:

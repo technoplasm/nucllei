@@ -376,6 +376,8 @@ app.state.config.OPENAI_API_KEYS = OPENAI_API_KEYS
 app.state.config.OPENAI_API_CONFIGS = OPENAI_API_CONFIGS
 
 app.state.OPENAI_MODELS = {}
+# 接続先の /models を覚えておく場所(routers/openai.fetch_model_list、MODEL_LIST_CACHE_TTL)
+app.state.OPENAI_MODEL_LIST_CACHE = {}
 
 ########################################
 #
@@ -659,20 +661,20 @@ app.include_router(ext.router, prefix="/ext", tags=["ext"])
 
 @app.get("/api/models")
 async def get_models(request: Request, user=Depends(get_verified_user)):
-    def get_filtered_models(models, user):
-        filtered_models = []
-        for model in models:
-            # llens(#48): arena モデルは撲滅済み(仮想 arena モデルの分岐を撤去)。
-            model_info = Models.get_model_by_id(model["id"])
-            if model_info:
-                if user.id == model_info.user_id or has_access(
-                    user.id, type="read", access_control=model_info.access_control
-                ):
-                    filtered_models.append(model)
-
-        return filtered_models
+    def get_filtered_models(models, rows, user):
+        return [
+            model
+            for model in models
+            if user.id == rows[model["id"]].user_id
+            or has_access(
+                user.id, type="read", access_control=rows[model["id"]].access_control
+            )
+        ]
 
     all_models = await get_all_models(request, user=user)
+    # Models 行は 1 回でまとめて読む(モデルごとに引かない)。同期の DB 読みは
+    # イベントループの外で
+    rows = {row.id: row for row in await asyncio.to_thread(Models.get_all_models)}
 
     models = []
     for model in all_models:
@@ -685,7 +687,7 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
         # 対して隠す。Models 行は base_model_id 必須(= preset のみ、routers/models.py)
         # なので、ここを通るのは常に preset。ベースモデル選択・棚卸しは /api/models/base。
         # 行を持たない arena 等の仮想モデルもここで併せて除外される。
-        if not Models.get_model_by_id(model["id"]):
+        if model["id"] not in rows:
             continue
 
         models.append(model)
@@ -700,7 +702,7 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
 
     # Filter out models that the user does not have access to
     if user.role == "user":
-        models = get_filtered_models(models, user)
+        models = await asyncio.to_thread(get_filtered_models, models, rows, user)
 
     log.debug(
         f"/api/models returned filtered models accessible to the user: {json.dumps([model['id'] for model in models])}"
@@ -712,7 +714,8 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
 async def get_base_models(request: Request, user=Depends(get_admin_user)):
     # llens(#82): 接続由来の生モデル一覧(admin 専用 — 棚卸しビューと preset の base 選択用)。
     # 生モデルは Models 行を持たず、チャットには一切露出しない。
-    models = await get_all_base_models(request, user=user)
+    # 接続先で足したモデルがすぐ選べるように、覚えておいた /models を使わずに取り直す。
+    models = await get_all_base_models(request, user=user, refresh=True)
     return {"data": models}
 
 

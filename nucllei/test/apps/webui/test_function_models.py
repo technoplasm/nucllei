@@ -53,7 +53,7 @@ def _run_get_all_models(monkeypatch, modules):
         app=types.SimpleNamespace(state=types.SimpleNamespace(FUNCTIONS={}))
     )
 
-    async def base_models(request, user=None):
+    async def base_models(request, user=None, refresh=False):
         return [{"id": "base", "name": "base", "owned_by": "openai"}]
 
     custom = types.SimpleNamespace(

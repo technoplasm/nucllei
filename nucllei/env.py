@@ -199,25 +199,13 @@ if "postgres://" in DATABASE_URL:
 
 DATABASE_SCHEMA = os.environ.get("DATABASE_SCHEMA", None)
 
-DATABASE_POOL_SIZE = os.environ.get("DATABASE_POOL_SIZE", 0)
-
-if DATABASE_POOL_SIZE == "":
-    DATABASE_POOL_SIZE = 0
-else:
-    try:
-        DATABASE_POOL_SIZE = int(DATABASE_POOL_SIZE)
-    except Exception:
-        DATABASE_POOL_SIZE = 0
-
-DATABASE_POOL_MAX_OVERFLOW = os.environ.get("DATABASE_POOL_MAX_OVERFLOW", 0)
-
-if DATABASE_POOL_MAX_OVERFLOW == "":
-    DATABASE_POOL_MAX_OVERFLOW = 0
-else:
-    try:
-        DATABASE_POOL_MAX_OVERFLOW = int(DATABASE_POOL_MAX_OVERFLOW)
-    except Exception:
-        DATABASE_POOL_MAX_OVERFLOW = 0
+# Postgres の接続プール。0 で NullPool (問い合わせのたびに接続を張り直す — 1 回 3 ms 前後、
+# 1 リクエストで数十回問い合わせる画面では接続だけで 100 ms 近くになる)。
+# 既定は 10 本を張ったまま使い回し、それを超える分は上限なしで張る
+# (DATABASE_POOL_MAX_OVERFLOW=-1。超えた分は返したときに閉じる)。上限を付けると、
+# 使い切ったときに空くまで DATABASE_POOL_TIMEOUT 秒待たされる。SQLite には効かない。
+DATABASE_POOL_SIZE = env_int("DATABASE_POOL_SIZE", 10, minimum=0)
+DATABASE_POOL_MAX_OVERFLOW = env_int("DATABASE_POOL_MAX_OVERFLOW", -1, minimum=-1)
 
 DATABASE_POOL_TIMEOUT = os.environ.get("DATABASE_POOL_TIMEOUT", 30)
 
@@ -505,6 +493,12 @@ except Exception:
 # (0 でやり直さない)。待ち時間は 1 回目が MODEL_CALL_RETRY_DELAY_S 秒で、以後 2 倍ずつ。
 MODEL_CALL_RETRIES = env_int("MODEL_CALL_RETRIES", 3, minimum=0)
 MODEL_CALL_RETRY_DELAY_S = env_int("MODEL_CALL_RETRY_DELAY_S", 2, minimum=0)
+
+# 接続先 (OpenAI 互換) の /models の結果を覚えておく秒数。この間は GET /api/models などが
+# 上流へ取りに行かない。0 で覚えない (毎回取りに行く)。接続設定の保存で捨てる。
+# 取りに行って失敗したときは、前に取れた値があればそれを返し (次に取りに行くのは
+# この秒数の後)、無ければその接続のモデルは一覧に出ない。README_API.md §4.2。
+MODEL_LIST_CACHE_TTL = env_int("MODEL_LIST_CACHE_TTL", 60, minimum=0)
 
 AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST = os.environ.get(
     "AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST", "10"

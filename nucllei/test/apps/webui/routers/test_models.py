@@ -70,8 +70,8 @@ class TestModels(AbstractPostgresTest):
 
         calls = []
 
-        async def fake_get_all_models(request, user=None):
-            calls.append(user.id if user else None)
+        async def fake_get_all_models(request, user=None, refresh=False):
+            calls.append((user.id if user else None, refresh))
             return []
 
         mp = pytest.MonkeyPatch()
@@ -108,7 +108,8 @@ class TestModels(AbstractPostgresTest):
                     ).status_code
                     == 200
                 )
-            assert len(calls) == 3
+            # 接続先の /models も覚えておいた値を使わずに取り直す
+            assert calls == [("2", True)] * 3
             assert models_router._refresh_models_cache is not None
         finally:
             mp.undo()

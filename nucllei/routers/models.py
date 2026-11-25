@@ -68,7 +68,8 @@ async def _refresh_models_cache(request: Request, user) -> None:
     try:
         from nucllei.utils.models import get_all_models
 
-        await get_all_models(request, user=user)
+        # preset を書いた直後は接続先の /models も取り直す(覚えておいた値を使わない)
+        await get_all_models(request, user=user, refresh=True)
     except Exception as e:  # noqa: BLE001
         log.warning(f"models cache refresh failed after a preset write: {e!r}")
 
