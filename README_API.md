@@ -290,22 +290,31 @@ managed per-group in the DB/UI.
 
 **Retrying a model call.** The first model call of a chat turn and every
 tool-loop follow-up are retried with the same body when they fail with a
-connection failure: no response from the engine (connection refused or closed,
-timeout, the stream cut off), a `502` / `503` / `504`, or a `500` whose message
-reports a connection failure further upstream (e.g. LiteLLM's
-`litellm.APIConnectionError: … Connection closed.`, `litellm.Timeout`). A `4xx`
-(a bad request, a permission, a rate limit) and any other `500` are not retried.
+connection failure: no response from the engine (connection refused, the
+connect timeout `AIOHTTP_CLIENT_TIMEOUT_CONNECT`, the connection closed, the
+stream cut off), a `502` / `503`, or a `500` whose message reports a connection
+failure further upstream (e.g. LiteLLM's
+`litellm.APIConnectionError: … Connection closed.`). A failure to get the
+response **in time** is not retried: the read timeout
+(`AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` — nothing arrived for that long, whether
+before the response headers or in the stream), the total timeout
+(`AIOHTTP_CLIENT_TIMEOUT`), a `504`, and a `500` whose message reports a timeout
+(e.g. `litellm.Timeout`, `… timed out`, even next to a connection-failure
+message). The engine may have been working on the request, and a retry would
+only repeat the same long wait. A `4xx` (a bad request, a permission, a rate
+limit) and any other `500` are not retried.
 A stream that breaks **after** output has arrived (text, reasoning, a tool call,
 usage) is not retried either: that output is already on screen and saved, and a
 second answer would be appended to it — the turn ends with the error and keeps
-what arrived. Each retry logs one `model call … WARN: retry 1/3 in 2s` line, and
-giving up logs `… WARN: call failed after 3 retries`
-(`_memos/streaming-wire-v2.md`). The title generation and the `carried_tokens`
-measurement are not retried. A turn that fails in the middle of its tool loop
-keeps its tool calls and their results in `content_blocks` (a call that has no
-result is paired with an `[interrupted]` result in the history), so the UI lets
-the user send the next message to continue from there; only an error response
-with neither text nor tool calls asks for a regeneration.
+what arrived. Each retry logs one `model call … WARN: retry 1/3 in 2s` line,
+giving up logs `… WARN: call failed after 3 retries`, and a failure that is not
+retried logs `… WARN: call failed` (`_memos/streaming-wire-v2.md`). The title
+generation and the `carried_tokens` measurement are not retried. A turn that
+fails in the middle of its tool loop keeps its tool calls and their results in
+`content_blocks` (a call that has no result is paired with an `[interrupted]`
+result in the history), so the UI lets the user send the next message to
+continue from there; only an error response with neither text nor tool calls
+asks for a regeneration.
 
 Reference wiring for a local engine:
 `OPENAI_API_BASE_URLS=http://host.docker.internal:13300/v1`, `OPENAI_API_KEYS=EMPTY`,

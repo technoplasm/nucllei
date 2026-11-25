@@ -859,8 +859,8 @@ async def chat_completion(
         )
 
     try:
-        # 接続系の失敗(接続断・timeout・上流の 502/503/504 等)は同じ body でやり直す
-        # (README_API §3.5)。応答を読み始めてからの失敗は process_chat_response が持つ
+        # 接続系の失敗(接続断・接続の確立の timeout・上流の 502/503 等)は同じ body で
+        # やり直す(README_API §3.5)。応答を読み始めてからの失敗は process_chat_response が持つ
         response = await run_model_call_with_retry(
             lambda: chat_completion_handler(request, form_data, user),
             metadata=metadata,

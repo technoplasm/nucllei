@@ -1905,14 +1905,22 @@ def describe_call_error(exc) -> str:
 
 
 def log_model_call_error(
-    exc, *, metadata, model, call_index, elapsed=None, warn="call failed"
+    exc,
+    *,
+    metadata,
+    model,
+    call_index,
+    elapsed=None,
+    warn="call failed",
+    traceback=True,
 ):
     """モデル呼び出しが例外で終わったときの `model call` の 1 行 (WARNING)。
 
     `model call chat_id=… message_id=… call=… model=… status=… exception=… elapsed=…s
     WARN: call failed`。`warn` は行末の理由 (やり直しの行は `retry 1/3 in 2s` など)。
     HTTPException は router が traceback を出してから包んだもの (または意図した 4xx) なので
-    traceback を付けない。やり直しの行も付けない。それ以外の例外の `call failed` には付ける。
+    traceback を付けない。やり直しの行も付けない。それ以外の例外の `call failed` には付ける
+    (`traceback=False` なら付けない — 呼び出し側が traceback を出す場合)。
     """
     try:
         model_id = model.get("id") if isinstance(model, dict) else model
@@ -1924,7 +1932,7 @@ def log_model_call_error(
         if elapsed is not None:
             line += f" elapsed={elapsed:.2f}s"
         line += f" WARN: {warn}"
-        if isinstance(exc, HTTPException) or warn != "call failed":
+        if not traceback or isinstance(exc, HTTPException) or warn != "call failed":
             log.warning(line)
         else:
             log.warning(line, exc_info=exc)
@@ -1938,11 +1946,14 @@ def log_model_call_error(
 # やり直す (MODEL_CALL_RETRIES 回、待ち時間は MODEL_CALL_RETRY_DELAY_S 秒から 2 倍ずつ)。
 # やり直すのは出力をまだ 1 つも受け取っていないときだけ — 受け取った分はもう画面に出て
 # DB にも書かれているので、やり直すと出力が重なる (README_API §3.5)。
+# 応答を待ち切れなかった失敗 (読み取りの timeout・上流の 504 や timeout を伝える 500) は
+# やり直さない — 上流は要求を受けて処理していた可能性があり、やり直しても同じ長い待ち
+# (AIOHTTP_CLIENT_TIMEOUT_SOCK_READ や上流の timeout) を繰り返すだけになる。
 
-# 上流 (gateway) が「その先に届かない・応答が無い」と返す status
-_RETRYABLE_STATUSES = frozenset({502, 503, 504})
+# 上流 (gateway) が「その先に届かない」と返す status
+_RETRYABLE_STATUSES = frozenset({502, 503})
 # 上流の 500 のうち、その先との接続の失敗を伝えるもの (LiteLLM の
-# `litellm.APIConnectionError: … Connection closed.` / `litellm.Timeout` など)。小文字で比べる
+# `litellm.APIConnectionError: … Connection closed.` など)。小文字で比べる
 _CONNECTION_ERROR_MARKERS = (
     "apiconnectionerror",
     "connection closed",
@@ -1951,9 +1962,11 @@ _CONNECTION_ERROR_MARKERS = (
     "connection aborted",
     "connection error",
     "server disconnected",
-    "timed out",
-    "timeout",
 )
+# 上流の 500 のうち、その先の応答を待ち切れなかったことを伝えるもの (`litellm.Timeout`
+# など)。接続の失敗の文面と両方あればこちらを採る (つながらなかったのか、待ち切れ
+# なかったのかを文面からは決められない — 待ちが積み上がらない方に倒す)
+_TIMEOUT_MARKERS = ("timed out", "timeout")
 
 
 class ModelStreamInterrupted(Exception):
@@ -1973,9 +1986,14 @@ def is_retryable_model_call_error(exc) -> bool:
     """モデル呼び出しの失敗が、同じ body でやり直してよい接続系の失敗か。
 
     - 出力を受け取った後に切れたストリーム (ModelStreamInterrupted.output_started) → しない
-    - 上流の応答が無い失敗 (接続できない・接続断・timeout・途中で切れた本文) → する
-    - 上流の 502 / 503 / 504 → する
-    - 上流の 500 は、接続の失敗を伝える文面 (_CONNECTION_ERROR_MARKERS) のときだけ → する
+    - 上流の応答が無い失敗 (接続できない・接続の確立の timeout・接続断・途中で切れた本文)
+      → する
+    - 応答を待ち切れなかった timeout (読み取りの timeout = aiohttp.SocketTimeoutError、
+      全体の timeout = asyncio.TimeoutError。接続の確立の timeout
+      aiohttp.ConnectionTimeoutError 以外の TimeoutError すべて) → しない
+    - 上流の 502 / 503 → する。504 (上流が、その先の応答を待ち切れなかった) → しない
+    - 上流の 500 は、接続の失敗を伝える文面 (_CONNECTION_ERROR_MARKERS) で、timeout を
+      伝える文面 (_TIMEOUT_MARKERS) を含まないときだけ → する
     - 4xx (要求の誤り・権限・上限) とそれ以外の例外 → しない
     """
     cause = exc
@@ -1996,12 +2014,13 @@ def is_retryable_model_call_error(exc) -> bool:
     elif isinstance(cause, HTTPException):
         status = cause.status_code
     else:
+        if isinstance(cause, asyncio.TimeoutError):
+            return isinstance(cause, aiohttp.ConnectionTimeoutError)
         return isinstance(
             cause,
             (
                 aiohttp.ClientConnectionError,
                 aiohttp.ClientPayloadError,
-                asyncio.TimeoutError,
                 ConnectionError,
             ),
         )
@@ -2010,6 +2029,8 @@ def is_retryable_model_call_error(exc) -> bool:
         return True
     if status == 500:
         text = " ".join(texts).lower()
+        if any(marker in text for marker in _TIMEOUT_MARKERS):
+            return False
         return any(marker in text for marker in _CONNECTION_ERROR_MARKERS)
     return False
 
@@ -2020,9 +2041,10 @@ async def run_model_call_with_retry(
     """`await attempt()` を返す。接続系の失敗ならやり直す (is_retryable_model_call_error)。
 
     やり直すたびに `model call … WARN: retry 1/3 in 2s` を 1 行、やり直しを使い切って
-    諦めたときに `… WARN: call failed after 3 retries` を 1 行出す。`before_retry` は
-    次の試行の前に呼ぶ (assembler の呼び出し番号を戻す等)。stop (CancelledError) は
-    待ち時間の間でもそのまま上げる。
+    諦めたときに `… WARN: call failed after 3 retries` を 1 行、やり直さない失敗では
+    `… WARN: call failed` を 1 行出す (traceback は付けない — 呼び出し側か router が出す)。
+    `before_retry` は次の試行の前に呼ぶ (assembler の呼び出し番号を戻す等)。
+    stop (CancelledError) は待ち時間の間でもそのまま上げる。
     """
     retries = MODEL_CALL_RETRIES
     done = 0
@@ -2031,19 +2053,31 @@ async def run_model_call_with_retry(
         try:
             return await attempt()
         except Exception as e:
-            if not is_retryable_model_call_error(e):
-                raise
             elapsed = time.monotonic() - started
+            if not is_retryable_model_call_error(e):
+                log_model_call_error(
+                    e,
+                    metadata=metadata,
+                    model=model,
+                    call_index=call_index,
+                    elapsed=elapsed,
+                    traceback=False,
+                )
+                raise
             if done >= retries:
-                if retries:
-                    log_model_call_error(
-                        e,
-                        metadata=metadata,
-                        model=model,
-                        call_index=call_index,
-                        elapsed=elapsed,
-                        warn=f"call failed after {retries} retries",
-                    )
+                log_model_call_error(
+                    e,
+                    metadata=metadata,
+                    model=model,
+                    call_index=call_index,
+                    elapsed=elapsed,
+                    warn=(
+                        f"call failed after {retries} retries"
+                        if retries
+                        else "call failed"
+                    ),
+                    traceback=False,
+                )
                 raise
             done += 1
             delay = MODEL_CALL_RETRY_DELAY_S * 2 ** (done - 1)

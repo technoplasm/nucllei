@@ -488,9 +488,11 @@ except Exception:
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = 300
 
 # モデル呼び出し(チャットの最初の呼び出しと tool ループの追撃)のやり直し。やり直すのは
-# 接続系の失敗(接続断・timeout・上流の 502/503/504・接続断を伝える上流の 500)で、
-# 出力をまだ 1 つも受け取っていないときだけ。MODEL_CALL_RETRIES はやり直しの回数
-# (0 でやり直さない)。待ち時間は 1 回目が MODEL_CALL_RETRY_DELAY_S 秒で、以後 2 倍ずつ。
+# 接続系の失敗(接続できない・接続の確立の timeout・接続断・上流の 502/503・接続断を伝える
+# 上流の 500)で、出力をまだ 1 つも受け取っていないときだけ。応答を待ち切れなかった失敗
+# (読み取りの timeout・上流の 504・timeout を伝える上流の 500)はやり直さない。
+# MODEL_CALL_RETRIES はやり直しの回数(0 でやり直さない)。待ち時間は 1 回目が
+# MODEL_CALL_RETRY_DELAY_S 秒で、以後 2 倍ずつ。
 MODEL_CALL_RETRIES = env_int("MODEL_CALL_RETRIES", 3, minimum=0)
 MODEL_CALL_RETRY_DELAY_S = env_int("MODEL_CALL_RETRY_DELAY_S", 2, minimum=0)
 
