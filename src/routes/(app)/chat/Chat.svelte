@@ -60,6 +60,7 @@
 	import MessageInput from './MessageInput.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from './Navbar.svelte';
+	import { isUnavailableModel } from './ModelSelector/selection';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import NotFound from '$lib/components/common/NotFound.svelte';
@@ -79,6 +80,10 @@
 	let isAgentSession = $state(false);
 	let parentChatId = $state<string | null>(null);
 
+	// 開いているチャットに記録されたモデル(chat.models[0]。新規チャットは null)。
+	// 利用者のモデル一覧に無い preset(サブエージェント用など)でも選択欄に残す
+	// (ModelSelector/selection.ts)。そのモデルが選ばれている間は送信を止める(submitPrompt)
+	let chatModelId = $state<string | null>(null);
 	const eventTarget = new EventTarget();
 	let controlPane = $state<any>();
 	let controlPaneComponent = $state<any>();
@@ -172,6 +177,24 @@
 			void resyncDetached();
 		}
 	});
+
+	const selectedModelUnavailable = $derived(
+		isUnavailableModel(
+			session.selectedModels[0],
+			$models.map((m) => m.id)
+		)
+	);
+
+	// 送信の入口(入力欄・通話・iframe の postMessage・?q=)。一覧に無いモデルでは送らない —
+	// BE もその利用者には許していない(400 Model not found)。入力は残したまま
+	// 別のモデルを選ばせる
+	const submitPrompt = async (userPrompt: string) => {
+		if (selectedModelUnavailable) {
+			toast.error(t('This model is not available to you. Select another model to send.'));
+			return;
+		}
+		await send.submitPrompt(userPrompt);
+	};
 
 	// done 前に SSE が切れた自ターン(Chat/detached-turn.ts)。message は未完のまま
 	// (生成中表示)置き、表示中に戻ったとき(visibilitychange)と poll tick で追いつく
@@ -361,8 +384,10 @@
 		})();
 	};
 
+	// 一覧に無いモデル(記録されたモデルを表示しているだけ)は持ち越さない — 次の新規
+	// チャットが利用者の既定モデルではなく admin の既定へ落ちてしまう
 	$effect(() => {
-		if (session.selectedModels && chatIdProp !== '') {
+		if (session.selectedModels && chatIdProp !== '' && !selectedModelUnavailable) {
 			session.saveSessionSelectedModels();
 		}
 	});
@@ -392,7 +417,7 @@
 
 			if (session.prompt !== '') {
 				await tick();
-				send.submitPrompt(session.prompt);
+				submitPrompt(session.prompt);
 			}
 		}
 
@@ -401,7 +426,7 @@
 
 			if (event.data.text !== '') {
 				await tick();
-				send.submitPrompt(event.data.text);
+				submitPrompt(event.data.text);
 			}
 		}
 	};
@@ -515,6 +540,7 @@
 	//////////////////////////
 
 	const initNewChat = async () => {
+		chatModelId = null;
 		const modelsParam = $page.url.searchParams.get('models');
 		const modelParam = $page.url.searchParams.get('model');
 		if (modelsParam) {
@@ -618,7 +644,7 @@
 
 			if (session.prompt) {
 				await tick();
-				send.submitPrompt(session.prompt);
+				submitPrompt(session.prompt);
 			}
 		} else if ($page.url.searchParams.get('draft')) {
 			// llens(#121): ?draft= は入力欄にプリフィルするだけで送信しない(?q= は自動送信)。
@@ -660,6 +686,8 @@
 			refreshChatChildren(isAgentSession ? parentChatId : $chatId);
 
 			if (chatContent) {
+				// 選択欄が一覧に無い記録モデルを '' に落とさないよう、選択より先に置く
+				chatModelId = chatContent.models?.[0] ?? null;
 				session.selectedModels = chatContent.models;
 				session.history = chatContent.history;
 
@@ -890,6 +918,7 @@
 					history={session.history}
 					chatFiles={session.chatFiles}
 					bind:selectedModels={session.selectedModels}
+					recordedModelId={chatModelId}
 					shareEnabled={!!session.history.currentId}
 					{initNewChat}
 				/>
@@ -998,7 +1027,7 @@
 									onSubmit={async (userPrompt) => {
 										if (userPrompt || session.files.length > 0) {
 											await tick();
-											send.submitPrompt(userPrompt);
+											submitPrompt(userPrompt);
 										}
 									}}
 								/>
@@ -1025,7 +1054,7 @@
 								onSubmit={async (userPrompt) => {
 									if (userPrompt || session.files.length > 0) {
 										await tick();
-										send.submitPrompt(userPrompt);
+										submitPrompt(userPrompt);
 									}
 								}}
 							/>
@@ -1042,7 +1071,7 @@
 				bind:pane={controlPane}
 				chatId={$chatId}
 				modelId={session.selectedModelIds?.at(0) ?? null}
-				submitPrompt={send.submitPrompt}
+				{submitPrompt}
 				stopResponse={send.stopResponse}
 				{eventTarget}
 			/>

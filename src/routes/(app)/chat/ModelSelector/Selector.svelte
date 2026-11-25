@@ -294,6 +294,20 @@
 			<span class="min-w-0 truncate">
 				{#if selectedModel}
 					{selectedModel.label}
+				{:else if value}
+					<!-- 一覧に無いモデル(開いているチャットに記録された、利用者が読めない preset)。
+					 名前などの中身は読めないので id だけを出し、送れないことを添える。
+					 狭い幅では id を優先し、添え書きは鍵のアイコンに任せる -->
+					<span
+						class="inline-flex items-center gap-1.5 max-w-full align-middle"
+						title={$i18n.t('This model is not available to you. Select another model to send.')}
+					>
+						<span class="i-lucide-lock size-4 block shrink-0 text-content-muted"></span>
+						<span class="truncate">{value}</span>
+						<span class="text-xs font-normal text-content-muted shrink-0 max-sm:hidden"
+							>({$i18n.t('Cannot send')})</span
+						>
+					</span>
 				{:else}
 					{placeholder}
 				{/if}

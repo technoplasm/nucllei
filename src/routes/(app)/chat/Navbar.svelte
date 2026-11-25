@@ -30,7 +30,8 @@
 		chat,
 		history,
 		chatFiles = [],
-		selectedModels = $bindable()
+		selectedModels = $bindable(),
+		recordedModelId = null
 	}: {
 		initNewChat: () => void;
 		shareEnabled?: boolean;
@@ -38,6 +39,8 @@
 		history: any;
 		chatFiles?: ChatFile[];
 		selectedModels: string[];
+		// 開いているチャットに記録されたモデル(ModelSelector へ渡す)
+		recordedModelId?: string | null;
 	} = $props();
 
 	// 「このチャットのファイル」アイコンのバッジ数。右ペイン(ChatFiles.svelte)と
@@ -87,7 +90,7 @@
 				</div>
 
 				<div class="flex-1 overflow-hidden max-w-full py-0.5 {$showSidebar ? 'ml-1' : ''}">
-					<ModelSelector bind:selectedModels />
+					<ModelSelector bind:selectedModels {recordedModelId} />
 				</div>
 
 				<div class="self-start flex flex-none items-center text-content-muted">

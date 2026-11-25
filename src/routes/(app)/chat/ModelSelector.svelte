@@ -2,19 +2,31 @@
 	import { models } from '$lib/stores';
 	import { getContext } from 'svelte';
 	import Selector from './ModelSelector/Selector.svelte';
+	import { normalizeSelectedModels } from './ModelSelector/selection';
 
 	const i18n = getContext('i18n');
 
-	let { selectedModels = $bindable(['']) }: { selectedModels?: string[] } = $props();
+	let {
+		selectedModels = $bindable(['']),
+		recordedModelId = null
+	}: {
+		selectedModels?: string[];
+		// 開いているチャットに記録されたモデル(新規チャットでは null)。一覧に無くても
+		// 選択欄に残す(ModelSelector/selection.ts)
+		recordedModelId?: string | null;
+	} = $props();
 
 	// llens(#108): マルチモデル送信は撤去 — 選択は常に 1 モデル。
 	// 旧 sessionStorage / 旧チャット由来の複数要素は先頭だけ残して切り詰める。
-	// 存在しないモデル id は '' に落とす(モデル一覧の変化・URL 指定への追従)。
+	// 一覧に無いモデル id は '' に落とす(モデル一覧の変化・URL 指定への追従)。
+	// ただし開いているチャットに記録されたモデルは残す。
 	$effect(() => {
 		if (selectedModels.length > 0 && $models.length > 0) {
-			const next = selectedModels
-				.slice(0, 1)
-				.map((model) => ($models.some((m) => m.id === model) ? model : ''));
+			const next = normalizeSelectedModels(
+				selectedModels,
+				$models.map((m) => m.id),
+				recordedModelId
+			);
 			if (
 				next.length !== selectedModels.length ||
 				next.some((model, idx) => model !== selectedModels[idx])
