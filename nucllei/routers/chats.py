@@ -534,43 +534,48 @@ async def get_admin_chat_list(
             detail="kind must be one of: user, agent",
         )
 
-    chats, total = Chats.get_chats_page_admin(
-        user_id=user_id,
-        title=title,
-        model=model,
-        updated_from=updated_from,
-        updated_to=updated_to,
-        deleted=deleted,
-        shared=shared,
-        kind=kind,
-        order_by=order_by,
-        direction=direction,
-        limit=limit,
-        offset=offset,
-    )
+    def build_page() -> dict:
+        chats, total = Chats.get_chats_page_admin(
+            user_id=user_id,
+            title=title,
+            model=model,
+            updated_from=updated_from,
+            updated_to=updated_to,
+            deleted=deleted,
+            shared=shared,
+            kind=kind,
+            order_by=order_by,
+            direction=direction,
+            limit=limit,
+            offset=offset,
+        )
 
-    users = Users.get_users_by_user_ids(list({chat.user_id for chat in chats}))
-    user_names = {u.id: u.name for u in users}
+        users = Users.get_users_by_user_ids(list({chat.user_id for chat in chats}))
+        user_names = {u.id: u.name for u in users}
 
-    return {
-        "items": [
-            _to_admin_chat_list_item(chat, user_names.get(chat.user_id))
-            for chat in chats
-        ],
-        "total": total,
-    }
+        return {
+            "items": [
+                _to_admin_chat_list_item(chat, user_names.get(chat.user_id))
+                for chat in chats
+            ],
+            "total": total,
+        }
+
+    # DB 読みと chat JSON の集約は同期処理 — イベントループの外で走らせる
+    # (ループ上で回すと、その間に来た他の request が全部待たされる)
+    return await asyncio.to_thread(build_page)
 
 
 @router.get("/admin/users")
 async def get_admin_chat_users(user=Depends(get_admin_user)):
     """チャットを 1 件以上持つユーザーの一覧(#19、admin のフィルタ UI 用)。"""
-    return Chats.get_chat_owners()
+    return await asyncio.to_thread(Chats.get_chat_owners)
 
 
 @router.get("/admin/models")
 async def get_admin_chat_models(user=Depends(get_admin_user)):
     """チャットで使われている model id の一覧(#19、admin のフィルタ UI 用)。"""
-    return Chats.get_chat_models()
+    return await asyncio.to_thread(Chats.get_chat_models)
 
 
 ############################

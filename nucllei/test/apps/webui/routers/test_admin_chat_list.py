@@ -183,18 +183,20 @@ class TestAdminChatList(AbstractPostgresTest):
         assert body["items"][0]["title"] == "Weekly Report 2026"
 
     def test_list_model_filter(self):
-        self._insert_chat(title="kimi_only", models=["kimi-k2.6"])
-        self._insert_chat(title="both", models=["kimi-k2.6", "gpt-oss:20b"])
+        self._insert_chat(title="kimi_1", models=["kimi-k2.6"])
+        self._insert_chat(title="kimi_2", models=["kimi-k2.6"])
+        self._insert_chat(title="gpt", models=["gpt-oss:20b"])
         self._insert_chat(title="none", models=[])
         with mock_webui_user(id="1", role="admin"):
             r = self.fast_api_client.get(
                 self.create_url("/admin/list", {"model": "kimi-k2.6"})
             )
-            assert {i["title"] for i in r.json()["items"]} == {"kimi_only", "both"}
+            assert r.json()["total"] == 2
+            assert {i["title"] for i in r.json()["items"]} == {"kimi_1", "kimi_2"}
             r = self.fast_api_client.get(
                 self.create_url("/admin/list", {"model": "gpt-oss:20b"})
             )
-            assert {i["title"] for i in r.json()["items"]} == {"both"}
+            assert {i["title"] for i in r.json()["items"]} == {"gpt"}
 
     def test_list_updated_range_filter(self):
         for title, ts in (("c_100", 100), ("c_200", 200), ("c_300", 300)):
@@ -329,7 +331,8 @@ class TestAdminChatList(AbstractPostgresTest):
 
     def test_admin_models(self):
         self._insert_chat(models=["kimi-k2.6"])
-        self._insert_chat(models=["kimi-k2.6", "gpt-oss:20b"])
+        self._insert_chat(models=["kimi-k2.6"])
+        self._insert_chat(models=["gpt-oss:20b"])
         self._insert_chat(models=[])
         with mock_webui_user(id="1", role="admin"):
             r = self.fast_api_client.get(self.create_url("/admin/models"))
@@ -338,6 +341,35 @@ class TestAdminChatList(AbstractPostgresTest):
             {"model": "kimi-k2.6", "chat_count": 2},
             {"model": "gpt-oss:20b", "chat_count": 1},
         ]
+
+    def test_model_column_follows_chat_writes(self):
+        # モデル一覧・絞り込みは chat.model 列で引く — chat JSON を書く経路が列も揃える
+        from nucllei.models.chats import ChatImportForm
+
+        chat = self._insert_chat(title="switch", models=["kimi-k2.6"])
+        # 保存経路(CAS 版)で models を差し替える
+        current = self.chats.get_chat_by_id(chat.id)
+        status, _ = self.chats.update_chat_by_id_guarded(
+            chat.id, {**current.chat, "models": ["gpt-oss:20b"]}, current.version
+        )
+        assert status == "ok"
+        # 無ガード版
+        other = self._insert_chat(title="other", models=["kimi-k2.6"])
+        self.chats.update_chat_by_id(other.id, {**other.chat, "models": []})
+        # import
+        self.chats.import_chat(
+            "1", ChatImportForm(chat={"title": "imported", "models": ["glm-5"]})
+        )
+        with mock_webui_user(id="1", role="admin"):
+            r = self.fast_api_client.get(self.create_url("/admin/models"))
+            assert r.json() == [
+                {"model": "glm-5", "chat_count": 1},
+                {"model": "gpt-oss:20b", "chat_count": 1},
+            ]
+            r = self.fast_api_client.get(
+                self.create_url("/admin/list", {"model": "gpt-oss:20b"})
+            )
+            assert [i["title"] for i in r.json()["items"]] == ["switch"]
 
     # ---- admin からの共有権限編集(#19 残スコープ) ----
 
@@ -408,3 +440,49 @@ class TestAdminChatList(AbstractPostgresTest):
                 self.create_url("/admin/list", {"shared": "bogus"})
             )
         assert r.status_code == 400, r.text
+
+
+# ---- migration e77eb73454b7(既存行の chat.model の埋め方)----
+
+
+def _run_chat_model_upgrade(rows):
+    """sqlite に migration 直前の chat 表を作って upgrade を当て、model を返す。"""
+    import importlib.util
+    import json
+    import pathlib
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    versions = pathlib.Path(__file__).resolve().parents[4] / "migrations" / "versions"
+    path = next(versions.glob("*_e77eb73454b7_*.py"))
+    spec = importlib.util.spec_from_file_location("migration_e77eb73454b7", path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE TABLE chat (id TEXT PRIMARY KEY, chat JSON)"))
+        for cid, chat in rows:
+            conn.execute(
+                sa.text("INSERT INTO chat (id, chat) VALUES (:id, :chat)"),
+                {"id": cid, "chat": None if chat is None else json.dumps(chat)},
+            )
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            m.upgrade()
+        return dict(conn.execute(sa.text("SELECT id, model FROM chat")).all())
+
+
+def test_migration_backfills_chat_model():
+    models = _run_chat_model_upgrade(
+        [
+            ("1", {"models": ["kimi-k2.6"], "messages": []}),
+            ("2", {"models": []}),
+            ("3", {"title": "no models"}),
+            ("4", None),
+            ("5", {"models": [1]}),
+        ]
+    )
+    assert models == {"1": "kimi-k2.6", "2": None, "3": None, "4": None, "5": None}

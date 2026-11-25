@@ -94,6 +94,11 @@ class Chat(Base):
     parent_message_id = Column(String, nullable=True)
     depth = Column(Integer, nullable=False, server_default="0")  # user chat = 0
 
+    # チャットのモデル id(chat JSON の models[0] の写し — chat_model_of)。admin 一覧の
+    # モデル絞り込みとモデル別件数は、chat 列(会話全体の JSON)を読まずにこの列で引く。
+    # chat 列を書く全書き込み点で一緒に書くこと。
+    model = Column(String, nullable=True)
+
 
 class ChatModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -234,6 +239,14 @@ def _bump(chat_item: "Chat") -> None:
     chat_item.version = (chat_item.version or 0) + 1
 
 
+def chat_model_of(chat_json: Optional[dict]) -> Optional[str]:
+    """chat JSON のモデル id(models 配列の先頭)。chat.model 列に書く値。"""
+    models = (chat_json or {}).get("models")
+    if isinstance(models, list) and models and isinstance(models[0], str):
+        return models[0]
+    return None
+
+
 def _chat_snippet(chat_json: Optional[dict], limit: int = 120) -> str:
     """llens(#69): チャットプレビュー用に冒頭のユーザー発話を切り出す
     (タイトルだけで判別できない一覧の 2 行目)。"""
@@ -280,7 +293,7 @@ class ChatTable:
                 }
             )
 
-            result = Chat(**chat.model_dump())
+            result = Chat(**chat.model_dump(), model=chat_model_of(form_data.chat))
             db.add(result)
             db.commit()
             db.refresh(result)
@@ -308,7 +321,7 @@ class ChatTable:
                 }
             )
 
-            result = Chat(**chat.model_dump())
+            result = Chat(**chat.model_dump(), model=chat_model_of(form_data.chat))
             db.add(result)
             db.commit()
             db.refresh(result)
@@ -319,6 +332,7 @@ class ChatTable:
             with get_db() as db:
                 chat_item = db.get(Chat, id)
                 chat_item.chat = chat
+                chat_item.model = chat_model_of(chat)
                 chat_item.title = chat["title"] if "title" in chat else "New Chat"
                 # CAS の version を前進させる(同秒 ABA 防止 — #110 敵対検証 2)
                 _bump(chat_item)
@@ -356,6 +370,7 @@ class ChatTable:
                     .update(
                         {
                             "chat": chat,
+                            "model": chat_model_of(chat),
                             "title": chat["title"] if "title" in chat else "New Chat",
                             "updated_at": int(time.time()),
                             "version": expected_version + 1,
@@ -487,6 +502,7 @@ class ChatTable:
                     .update(
                         {
                             "chat": chat_json,
+                            "model": chat_model_of(chat_json),
                             "updated_at": now,
                             "version": expected_version + 1,
                         },
@@ -632,7 +648,7 @@ class ChatTable:
                     "updated_at": int(time.time()),
                 }
             )
-            shared_result = Chat(**shared_chat.model_dump())
+            shared_result = Chat(**shared_chat.model_dump(), model=chat.model)
             db.add(shared_result)
             db.commit()
             db.refresh(shared_result)
@@ -659,6 +675,7 @@ class ChatTable:
 
                 shared_chat.title = chat.title
                 shared_chat.chat = chat.chat
+                shared_chat.model = chat.model
 
                 # 共有コピー行は CAS 対象ではないが、書き込み点の規律は揃える
                 _bump(shared_chat)
@@ -1108,8 +1125,7 @@ class ChatTable:
         """llens(#19): admin チャット閲覧ビュー用のページング一覧。
 
         order/limit/offset は SQL 側で効かせる(全件ロードして python で切らない)。
-        user_id=None は全ユーザー。model は chat JSON トップレベルの models 配列への
-        メンバーシップ(dialect 別 JSON クエリ — search_text と同じ流儀)。
+        user_id=None は全ユーザー。model はチャットのモデル id(chat.model 列)の一致。
         updated_from/updated_to は updated_at の範囲(epoch 秒・両端含む)。
         deleted は soft delete 済み(#31)の扱い: include(既定)/ exclude / only。
         shared は共有状態(share_id の有無 — #19)の扱い: include(既定)/ exclude / only。
@@ -1137,25 +1153,7 @@ class ChatTable:
             if updated_to is not None:
                 query = query.filter(Chat.updated_at <= updated_to)
             if model:
-                dialect_name = db.bind.dialect.name
-                if dialect_name == "sqlite":
-                    query = query.filter(text("""
-                            EXISTS (
-                                SELECT 1
-                                FROM json_each(Chat.chat, '$.models') AS m
-                                WHERE m.value = :model
-                            )
-                            """).params(model=model))
-                elif dialect_name == "postgresql":
-                    query = query.filter(text("""
-                            EXISTS (
-                                SELECT 1
-                                FROM json_array_elements_text(Chat.chat->'models') AS m(value)
-                                WHERE m.value = :model
-                            )
-                            """).params(model=model))
-                else:
-                    raise NotImplementedError(f"Unsupported dialect: {dialect_name}")
+                query = query.filter(Chat.model == model)
 
             total = query.count()
 
@@ -1199,26 +1197,17 @@ class ChatTable:
     def get_chat_models(self) -> list[dict]:
         """llens(#19): チャットで使われている model id と件数(admin のフィルタ UI 用)。
 
-        chat JSON トップレベルの models 配列を dialect 別 JSON クエリで展開して集計。
+        chat.model 列で集計する(chat 列の JSON は読まない)。
         """
         with get_db() as db:
-            dialect_name = db.bind.dialect.name
-            if dialect_name == "sqlite":
-                rows = db.execute(text("""
-                        SELECT m.value AS model, COUNT(*) AS chat_count
-                        FROM chat, json_each(chat.chat, '$.models') AS m
-                        GROUP BY m.value
-                        ORDER BY chat_count DESC, model ASC
-                        """)).all()
-            elif dialect_name == "postgresql":
-                rows = db.execute(text("""
-                        SELECT m.value AS model, COUNT(*) AS chat_count
-                        FROM chat, json_array_elements_text(chat.chat->'models') AS m(value)
-                        GROUP BY m.value
-                        ORDER BY chat_count DESC, model ASC
-                        """)).all()
-            else:
-                raise NotImplementedError(f"Unsupported dialect: {dialect_name}")
+            chat_count = func.count(Chat.id).label("chat_count")
+            rows = (
+                db.query(Chat.model, chat_count)
+                .filter(Chat.model != None)  # noqa: E711
+                .group_by(Chat.model)
+                .order_by(chat_count.desc(), Chat.model.asc())
+                .all()
+            )
             return [{"model": row.model, "chat_count": row.chat_count} for row in rows]
 
     # llens(#31): 削除系はすべて soft delete(deleted_at を立てて非表示化 + 共有解除)。
