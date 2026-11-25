@@ -95,6 +95,38 @@ class TestChats(AbstractPostgresTest):
     def test_get_user_chats(self):
         self.test_get_session_user_chat_list()
 
+    def test_pinned_and_unpinned_lists_carry_no_chat_body(self):
+        """サイドバーの 2 本の一覧は id / title / 時刻だけ。ピン留めは /pinned にだけ出る。"""
+        from nucllei.models.chats import ChatForm
+
+        first_id = self.chats.get_chats()[0].id
+        pinned = self.chats.insert_new_chat(
+            "2", ChatForm(chat={"title": "pinned one", "history": {"messages": {}}})
+        )
+        self.chats.toggle_chat_pinned_by_id(pinned.id)
+        archived_pinned = self.chats.insert_new_chat(
+            "2", ChatForm(chat={"title": "archived", "history": {"messages": {}}})
+        )
+        self.chats.toggle_chat_pinned_by_id(archived_pinned.id)
+        self.chats.toggle_chat_archive_by_id(archived_pinned.id)
+        other_user = self.chats.insert_new_chat(
+            "3", ChatForm(chat={"title": "other", "history": {"messages": {}}})
+        )
+        self.chats.toggle_chat_pinned_by_id(other_user.id)
+
+        with mock_webui_user(id="2"):
+            pinned_res = self.fast_api_client.get(self.create_url("/pinned"))
+            list_res = self.fast_api_client.get(self.create_url("/?page=1"))
+        assert pinned_res.status_code == 200
+        assert list_res.status_code == 200
+
+        keys = {"id", "title", "updated_at", "created_at"}
+        assert [row["id"] for row in pinned_res.json()] == [pinned.id]
+        assert set(pinned_res.json()[0]) == keys
+        assert pinned_res.json()[0]["title"] == "pinned one"
+        assert [row["id"] for row in list_res.json()] == [first_id]
+        assert set(list_res.json()[0]) == keys
+
     def test_get_user_archived_chats(self):
         self.chats.archive_all_chats_by_user_id("2")
         from nucllei.internal.db import Session

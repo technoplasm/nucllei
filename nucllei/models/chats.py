@@ -774,10 +774,18 @@ class ChatTable:
         include_archived: bool = False,
         skip: Optional[int] = None,
         limit: Optional[int] = None,
+        pinned: bool = False,
     ) -> list[ChatTitleIdResponse]:
+        """サイドバー一覧の行(id / title / 時刻だけ — chat JSON は読まない)。
+
+        pinned=False は通常一覧(ピン留めを除く)、pinned=True はピン留めだけ。
+        """
         with get_db() as db:
             query = db.query(Chat).filter_by(user_id=user_id)
-            query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
+            if pinned:
+                query = query.filter(Chat.pinned == True)
+            else:
+                query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter(Chat.deleted_at == None)
             query = query.filter(Chat.kind == "user")
 
@@ -900,17 +908,6 @@ class ChatTable:
             all_chats = (
                 db.query(Chat)
                 .filter_by(user_id=user_id)
-                .filter(Chat.deleted_at == None)
-                .filter(Chat.kind == "user")
-                .order_by(Chat.updated_at.desc())
-            )
-            return [ChatModel.model_validate(chat) for chat in all_chats]
-
-    def get_pinned_chats_by_user_id(self, user_id: str) -> list[ChatModel]:
-        with get_db() as db:
-            all_chats = (
-                db.query(Chat)
-                .filter_by(user_id=user_id, pinned=True, archived=False)
                 .filter(Chat.deleted_at == None)
                 .filter(Chat.kind == "user")
                 .order_by(Chat.updated_at.desc())

@@ -222,8 +222,8 @@
 
 				if (sessionUser) {
 					// Save Session User to Store
+					// (config は上の 1 回目でセッション cookie 付きで取れている — 取り直さない)
 					await user.set(sessionUser);
-					await config.set(await getBackendConfig());
 				} else {
 					// 未ログイン or セッション失効。旧 localStorage token は移行残骸として掃除
 					localStorage.removeItem('token');

@@ -144,13 +144,13 @@
 	let allChatsLoaded = $state(false);
 
 	const initChatList = async () => {
-		// Reset pagination variables
-		pinnedChats.set(await getPinnedChatList());
-
 		currentChatPage.set(1);
 		allChatsLoaded = false;
 
-		await chats.set(await getChatList($currentChatPage));
+		// ピン留めと 1 ページ目は互いに依存しないので同時に取る(往復 1 回で一覧が出る)
+		const [pinned, list] = await Promise.all([getPinnedChatList(), getChatList($currentChatPage)]);
+		pinnedChats.set(pinned);
+		chats.set(list);
 
 		// Enable pagination
 		scrollPaginationEnabled.set(true);

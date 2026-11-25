@@ -76,6 +76,14 @@
 	// 編集開始時に必ず title を代入するので初期値は空でよい(state_referenced_locally 回避)
 	let chatTitle = $state('');
 
+	// サイドバーの通常一覧(1 ページ目)とピン留めを同時に取り直す
+	const refreshLists = async () => {
+		currentChatPage.set(1);
+		const [list, pinned] = await Promise.all([getChatList($currentChatPage), getPinnedChatList()]);
+		chats.set(list);
+		pinnedChats.set(pinned);
+	};
+
 	const editChatTitle = async (id: string, title: string) => {
 		if (title === '') {
 			toast.error($i18n.t('Title cannot be an empty string.'));
@@ -88,9 +96,7 @@
 				_chatTitle.set(title);
 			}
 
-			currentChatPage.set(1);
-			await chats.set(await getChatList($currentChatPage));
-			await pinnedChats.set(await getPinnedChatList());
+			await refreshLists();
 
 			onChange?.();
 		}
@@ -110,9 +116,7 @@
 		if (res) {
 			goto(`/c/${res.id}`);
 
-			currentChatPage.set(1);
-			await chats.set(await getChatList($currentChatPage));
-			await pinnedChats.set(await getPinnedChatList());
+			await refreshLists();
 		}
 	};
 

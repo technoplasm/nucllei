@@ -384,12 +384,9 @@ async def search_user_chats(
 ############################
 
 
-@router.get("/pinned", response_model=list[ChatResponse])
+@router.get("/pinned", response_model=list[ChatTitleIdResponse])
 async def get_user_pinned_chats(user=Depends(get_verified_user)):
-    return [
-        ChatResponse(**chat.model_dump())
-        for chat in Chats.get_pinned_chats_by_user_id(user.id)
-    ]
+    return Chats.get_chat_title_id_list_by_user_id(user.id, pinned=True)
 
 
 ############################

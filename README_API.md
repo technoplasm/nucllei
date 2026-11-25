@@ -1723,6 +1723,12 @@ and `ATTACHMENT_FUNCTION_ID` — the function to activate; `""` disables it).
   last 200 chars are used; the built-in microphone input does not send it),
   `POST /api/v1/audio/speech` (TTS).
 - Chats CRUD: `/api/v1/chats/*` (`/new`, `/{id}`, `/search`, share/archive/clone...).
+- Sidebar lists of the caller's own chats (not archived, not deleted, no agent
+  sessions), newest `updated_at` first. Each row is only
+  `{id, title, updated_at, created_at}` — the chat body is never included (read
+  one chat with `GET /api/v1/chats/{id}`):
+  `GET /api/v1/chats/?page=N` → the unpinned chats, 60 per page (no `page` = all);
+  `GET /api/v1/chats/pinned` → the pinned chats (all of them).
 - Executions of a chat (owner only, see §5.9):
   `GET /api/v1/chats/{id}/executions` →
   `{executions: [...], resume_suspended: bool}`. Each row carries
